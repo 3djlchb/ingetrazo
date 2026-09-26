@@ -1326,7 +1326,11 @@ class MainWindow(QMainWindow):
     def _on_preferences(self) -> None:
         """Window ▸ Preferences: the scattered QSettings in one dialog."""
         from views.preferences_dialog import PreferencesDialog
-        PreferencesDialog(self).exec()
+        dlg = PreferencesDialog(self)
+        dlg.exec()
+        # Freed now, not when the window goes: each opening used to leave
+        # a hidden dialog hanging from the window until the app closed.
+        dlg.deleteLater()
 
     def _on_set_language(self, code: str) -> None:
         """Persist the chosen UI language (applied on next start)."""

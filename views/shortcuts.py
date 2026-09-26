@@ -17,10 +17,11 @@ from __future__ import annotations
 
 from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtWidgets import (QHBoxLayout, QHeaderView, QKeySequenceEdit,
-                               QLabel, QLineEdit, QMessageBox, QPushButton,
-                               QTreeWidget, QTreeWidgetItem, QVBoxLayout,
-                               QWidget)
+from PySide6.QtCore import Signal
+from PySide6.QtCore import QKeyCombination
+from PySide6.QtWidgets import (QHBoxLayout, QHeaderView, QLabel, QLineEdit,
+                               QMessageBox, QPushButton, QTreeWidget,
+                               QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from core.i18n import source_of, tr
 
@@ -127,6 +128,41 @@ def save_shortcut(action: QAction, seqs: list) -> None:
     st.sync()
 
 
+class _KeyCapture(QLineEdit):
+    """A box that takes ONE key combination (the keys pressed in it).
+
+    Not QKeySequenceEdit: that widget hands its focus to an inner line edit
+    (a focus proxy), and destroying it inside Preferences — a dialog that
+    lives as the main window's child until the window goes — crashed the
+    process in QWidget::~QWidget → window() while the window was being torn
+    down: the test suite died with a segmentation fault, every run, from the
+    commit that put this panel into Preferences on."""
+
+    keyCaptured = Signal(QKeySequence)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setReadOnly(True)
+        self.setPlaceholderText(tr("Click here and press the keys"))
+        self._seq = QKeySequence()
+
+    def keySequence(self) -> QKeySequence:
+        return self._seq
+
+    def setKeySequence(self, seq: QKeySequence) -> None:
+        self._seq = QKeySequence(seq)
+        self.setText(self._seq.toString(QKeySequence.NativeText))
+
+    def keyPressEvent(self, event) -> None:
+        key = event.key()
+        if key in (Qt.Key_Shift, Qt.Key_Control, Qt.Key_Alt, Qt.Key_Meta,
+                   Qt.Key_AltGr, Qt.Key_unknown, 0):
+            return                            # wait for the real key
+        mods = event.modifiers() & ~Qt.KeypadModifier
+        self.setKeySequence(QKeySequence(QKeyCombination(mods, Qt.Key(key))))
+        self.keyCaptured.emit(self._seq)
+
+
 class ShortcutsPanel(QWidget):
     """Preferences ▸ Keyboard shortcuts (Marco, 26-09: «deberían estar
     dentro de preferencias»): every action, its keys, a search box; pick a
@@ -151,9 +187,8 @@ class ShortcutsPanel(QWidget):
         lay.addWidget(self._tree, 1)
         edit_row = QHBoxLayout()
         edit_row.addWidget(QLabel(tr("New shortcut:")))
-        self._edit = QKeySequenceEdit()
-        self._edit.setMaximumSequenceLength(1)
-        self._edit.editingFinished.connect(self._on_keys)
+        self._edit = _KeyCapture()
+        self._edit.keyCaptured.connect(lambda _seq: self._on_keys())
         edit_row.addWidget(self._edit, 1)
         clear = QPushButton(tr("Clear"))
         clear.clicked.connect(self._on_clear)

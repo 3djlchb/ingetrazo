@@ -111,3 +111,27 @@ def test_keys_the_viewport_reads_itself_are_refused():
     for good in ("Ctrl+5", "Alt+Left", "Ctrl+Shift+G", "F4", "K",
                  "Shift+K"):
         assert reserved_reason(QKeySequence(good)) is None, good
+
+
+def test_the_key_box_captures_one_combination(monkeypatch):
+    """The box takes the keys pressed in it — a real key event, modifiers
+    alone ignored — and assigns them."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from views.shortcuts import ShortcutsPanel
+    QSettings().remove("shortcuts")
+    win = _window()
+    try:
+        panel = ShortcutsPanel(win)
+        panel._filter.setText("Make Group")
+        panel._tree.setCurrentItem(panel._tree.topLevelItem(
+            next(i for i in range(panel._tree.topLevelItemCount())
+                 if not panel._tree.topLevelItem(i).isHidden())))
+        QTest.keyClick(panel._edit, Qt.Key_Control)          # alone: nothing
+        assert _keys(_action(win, "Make Group")) == ["Ctrl+G"]
+        QTest.keyClick(panel._edit, Qt.Key_K,
+                       Qt.ControlModifier | Qt.AltModifier)
+        assert _keys(_action(win, "Make Group")) == ["Ctrl+Alt+K"]
+    finally:
+        _close(win)
+        QSettings().remove("shortcuts")

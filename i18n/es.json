@@ -2108,5 +2108,6 @@
  "the drawing tools use it (cancel, confirm, edit a value)": "la usan las herramientas de dibujo (cancelar, confirmar, corregir un valor)",
  "the arrow keys lock an axis while drawing": "las flechas bloquean un eje mientras dibujas",
  "it types a measure in the value box": "sirve para escribir medidas en la casilla de valores",
- "«{keys}» cannot be a shortcut: {why}.": "«{keys}» no puede ser un atajo: {why}."
+ "«{keys}» cannot be a shortcut: {why}.": "«{keys}» no puede ser un atajo: {why}.",
+ "Click here and press the keys": "Haz clic aquí y pulsa las teclas"
 }

@@ -2108,5 +2108,6 @@
  "the drawing tools use it (cancel, confirm, edit a value)": "绘图工具要用它（取消、确认、修改数值）",
  "the arrow keys lock an axis while drawing": "绘图时方向键用于锁定轴",
  "it types a measure in the value box": "它用于在数值框中输入尺寸",
- "«{keys}» cannot be a shortcut: {why}.": "「{keys}」不能作为快捷键：{why}。"
+ "«{keys}» cannot be a shortcut: {why}.": "「{keys}」不能作为快捷键：{why}。",
+ "Click here and press the keys": "点击此处并按下按键"
 }
