@@ -65,8 +65,10 @@ from core.topology import (
     fold_nonplanar_faces,
     heal_overlapping_faces,
     loop_inside_face,
+    orient_coplanar_faces,
     orphaned_edges_at,
     subtract_loop_from_face,
+    winding_footprint,
 )
 
 
@@ -378,6 +380,7 @@ class EraseSelectionCommand(Command):
     def do(self, scene) -> None:
         m = scene.mesh
         self.snapshot = m.capture_state()
+        footprint = winding_footprint(m)
         # Loop->face lookups through ONE index: _find_face_by_loop scans the
         # whole mesh per call, and deleting thousands of box-selected faces
         # froze for ~26 s on a 28k-face mesh (piscina.igz report, round 2).
@@ -466,7 +469,7 @@ class EraseSelectionCommand(Command):
                 m.remove_edge(e)
         # A merge can leave the big enclosing face overlapping its subdivisions;
         # drop any such redundant mother (covered by the snapshot undo above).
-        for f in heal_overlapping_faces(m):
+        for f in heal_overlapping_faces(m, footprint=footprint):
             scene.selection.discard(f)
         # And the endpoints go with them. remove_edge only detaches, so an
         # erase used to leave its vertices in the mesh: invisible, ignored by
@@ -2670,9 +2673,13 @@ class SnapshotCompound(Command):
             # overlap it created (redundant nested holes / spurious mother), then
             # snapshot the result so undo/redo restore exactly.
             self.before = scene.mesh.capture_state()
+            # Which way every face looked before the draw: the heal may
+            # align the faces the draw MADE, never the ones already there
+            # (a Reverse Faces undone by the next rectangle).
+            footprint = winding_footprint(scene.mesh)
             for cmd in self.inner:
                 cmd.do(scene)
-            for f in heal_overlapping_faces(scene.mesh):
+            for f in heal_overlapping_faces(scene.mesh, footprint=footprint):
                 scene.selection.discard(f)
             # A draw that split a curve leaves it in separate contours — break
             # the curve ids there (SketchUp), before the snapshot so redo keeps it.
@@ -3653,7 +3660,9 @@ class HealOverlapsCommand(Command):
     def do(self, scene) -> None:
         self.snapshot = scene.mesh.capture_state()
         # partial defaults to auto: the aggressive pass runs only on a flat plan.
-        removed = heal_overlapping_faces(scene.mesh)
+        # Orientation is not this command's business (Orient Faces is).
+        removed = heal_overlapping_faces(
+            scene.mesh, footprint=winding_footprint(scene.mesh))
         self.healed = len(removed)
         for f in removed:
             scene.selection.discard(f)
@@ -3696,6 +3705,7 @@ class RebuildPlanarFacesCommand(Command):
 
         self.snapshot = scene.mesh.capture_state()
         mesh = scene.mesh
+        footprint = winding_footprint(mesh)
         if not mesh.edges:
             self.flat = False
             return
@@ -3740,6 +3750,11 @@ class RebuildPlanarFacesCommand(Command):
                        for t0, t1, t2 in old_tris):
                     f.attrs.update(attrs)
                     break
+        # Every region comes out facing ``normal`` (the first face's); each
+        # takes back the way the face it lies in was facing — a lone arc
+        # drawn on the plane turned every reversed face back otherwise.
+        if footprint is not None:
+            orient_coplanar_faces(mesh, footprint)
         mesh.resplit_curves()
         self.rebuilt = len(faces)
         scene.version += 1
