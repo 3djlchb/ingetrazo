@@ -6,6 +6,17 @@ follow [SemVer](https://semver.org).
 
 ## [Sin publicar]
 
+## [0.5.4] — 2026-09-26
+
+**Un día de reportes, resuelto.** Tirar hacia arriba contra una pared (la
+#94, que se nos resistía), esferas con Sígueme, guías exactas al milímetro,
+componentes cuyas copias comparten lo de dentro, grupos que ya no saltan al
+explotarlos y líneas sueltas en el `.skp`. Las láminas ganan líneas ocultas
+a trazos, una lista de elementos como la de QGIS y los dos clics que se
+perdían. Atajos de teclado propios en Preferencias, el ratón 3D con cada
+eje invertible, IngeTrazo en chino y el instalador de Windows en tres
+idiomas. El Ingeniero es la nueva figura de escala.
+
 ### Cambiado
 - **En KDE Plasma con Wayland, IngeTrazo arranca en X11 (XWayland)** (#136,
   @leo-smi): ahí los menús flotantes de Qt salen rotos. Preferencias ▸
