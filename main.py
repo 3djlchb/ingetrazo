@@ -33,7 +33,8 @@ elif sys.stderr is not None:
 # if the ghost bothers you: run with QT_QPA_PLATFORM=xcb. Re-test the ghost
 # when Mutter/Qt update; no app-side workaround cured it (see CLAUDE.md).
 
-from PySide6.QtCore import QEvent, QLocale, QSettings, Qt
+from PySide6.QtCore import (QEvent, QLibraryInfo, QLocale, QSettings, Qt,
+                            QTranslator)
 from PySide6.QtGui import QSurfaceFormat
 from PySide6.QtWidgets import QApplication
 
@@ -59,6 +60,29 @@ def _init_language() -> None:
         else:
             saved = "en"
     i18n.set_language(str(saved))
+    _install_qt_translator(str(saved))
+
+
+#: Kept alive for the whole session: Qt drops a translator that is freed.
+_qt_translator: QTranslator | None = None
+
+
+def _install_qt_translator(lang: str) -> None:
+    """Let Qt name its own widgets in ``lang`` too.
+
+    Our catalog only covers ``tr()`` strings; the standard buttons of
+    QMessageBox and QDialogButtonBox (OK, Cancel, Yes, No…) come from
+    Qt's own ``qtbase_<lang>.qm``, which PySide6 ships. Without it they
+    stayed in English under every language. A missing file just leaves
+    them in English, as before."""
+    global _qt_translator
+    if lang == "en":
+        return
+    translator = QTranslator()
+    folder = QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)
+    if translator.load(f"qtbase_{lang.replace('-', '_')}", folder):
+        QApplication.installTranslator(translator)
+        _qt_translator = translator
 
 from views.main_window import MainWindow
 
