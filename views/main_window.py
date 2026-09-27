@@ -5323,6 +5323,12 @@ class MainWindow(QMainWindow):
             QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
             self)
         box.setOption(QMessageBox.Option.DontUseNativeDialog, True)
+        # Qt names its standard buttons in English unless a Qt translator
+        # is installed, and none is: name them through our own catalog.
+        for button, text in ((QMessageBox.Save, "Save"),
+                             (QMessageBox.Discard, "Don't Save"),
+                             (QMessageBox.Cancel, "Cancel")):
+            box.button(button).setText(tr(text))
         box.setDefaultButton(QMessageBox.Save)
         answer = box.exec()
         if answer == QMessageBox.Save:
