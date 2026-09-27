@@ -3,10 +3,12 @@
 """Qt's own standard buttons (OK, Cancel, Yes, No…) follow the app language.
 
 Our catalog only covers ``tr()``; those buttons come from Qt's
-``qtbase_<lang>.qm``, and without it they stayed in English."""
+``qtbase_<lang>.qm``, and without it they stayed in English. The keys in
+the shortcuts stay in English on purpose: only the buttons are taken."""
 from __future__ import annotations
 
 import pytest
+from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 _app = QApplication.instance() or QApplication([])
@@ -35,3 +37,15 @@ def test_english_installs_nothing(monkeypatch):
     monkeypatch.setattr(main, "_qt_translator", None)
     main._install_qt_translator("en")
     assert main._qt_translator is None
+
+
+def test_shortcuts_keep_their_english_key_names(monkeypatch):
+    import main
+    monkeypatch.setattr(main, "_qt_translator", None)
+    main._install_qt_translator("es")
+    try:
+        shown = QKeySequence("Ctrl+Shift+PgUp").toString(QKeySequence.NativeText)
+        assert shown == "Ctrl+Shift+PgUp"            # not «Control+Mayúsculas…»
+        assert QKeySequence("Esc").toString(QKeySequence.NativeText) == "Esc"
+    finally:
+        QApplication.removeTranslator(main._qt_translator)

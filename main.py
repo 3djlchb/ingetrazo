@@ -63,12 +63,40 @@ def _init_language() -> None:
     _install_qt_translator(str(saved))
 
 
+class _ButtonsOnlyTranslator(QTranslator):
+    """Qt's own catalog, limited to the standard button texts.
+
+    ``qtbase_<lang>.qm`` also names the keys — «Control+Mayúsculas+Re Pág»
+    for Ctrl+Shift+PgUp in menus, tooltips and the shortcut editor — and
+    the shortcuts stay in English on purpose. The button texts live in
+    these contexts; everything else is left untranslated."""
+
+    _CONTEXTS = frozenset({"QPlatformTheme", "QMessageBox",
+                           "QDialogButtonBox"})
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._qt = QTranslator()
+
+    def load_qt(self, lang: str) -> bool:
+        folder = QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)
+        return self._qt.load(f"qtbase_{lang.replace('-', '_')}", folder)
+
+    def isEmpty(self) -> bool:
+        return self._qt.isEmpty()
+
+    def translate(self, context, source, disambiguation=None, n=-1):
+        if context not in self._CONTEXTS:
+            return None                   # not ours: Qt keeps its text
+        return self._qt.translate(context, source, disambiguation, n)
+
+
 #: Kept alive for the whole session: Qt drops a translator that is freed.
 _qt_translator: QTranslator | None = None
 
 
 def _install_qt_translator(lang: str) -> None:
-    """Let Qt name its own widgets in ``lang`` too.
+    """Let Qt name its standard buttons in ``lang`` too.
 
     Our catalog only covers ``tr()`` strings; the standard buttons of
     QMessageBox and QDialogButtonBox (OK, Cancel, Yes, No…) come from
@@ -78,9 +106,8 @@ def _install_qt_translator(lang: str) -> None:
     global _qt_translator
     if lang == "en":
         return
-    translator = QTranslator()
-    folder = QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)
-    if translator.load(f"qtbase_{lang.replace('-', '_')}", folder):
+    translator = _ButtonsOnlyTranslator()
+    if translator.load_qt(lang):
         QApplication.installTranslator(translator)
         _qt_translator = translator
 
