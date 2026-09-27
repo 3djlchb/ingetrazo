@@ -63,6 +63,10 @@ class ProtractorBase(Tool):
     #: on it. Only the world half — the screen detector would hand back a
     #: point on an axis OUTSIDE the disc's plane, which an arm cannot be.
     magnetic_axis_deg = 3.0
+    #: The arms are directions from the centre, not lines being drawn: the
+    #: snap engine leaves out 'through point', 'extension' and 'from point'
+    #: for them, so the axis magnet is not outvoted (issue #140).
+    radial_arm = True
 
     def __init__(self) -> None:
         self.start_point: QVector3D | None = None   # the protractor centre

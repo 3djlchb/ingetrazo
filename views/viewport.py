@@ -11280,6 +11280,7 @@ class Viewport(QOpenGLWidget):
             shift_lock_color=self._shift_lock[1] if self._shift_lock else None,
             linear_mode=self.linear_inference_mode,
             work_plane_normal=self._work_plane_normal(),
+            radial_arm=bool(getattr(self.active_tool, "radial_arm", False)),
         )
         snap = self._axis_source_cue(snap, px_x, px_y)
         snap = self._extension_snap(snap, px_x, px_y)
@@ -11693,6 +11694,7 @@ class Viewport(QOpenGLWidget):
             shift_lock_color=self._shift_lock[1] if self._shift_lock else None,
             linear_mode=self.linear_inference_mode,
             work_plane_normal=self._work_plane_normal(),
+            radial_arm=bool(getattr(self.active_tool, "radial_arm", False)),
         )
         snap = self._axis_source_cue(snap, px_x, px_y)
         snap = self._extension_snap(snap, px_x, px_y)

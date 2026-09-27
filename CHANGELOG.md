@@ -6,6 +6,18 @@ follow [SemVer](https://semver.org).
 
 ## [Sin publicar]
 
+### Corregido
+- **Rotar y Transportador enganchan el eje rojo aunque la línea de
+  referencia esté a pocos grados de él** (#140, @pacaeiro). El brazo se
+  quedaba pegado a la dirección de la propia referencia («A través del
+  punto») y la extensión de otras aristas movía el ángulo según la
+  distancia del cursor. El brazo del transportador ya no usa las
+  inferencias de dibujar líneas (a través del punto, extensión, desde el
+  punto): solo puntos y ejes.
+- **La extensión ya no sale de un segmento de círculo, arco o superficie
+  suavizada, ni de una arista oculta** (#140): lanzaba líneas de trazos a
+  través de la esfera.
+
 ## [0.5.4] — 2026-09-26
 
 **Un día de reportes, resuelto.** Tirar hacia arriba contra una pared (la
