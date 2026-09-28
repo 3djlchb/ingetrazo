@@ -166,24 +166,67 @@ def test_large_stl_import_is_grouped_and_undoable(tmp_path):
     assert len(scene.groups) == 1
 
 
-def test_simplify_merges_large_coplanar_surface(tmp_path):
-    path = tmp_path / "flat_grid.stl"
+@pytest.mark.parametrize("plane", ["XY", "XZ", "YZ"])
+def test_simplify_merges_large_coplanar_surface_on_principal_planes(
+        tmp_path, plane):
+    path = tmp_path / f"flat_grid_{plane}.stl"
+
+    def point(x, y):
+        return {
+            "XY": (x, y, 0),
+            "XZ": (x, 0, y),
+            "YZ": (0, x, y),
+        }[plane]
+
     triangles = []
     for x in range(21):
         for y in range(10):
-            a = (x, y, 0)
-            b = (x + 1, y, 0)
-            c = (x + 1, y + 1, 0)
-            d = (x, y + 1, 0)
+            a = point(x, y)
+            b = point(x + 1, y)
+            c = point(x + 1, y + 1)
+            d = point(x, y + 1)
             triangles.extend(((a, b, c), (a, c, d)))
     _binary(path, triangles)
     scene = Scene()
 
-    stl_format.load_stl(scene, path, simplify=True)
+    stl_format.load_stl(scene, path, simplify_mode="principal")
 
     assert len(triangles) > 400
     assert len(scene.mesh.faces) == 1
     assert len(scene.mesh.vertices) == 4
+    expected_bounds = {
+        "XY": (0, 21, 0, 10, 0, 0),
+        "XZ": (0, 21, 0, 0, 0, 10),
+        "YZ": (0, 0, 0, 21, 0, 10),
+    }
+    expected_normals = {
+        "XY": QVector3D(0, 0, 1),
+        "XZ": QVector3D(0, -1, 0),
+        "YZ": QVector3D(1, 0, 0),
+    }
+    assert _bounds(scene) == pytest.approx(expected_bounds[plane])
+    normal = scene.mesh.faces[0].normal()
+    assert QVector3D.dotProduct(normal, expected_normals[plane]) == \
+        pytest.approx(1.0)
+
+
+def test_advanced_simplification_merges_any_coplanar_surface(tmp_path):
+    path = tmp_path / "tilted_grid.stl"
+
+    def point(x, y):
+        return (x, y, x + y)
+
+    a, b, c, d = point(0, 0), point(1, 0), point(1, 1), point(0, 1)
+    _binary(path, [(a, b, c), (a, c, d)])
+
+    principal_scene = Scene()
+    stl_format.load_stl(principal_scene, path, simplify_mode="principal")
+    assert len(principal_scene.mesh.faces) == 2
+
+    advanced_scene = Scene()
+    stl_format.load_stl(advanced_scene, path, simplify_mode="all")
+    assert len(advanced_scene.mesh.faces) == 1
+    assert len(advanced_scene.mesh.vertices) == 4
 
 
 def test_simplify_keeps_curved_facets_separate(tmp_path):
@@ -201,7 +244,7 @@ def test_simplify_keeps_curved_facets_separate(tmp_path):
     _binary(path, triangles)
     scene = Scene()
 
-    stl_format.load_stl(scene, path, simplify=True)
+    stl_format.load_stl(scene, path, simplify_mode="all")
 
     assert len(scene.groups) == 1
     assert segments < len(scene.groups[0].mesh.faces) < segments * 2

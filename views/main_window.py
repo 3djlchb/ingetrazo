@@ -4530,8 +4530,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(tr("Imported {name}", name=path.name), 3000)
 
     def _on_import_stl(self) -> None:
-        from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog,
-                                       QDialogButtonBox, QFormLayout)
+        from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox,
+                                       QFormLayout)
 
         path_str, _ = file_dialogs.getOpenFileName(
             self, tr("Import STL"), "",
@@ -4555,11 +4555,23 @@ class MainWindow(QMainWindow):
         form.addRow(
             tr("An STL file does not record its unit. What is this model in?"),
             units)
-        simplify = QCheckBox(
-            tr("Merge coplanar triangles (simplify flat surfaces)"), dialog)
-        simplify.setChecked(str(settings.value(
-            "import/stl_simplify", "true")).lower() not in ("0", "false"))
-        form.addRow("", simplify)
+        simplify = QComboBox(dialog)
+        simplify.addItem(tr("No mesh simplification"), "none")
+        simplify.addItem(
+            tr("Merge coplanar triangles on XY, XZ and YZ planes"),
+            "principal")
+        simplify.addItem(
+            tr("Advanced: merge all coplanar surfaces"), "all")
+        simplify_setting = settings.value("import/stl_simplify_mode")
+        if simplify_setting is None:
+            old_setting = str(settings.value("import/stl_simplify", "true"))
+            simplify_mode = ("none" if old_setting.lower() in ("0", "false")
+                             else "all")
+        else:
+            simplify_mode = str(simplify_setting)
+        simplify_index = simplify.findData(simplify_mode)
+        simplify.setCurrentIndex(simplify_index if simplify_index >= 0 else 2)
+        form.addRow(tr("Mesh simplification"), simplify)
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
         buttons.accepted.connect(dialog.accept)
@@ -4569,14 +4581,15 @@ class MainWindow(QMainWindow):
             return
         unit = keys[units.currentIndex()]
         scale = stl_format.STL_UNITS[unit]
+        simplify_mode = simplify.currentData()
         settings.setValue("import/stl_unit", unit)
-        settings.setValue("import/stl_simplify", simplify.isChecked())
+        settings.setValue("import/stl_simplify_mode", simplify_mode)
         dlg, cb = self._import_progress(
             tr("Importing {name}…", name=path.name))
         cmd = SnapshotImport(
             lambda scene: stl_format.load_stl(
                 scene, path, progress=cb, scale=scale,
-                simplify=simplify.isChecked()))
+                simplify_mode=simplify_mode))
         try:
             self.viewport.history.execute(cmd)
         except Exception as exc:  # noqa: BLE001

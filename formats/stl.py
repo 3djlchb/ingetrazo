@@ -150,10 +150,12 @@ def _ascii_stl(path: Path, scale: float, progress, file_size: int):
 
 
 def load_stl(scene, path, progress=None, scale: float = 1.0,
-             simplify: bool = False) -> None:
+             simplify_mode: str = "none") -> None:
     """Add binary or ASCII STL geometry to ``scene``.
 
     STL has no unit declaration, so callers supply the metres-per-unit scale.
+    ``simplify_mode`` is ``"none"``, ``"principal"`` (XY/XZ/YZ planes), or
+    ``"all"`` (coplanar surfaces in any orientation); curved facets stay split.
     Small imports are merged into the editable loose mesh; larger imports are
     kept as a named reference group to avoid costly topology cleanup.
     """
@@ -163,16 +165,18 @@ def load_stl(scene, path, progress=None, scale: float = 1.0,
     gc.disable()
     try:
         _load_stl_inner(scene, Path(path), progress=progress, scale=scale,
-                        simplify=simplify)
+                        simplify_mode=simplify_mode)
     finally:
         if was_enabled:
             gc.enable()
 
 
 def _load_stl_inner(scene, path: Path, progress=None, scale: float = 1.0,
-                    simplify: bool = False) -> None:
+                    simplify_mode: str = "none") -> None:
     if not math.isfinite(scale) or scale <= 0:
         raise ValueError("STL unit scale must be a positive finite number")
+    if simplify_mode not in ("none", "principal", "all"):
+        raise ValueError("STL simplification mode must be none, principal, or all")
     _tick(progress, 0.02, "Reading file…")
 
     size = path.stat().st_size
@@ -232,14 +236,16 @@ def _load_stl_inner(scene, path: Path, progress=None, scale: float = 1.0,
         raise ValueError("STL file contains no usable triangles")
 
     from formats.dae import _MAX_FUSE_LOOPS
-    if simplify:
+    if simplify_mode != "none":
         from core.mesh import Mesh
         from formats.dae import _add_fused
         from formats.fuse import fuse_coplanar_loops, soften_smooth_edges
 
         _tick(progress, 0.75, "Merging flat surfaces…")
         loops = [(face.vertices, None) for face in target.faces]
-        fused = fuse_coplanar_loops(loops, cos_tol=0.9999999)
+        fused = fuse_coplanar_loops(
+            loops, cos_tol=0.9999999,
+            principal_planes=simplify_mode == "principal")
         simplified = Mesh()
         for index, region in enumerate(fused):
             _add_fused(simplified, [region])
@@ -272,7 +278,7 @@ def _load_stl_inner(scene, path: Path, progress=None, scale: float = 1.0,
     seed = {_key(point) for face in target.faces for point in face.vertices}
     new_faces = set(target.faces)
     _tick(progress, 0.85, "Joining triangles…")
-    if simplify:
+    if simplify_mode != "none":
         orient_outward(target)
     else:
         run_stitch(target, seed, new_faces, coplanar_merge=True)

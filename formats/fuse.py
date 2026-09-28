@@ -84,7 +84,8 @@ def _sig_compatible(a, b) -> bool:
     return bool(ua and ub and _uvw_close(ua, ub))
 
 
-def fuse_coplanar_loops(loops, cos_tol: float = 0.99999):
+def fuse_coplanar_loops(loops, cos_tol: float = 0.99999,
+                        principal_planes: bool = False):
     """``loops``: list of ``(pts, attrs_dict_or_None)`` polygons (triangles or
     n-gons). Returns a list of ``(outer_pts, holes, attrs, originals)`` —
     coplanar same-material connected regions merged into one polygon (holes
@@ -140,11 +141,19 @@ def fuse_coplanar_loops(loops, cos_tol: float = 0.99999):
             if len(e) == 2:
                 edge_map.setdefault(e, []).append(i)
 
+    def on_principal_plane(normal):
+        return max(abs(normal.x()), abs(normal.y()),
+                   abs(normal.z())) >= 1.0 - 1e-7
+
     root_sig = [f[3] for f in faces]
     for idxs in edge_map.values():
         if len(idxs) != 2:
             continue                      # boundary or non-manifold junction
         i, j = idxs
+        if principal_planes and not (
+                on_principal_plane(faces[i][2])
+                and on_principal_plane(faces[j][2])):
+            continue
         if not _sig_compatible(faces[i][3], faces[j][3]):
             continue                      # different material / UV mapping
         if abs(QVector3D.dotProduct(faces[i][2], faces[j][2])) < cos_tol:

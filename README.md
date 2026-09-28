@@ -131,7 +131,8 @@ welcome arch with all its rebar (also attached to every release as
   powered by [OpenSKP](https://github.com/iamahsanmehmood/openskp)
   (see [Acknowledgements](#acknowledgements)).
 - **Files** — native `.igz` save/open (self-contained: textures travel inside
-  the document), **import STL (optionally merging coplanar triangles), OBJ
+  the document), **import STL (with principal-plane or advanced all-surface
+  coplanar merging), OBJ
   and COLLADA `.dae`**, **export STL, OBJ,
   COLLADA and glTF/GLB** (glTF with PBR materials and geolocation; STL
   goes to a slicer as is — dedicated 3D-printing tools are planned for the
