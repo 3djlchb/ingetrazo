@@ -940,34 +940,14 @@ def _zoom_extents(p, ink):
     _magnifier(p, ink, 22.0, 22.0, 7.5)
 
 
-# ---- Standard-view icons: a cube with the viewed face highlighted -----------
-# Every standard view is the same isometric cube; the face the view looks at
-# is filled in the accent. Faces at the back (Back, Left, Bottom) are hidden
-# behind the cube, so their edges are drawn dashed and their fill is lighter
-# — the eye reads "that side, behind". Iso fills the three visible faces.
-
-_CUBE_TOP = QPointF(24, 7)       # back corner of the top face
-_CUBE_R = QPointF(39, 15.5)      # right corner, top
-_CUBE_F = QPointF(24, 24)        # front corner, top
-_CUBE_L = QPointF(9, 15.5)       # left corner, top
-_CUBE_H = 18.0                   # vertical edge length
-
-
-def _down(pt: QPointF) -> QPointF:
-    return QPointF(pt.x(), pt.y() + _CUBE_H)
-
-
-def _cube_faces() -> dict:
-    t, r, f, l = _CUBE_TOP, _CUBE_R, _CUBE_F, _CUBE_L
-    return {
-        "top": QPolygonF([t, r, f, l]),
-        "front": QPolygonF([l, f, _down(f), _down(l)]),
-        "right": QPolygonF([f, r, _down(r), _down(f)]),
-        "back": QPolygonF([t, r, _down(r), _down(t)]),
-        "left": QPolygonF([l, t, _down(t), _down(l)]),
-        "bottom": QPolygonF([_down(l), _down(f), _down(r), _down(t)]),
-    }
-
+# ---- Standard-view icons: a little house drawn from each viewpoint ----------
+# Each orthographic view shows IngeTrazo's own little house from that
+# direction — ONE gable house, consistently, no windows: the door on the
+# front gable, the chimney on the right slope toward the back (right of
+# the apex from the front, left of it from behind, at the far end from
+# each side, a square at the back-right of the roof from above). The wall
+# you look at is filled with the accent, which is what tells the views
+# apart at a glance (Marco, 2026-09-14, chosen among a dozen candidates).
 
 def _accent_fill(p, poly, alpha: int = 150) -> None:
     acc = _accent()
@@ -981,9 +961,7 @@ def _accent_fill(p, poly, alpha: int = 150) -> None:
     p.restore()
 
 
-
 def _solid(p, ink, poly) -> None:
-    """Fill ``poly`` (a rect or polygon) solid in the ink, no outline."""
     p.save()
     p.setPen(Qt.NoPen)
     p.setBrush(QBrush(ink))
@@ -994,52 +972,115 @@ def _solid(p, ink, poly) -> None:
     p.restore()
 
 
-def _cube(p, ink, face: str | None) -> None:
-    faces = _cube_faces()
-    hidden = face in ("back", "left", "bottom")
-    if face == "iso":
-        _accent_fill(p, faces["top"], 70)
-        _accent_fill(p, faces["front"], 160)
-        _accent_fill(p, faces["right"], 110)
-    elif face is not None:
-        _accent_fill(p, faces[face], 125 if hidden else 160)
-    if hidden:
-        # the three edges that meet at the hidden back-bottom corner
-        faint = QColor(ink)
-        faint.setAlpha(150)
-        pen = QPen(faint, 2.0, Qt.DashLine)
-        p.save()
-        p.setPen(pen)
-        hb = _down(_CUBE_TOP)
-        for q in (_CUBE_TOP, _down(_CUBE_L), _down(_CUBE_R)):
-            p.drawLine(hb, q)
-        p.restore()
+def _chimney(p, ink, x: float, roof_y: float, h: float = 6.0, w: float = 4.0):
+    """A chimney stack rising ``h`` above the roof line at ``x``."""
+    _solid(p, ink, QRectF(x - w / 2, roof_y - h, w, h))
+
+
+_GABLE = QPolygonF([QPointF(9, 22), QPointF(23, 9), QPointF(37, 22)])
+_GABLE_WALL = QRectF(12, 22, 22, 15)
+
+
+def _view_front(p, ink):
+    # Gable end seen head-on: the wall in accent, ONE wide door, chimney
+    # RIGHT of the apex. (Front)
+    _accent_fill(p, _GABLE_WALL)
     p.setBrush(Qt.NoBrush)
-    outline = QPolygonF([_CUBE_TOP, _CUBE_R, _down(_CUBE_R), _down(_CUBE_F),
-                         _down(_CUBE_L), _CUBE_L])
-    p.drawPolygon(outline)
-    p.drawLine(_CUBE_L, _CUBE_F)
-    p.drawLine(_CUBE_F, _CUBE_R)
-    p.drawLine(_CUBE_F, _down(_CUBE_F))
+    p.drawRect(_GABLE_WALL)
+    p.drawPolygon(_GABLE)
+    _chimney(p, ink, 31.0, 15.0, h=6.5)
+    _solid(p, ink, QRectF(18, 28, 10, 9))                  # wide door
 
 
-def _view_face(face: str):
-    def draw(p, ink):
-        _cube(p, ink, face)
-    return draw
-
-
-_view_front = _view_face("front")
-_view_back = _view_face("back")
-_view_top = _view_face("top")
-_view_bottom = _view_face("bottom")
-_view_iso = _view_face("iso")
+def _view_back(p, ink):
+    # Same gable end from behind: blank wall in accent, chimney LEFT. (Back)
+    _accent_fill(p, _GABLE_WALL)
+    p.setBrush(Qt.NoBrush)
+    p.drawRect(_GABLE_WALL)
+    p.drawPolygon(_GABLE)
+    _chimney(p, ink, 15.0, 15.0, h=6.5)
 
 
 def _house_side(mirror: bool):
-    # Kept as the factory the registry calls: Right is the cube's right
-    # face, Left its hidden left face.
-    return _view_face("left" if mirror else "right")
+    # Long wall seen side-on, in accent, under a low roof; the chimney at
+    # the BACK end — the right end seen from the right, the left end seen
+    # from the left (mirror images).
+    def draw(p, ink):
+        p.save()
+        if mirror:
+            p.translate(48, 0)
+            p.scale(-1, 1)
+        # A touch wider than the front — the house is square in plan, but a
+        # hair of length tells the side from the gable at a glance (Marco,
+        # 2026-09-14).
+        wall = QRectF(11, 23, 27, 14)
+        _accent_fill(p, wall)
+        p.setBrush(Qt.NoBrush)
+        p.drawRect(wall)
+        p.drawPolygon(QPolygonF([QPointF(9, 23), QPointF(14, 15),
+                                 QPointF(35, 15), QPointF(40, 23)]))  # roof
+        _chimney(p, ink, 33.0, 15.0, h=6.0)
+        p.restore()
+    return draw
+
+
+def _view_top(p, ink):
+    # The gable roof from directly above: the footprint in accent, ONE
+    # ridge line down the middle (two slopes, not four), the chimney as a
+    # square at the back-right.
+    roof = QRectF(9, 11, 24, 24)
+    _accent_fill(p, roof)
+    p.setBrush(Qt.NoBrush)
+    p.drawRect(roof)
+    p.drawLine(QPointF(21, 11), QPointF(21, 35))           # ridge
+    _solid(p, ink, QRectF(25.5, 13.5, 4.5, 4.5))           # chimney
+    # a hint of the front: the door's end is the bottom edge — a short
+    # tick there keeps top and bottom apart from the other symbols
+    p.drawLine(QPointF(17, 35), QPointF(25, 35))
+
+
+def _view_bottom(p, ink):
+    # The slab from below, in accent, with the walls starting off it: a
+    # short diagonal stub at each corner (Marco's pick, 2026-09-14).
+    slab = QRectF(9, 11, 24, 24)
+    _accent_fill(p, slab)
+    p.setBrush(Qt.NoBrush)
+    p.drawRect(slab)
+    for x in (9.0, 33.0):
+        for y in (11.0, 35.0):
+            p.drawLine(QPointF(x, y),
+                       QPointF(x + (4.0 if x == 9.0 else -4.0),
+                               y + (4.0 if y == 11.0 else -4.0)))
+
+
+def _view_iso(p, ink):
+    # The same house in isometric with its EAVES: gable end (door) at the
+    # left, long side at the right, the roof slope overhanging both wall
+    # and gable, chimney at the back of the slope.
+    wl, wf, wr = QPointF(11, 23), QPointF(23, 29), QPointF(37, 22)
+    bl, bf, br = QPointF(11, 35), QPointF(23, 41), QPointF(37, 34)
+    apex = QPointF(17, 15.5)
+    back_apex = apex + (wr - wf)
+    gable = QPolygonF([bl, bf, wf, apex, wl])
+    side = QPolygonF([wf, wr, br, bf])
+    out = QPointF(-2.4, -1.2)          # forward, through the gable plane
+    eave = QPointF(2.6, 1.6)           # outward past the side wall
+    r_front_top, r_back_top = apex + out, back_apex - out * 0.4
+    r_front_low = wf + out + eave + QPointF(0, -1.0)
+    r_back_low = wr - out * 0.4 + eave + QPointF(0, -1.0)
+    slope = QPolygonF([r_front_top, r_back_top, r_back_low, r_front_low])
+    _accent_fill(p, gable, 150)
+    _accent_fill(p, side, 90)
+    _accent_fill(p, slope, 60)
+    p.setBrush(Qt.NoBrush)
+    p.drawPolygon(gable)
+    p.drawPolygon(side)
+    p.drawPolygon(slope)
+    p.drawLine(r_front_top, wl + out)                      # left rake edge
+    cx, cy = 30.5, 13.5
+    _solid(p, ink, QRectF(cx - 1.8, cy - 1, 3.6, 7))       # chimney
+    _solid(p, ink, QPolygonF([QPointF(15, 30.5), QPointF(19, 32.5),
+                              QPointF(19, 39.5), QPointF(15, 37.5)]))   # door
 
 
 def _text(p, ink):
@@ -1450,29 +1491,28 @@ def _disc(cx: float, cy: float, r: float) -> QPainterPath:
 
 
 def _position_camera(p, ink):
-    # Position Camera: a map pin where the eye will stand, and the view cone
-    # it will look along, filled in the accent.
-    acc = _accent()
-    cone = QPolygonF([QPointF(17, 20), QPointF(42, 8), QPointF(42, 30)])
-    p.save()
-    p.setPen(Qt.NoPen)
-    p.setBrush(QColor(acc.red(), acc.green(), acc.blue(), 120))
-    p.drawPolygon(cone)
-    p.setPen(_rpen(acc, 2.2))
-    p.drawLine(QPointF(17, 20), QPointF(42, 8))
-    p.drawLine(QPointF(17, 20), QPointF(42, 30))
-    p.restore()
-    pin = QPainterPath()
-    pin.moveTo(15, 43)
-    pin.cubicTo(8, 32, 5, 27, 5, 21)
-    pin.arcTo(QRectF(5, 11, 20, 20), 180, -180)
-    pin.cubicTo(25, 27, 22, 32, 15, 43)
-    p.setPen(_rpen(ink, 2.8))
+    # Position Camera: a small camera, its lens in the accent, and under it
+    # an accent marker pointing down -- the camera goes where you click.
+    top = QPainterPath()
+    top.moveTo(15, 12)
+    top.lineTo(18, 7)
+    top.lineTo(28, 7)
+    top.lineTo(31, 12)
+    p.setPen(_rpen(ink, 2.6))
     p.setBrush(Qt.NoBrush)
-    p.drawPath(pin)
+    p.drawPath(top)
+    body = QPainterPath()
+    body.addRoundedRect(QRectF(7, 12, 32, 21), 3.5, 3.5)
+    p.setPen(_rpen(ink, 2.8))
+    p.drawPath(body)
+    acc = _accent()
+    p.setPen(_rpen(ink, 2.6))
+    p.setBrush(QColor(acc.red(), acc.green(), acc.blue(), 210))
+    p.drawEllipse(QPointF(23, 22.5), 6.2, 6.2)
     p.setPen(Qt.NoPen)
-    p.setBrush(QBrush(ink))
-    p.drawPath(_disc(15, 21, 3.4))
+    p.setBrush(acc)
+    p.drawPolygon(QPolygonF([QPointF(18, 37), QPointF(28, 37),
+                             QPointF(23, 44)]))
 
 
 def _walk(p, ink):
@@ -1796,7 +1836,7 @@ _CURSOR_HOTSPOTS = {
     "zoom": (21, 21),               # the magnifier's lens centre
     "zoom_window": (21, 22),
     "section": (24, 27),            # the plane's centre
-    "position_camera": (24, 44),    # the tripod's foot: where you stand
+    "position_camera": (23, 44),    # the marker's tip: where the camera goes
     "walk": (24, 24),
     "look_around": (24, 26),        # the pupil
     "first_person": (24, 24),
