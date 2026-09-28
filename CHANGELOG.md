@@ -4,7 +4,17 @@ All notable changes to IngeTrazo are documented here.
 Format inspired by [Keep a Changelog](https://keepachangelog.com); versions
 follow [SemVer](https://semver.org).
 
-## [Sin publicar]
+## [0.5.5] — 2026-09-28
+
+**Nada de Trimble, y lo que los usuarios pidieron.** Tras un aviso de
+derechos de autor de Trimble, IngeTrazo deja de ejecutar, descargar o
+distribuir cualquier pieza de SketchUp: el conversor skp2dae y la
+exportación a `.skp` se van, y los `.skp` se siguen abriendo con el lector
+libre. Íconos propios en lugar de los que imitaban a SketchUp. Y una tanda
+de reportes resueltos: la órbita gira alrededor de lo que miras, Empujar/Tirar
+se detiene en las guías de la Cinta, rotar cae exacto en el punto enganchado,
+guardar ya no deja un «cambios sin guardar» fantasma, y las medidas salen en
+las unidades del documento.
 
 ### Retirado — nada de Trimble
 Tras el aviso de derechos de autor de Trimble (2026-09-28), IngeTrazo ya no
@@ -23,6 +33,28 @@ ejecuta, descarga ni enlaza nada de Trimble:
   referencia; `scripts/skp_diff.py` ahora compara contra un `.dae` que el
   propio SketchUp exporta.
 
+- **Ayuda ▸ Obtener más modelos** ya no enlaza al 3D Warehouse de Trimble;
+  quedan Poly Haven, ambientCG y Sketchfab.
+
+### Cambiado
+- **Íconos propios de IngeTrazo** donde imitaban a los de SketchUp:
+  Caminar son dos huellas, Mirar alrededor una cabeza vista desde arriba con
+  su cono de visión, las herramientas de sólidos dos discos que se cruzan, el
+  texto una T en un marco, el zoom a la extensión cuatro esquinas alrededor
+  de la lupa, y las cotas terminan en puntos. **Situar cámara es una
+  camarita** con el lente naranja y una marca debajo, y **el borrador una
+  goma inclinada** con su punta naranja. Las **vistas estándar siguen siendo
+  la casita** con la pared que se mira en naranja.
+- **IngeTrazo se presenta por sí mismo**: el README, la ficha del Flatpak y
+  la del Snap ya no lo describen como «estilo SketchUp» ni «alternativa a
+  SketchUp», sino con su lema, *traza como a mano*, y dicen cómo se
+  pronuncia su nombre (in-je-TRA-so: *inge*niería + *trazo*; sugerencia de
+  @pacaeiro). SketchUp se nombra sólo para decir que abre sus `.skp`.
+
+### Añadido
+- **Repetir el último comando con Mayús+R**, y como primera entrada del menú
+  del clic derecho (#145, @canalsecuario-blip).
+
 ### Corregido
 - **Rotar y Transportador enganchan el eje rojo aunque la línea de
   referencia esté a pocos grados de él** (#140, @pacaeiro). El brazo se
@@ -34,6 +66,32 @@ ejecuta, descarga ni enlaza nada de Trimble:
 - **La extensión ya no sale de un segmento de círculo, arco o superficie
   suavizada, ni de una arista oculta** (#140): lanzaba líneas de trazos a
   través de la esfera.
+- **La órbita gira alrededor de lo que estás mirando** (#164, @mariuseng-dot):
+  el punto del modelo bajo el cursor al empezar a arrastrar, o el modelo a la
+  vista si apuntas al cielo, y ese punto se queda bajo el cursor. Antes
+  giraba alrededor del objetivo de la cámara, lejísimos en un modelo grande.
+- **Empujar/Tirar se detiene en los puntos y líneas guía de la Cinta**
+  (#165, @ewertondiaseng-byte), con el aviso «Punto guía» / «En línea».
+- **Rotar cae exacto en el punto enganchado** (#163, @fafecm): con el
+  segundo clic enganchado a un punto, se aplicaba el ángulo redondeado a 0,1°
+  de la etiqueta (−70,3°) y la arista quedaba ~0,7 mm al costado a 2 m del
+  pivote. Además la vista previa ya no acumula error: se calcula siempre
+  desde una copia tomada al empezar, y cancelar deja todo idéntico.
+- **Guardar y cerrar ya no pregunta por cambios sin guardar** (#159,
+  @pacaeiro): cualquier cambio de selección después de guardar contaba como
+  una modificación.
+- **Círculo, polígono, empalme y recorrido muestran las medidas en las
+  unidades del documento** (#149, @xyont): en milímetros decían metros. Lo
+  que tecleas en el cuadro de valores se ve con la unidad en que se leerá, y
+  «lados»/«segmentos» se traducen.
+- **El Rectángulo acepta `200,100`** (sin espacio) como ancho y alto, como en
+  SketchUp (#152, @xyont). `200, 100` y `200;100` siguen valiendo; en las demás
+  herramientas la coma sigue siendo el decimal.
+- **Una cara invertida sigue invertida al seguir dibujando**
+  (#144, @canalsecuario-blip).
+- **Todas las pestañas de la bandeja derecha caben en los 240 px mínimos**
+  (#139, @felixriestra): los botones de Capas y los combos de Terreno se
+  cortaban.
 
 ## [0.5.4] — 2026-09-26
 

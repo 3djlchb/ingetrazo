@@ -75,6 +75,26 @@
   <url type="vcs-browser">https://github.com/ingelibre/ingetrazo</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.5.5" date="2026-09-28">
+      <description>
+        <p>Nothing of Trimble's: the skp2dae converter and the .skp export
+        are gone, and .skp files keep opening with the free built-in
+        reader. IngeTrazo's own icons replace those that imitated
+        SketchUp's. Orbit turns about what you are looking at, Push/Pull
+        stops at the Tape's guides, rotating lands exactly on the snapped
+        point, saving no longer leaves a phantom "unsaved changes", lengths
+        show in the document's units, and Shift+R repeats the last
+        command.</p>
+        <p xml:lang="es">Nada de Trimble: el conversor skp2dae y la
+        exportación a .skp se van, y los .skp se siguen abriendo con el
+        lector libre integrado. Íconos propios de IngeTrazo en lugar de los
+        que imitaban a SketchUp. La órbita gira alrededor de lo que miras,
+        Empujar/Tirar se detiene en las guías de la Cinta, rotar cae exacto
+        en el punto enganchado, guardar ya no deja «cambios sin guardar»
+        fantasma, las medidas salen en las unidades del documento, y
+        Mayús+R repite el último comando.</p>
+      </description>
+    </release>
     <release version="0.5.3" date="2026-09-25">
       <description>
         <p>Rotation grips on Move and a Select submenu, as in SketchUp;
