@@ -21,7 +21,8 @@ def test_tool_cursor_builds_bitmap_with_hotspot():
     hs = cur.hotSpot()
     assert (hs.x(), hs.y()) == (4, 28)         # (6,42) in 48-space → ×32/48
     ers = tool_cursor("eraser").hotSpot()
-    assert (ers.x(), ers.y()) == (9, 19)       # the rubber's working corner
+    assert (ers.x(), ers.y()) == (10, 21)      # middle of the accent end:
+                                               # (15,31) in 48-space
     mv = tool_cursor("move").hotSpot()
     assert (mv.x(), mv.y()) == (16, 16)        # centre of the cross
     assert tool_cursor("select") is None       # Select keeps the arrow

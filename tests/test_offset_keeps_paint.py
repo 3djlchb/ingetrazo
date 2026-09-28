@@ -145,7 +145,10 @@ def test_the_message_names_the_room_that_is_left():
     assert 0.2 < room < 0.26, room          # half of 0.5, minus the tolerance
     vp = _LoudVP(scene)
     _offset(vp, face, 0.40)
-    assert vp.said and "0.2" in vp.said[0], vp.said
+    # In the document's units, as the tool writes it (762a4bb): "250.0 mm"
+    # in a millimetre document, "0.25 m" in a metre one.
+    from core.units import fmt_len
+    assert vp.said and fmt_len(room) in vp.said[0], vp.said
 
 
 def test_a_feasible_offset_stays_quiet_and_builds():
