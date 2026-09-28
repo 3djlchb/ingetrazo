@@ -256,7 +256,7 @@ provided derivative works stay under the same license.
 
 ## En español
 
-**IngeTrazo** (se lee *in-je-TRA-zo*: *inge*niería + *trazo*) es un
+**IngeTrazo** (se lee *in-je-TRA-so*: *inge*niería + *trazo*) es un
 modelador 3D libre para arquitectura,
 ingeniería y diseño 3D, **hecho nativo para Linux** — donde casi no
 hay CAD para nuestra carrera ni para quien diseña en 3D. Es freeform en el núcleo (trazás lo que quieras,

@@ -13,7 +13,7 @@ version: "@VERSION@"
 title: IngeTrazo
 summary: Traza como a mano — modelador 3D libre para arquitectura e ingeniería
 description: |
-  IngeTrazo (se lee in-je-TRA-zo: ingeniería + trazo) es un modelador 3D
+  IngeTrazo (se lee in-je-TRA-so: ingeniería + trazo) es un modelador 3D
   libre (GPL-3.0) para arquitectura, ingeniería civil e impresión 3D, en
   español, para trazar como a mano. Abre archivos .skp con su propio lector
   libre (openskp), así que los modelos de tu equipo se importan sin
