@@ -7,7 +7,7 @@
 
 ![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)
 ![Status: usable](https://img.shields.io/badge/status-usable%20·%200.3.x-brightgreen)
-![Platform: Linux · Windows · macOS (from source)](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS%20(source)-informational)
+![Platform: Linux · Windows · macOS](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-informational)
 ![Made in Peru](https://img.shields.io/badge/made%20in-Peru%20%F0%9F%87%B5%F0%9F%87%AA-red)
 
 IngeTrazo brings *push/pull* modeling to Linux — where there is
@@ -63,26 +63,15 @@ Python, Qt and the pure-Python `.skp` reader travel inside; nothing else to
 install. `--check` prints what the install found and exits non-zero if
 anything is missing.
 
-- **macOS**: no packaged build yet — and, honestly, **no Mac here to test
-  one on**. Nothing in IngeTrazo is platform-specific (Python, Qt, OpenGL
-  3.3 core; every native dependency ships wheels for Intel and Apple
-  Silicon), so it should run from source. If you have a Mac, this is the
-  five-minute test that would let us ship a `.app`: you need Python 3.12+
-  (python.org or Homebrew), then
-
-```bash
-git clone https://github.com/ingelibre/ingetrazo.git
-cd ingetrazo
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-python main.py
-```
-
-  Then please [open an issue](https://github.com/ingelibre/ingetrazo/issues)
-  saying whether it opens, whether the 3D view is smooth, and pasting
-  anything the Terminal prints. Known gaps on macOS: DWG import (`dwg2dxf`
-  is Linux-only for now); the native `.skp` reader works everywhere. The first `.app` will be
-  unsigned — right-click ▸ Open the first time.
+- **macOS** (Apple Silicon, M1 and later): download
+  `IngeTrazo-<version>-macos-arm64.dmg` from the
+  [latest release](https://github.com/ingelibre/ingetrazo/releases/latest),
+  open it and drag IngeTrazo to Applications. The app is not signed yet, so
+  the first time right-click it ▸ Open. Known gap on macOS: DWG import
+  (`dwg2dxf` is Linux-only for now); the native `.skp` reader works
+  everywhere. If something fails, please
+  [open an issue](https://github.com/ingelibre/ingetrazo/issues) and paste
+  anything the Terminal prints.
 
 Something to open right away: [`examples/`](examples/) holds four real
 documents from the Yanque plaza project — the fountain, the bench with its
