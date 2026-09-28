@@ -1603,6 +1603,7 @@ class MainWindow(QMainWindow):
             (tr("COLLADA (.dae)…"), self._on_import_dae),
             (tr("glTF/GLB (.glb)…"), self._on_import_glb),
             (tr("Wavefront OBJ (.obj)…"), self._on_import_obj),
+            (tr("STL mesh (*.stl)…"), self._on_import_stl),
             (tr("Image (PNG / JPG)…"), self._on_import_image),
             (tr("Orthomosaic (GeoTIFF)…"), self._on_import_orthophoto),
             (tr("AutoCAD DWG (.dwg)…"), self._on_import_dwg),
@@ -4520,6 +4521,67 @@ class MainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001
             dlg.close()
             QMessageBox.critical(self, tr("Import OBJ failed"), str(exc))
+            return
+        self._prepare_import_display(cmd, cb)
+        dlg.close()
+        self.viewport.update()
+        self._import_name = path.name
+        self._update_title()
+        self.statusBar().showMessage(tr("Imported {name}", name=path.name), 3000)
+
+    def _on_import_stl(self) -> None:
+        from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog,
+                                       QDialogButtonBox, QFormLayout)
+
+        path_str, _ = file_dialogs.getOpenFileName(
+            self, tr("Import STL"), "",
+            tr("STL mesh (*.stl);;All files (*)"))
+        if not path_str:
+            return
+        path = Path(path_str)
+        keys = ["m", "cm", "mm", "in", "ft"]
+        labels = [tr("Metres"), tr("Centimetres"), tr("Millimetres"),
+                  tr("Inches"), tr("Feet")]
+        settings = QSettings()
+        guess = str(settings.value("import/stl_unit", "mm") or "mm")
+        idx = keys.index(guess) if guess in keys else keys.index("mm")
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(tr("Import STL"))
+        form = QFormLayout(dialog)
+        units = QComboBox(dialog)
+        units.addItems(labels)
+        units.setCurrentIndex(idx)
+        form.addRow(
+            tr("An STL file does not record its unit. What is this model in?"),
+            units)
+        simplify = QCheckBox(
+            tr("Merge coplanar triangles (simplify flat surfaces)"), dialog)
+        simplify.setChecked(str(settings.value(
+            "import/stl_simplify", "true")).lower() not in ("0", "false"))
+        form.addRow("", simplify)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        unit = keys[units.currentIndex()]
+        scale = stl_format.STL_UNITS[unit]
+        settings.setValue("import/stl_unit", unit)
+        settings.setValue("import/stl_simplify", simplify.isChecked())
+        dlg, cb = self._import_progress(
+            tr("Importing {name}…", name=path.name))
+        cmd = SnapshotImport(
+            lambda scene: stl_format.load_stl(
+                scene, path, progress=cb, scale=scale,
+                simplify=simplify.isChecked()))
+        try:
+            self.viewport.history.execute(cmd)
+        except Exception as exc:  # noqa: BLE001
+            dlg.close()
+            QMessageBox.critical(self, tr("Import STL failed"), str(exc))
             return
         self._prepare_import_display(cmd, cb)
         dlg.close()
