@@ -148,7 +148,13 @@ hiddenimports += [
 # 0.4.1). The Flatpak was fine because it ships the whole site-packages.
 from PyInstaller.utils.hooks import collect_data_files
 hiddenimports += collect_submodules('openskp')
-datas += collect_data_files('openskp')
+# ...except _scaffold/blank_v17.skp: a blank document written by Trimble's
+# SketchUp SDK (openskp's writer builds its files on top of it). IngeTrazo
+# does not distribute it since Trimble's copyright notice of 2026-09-28,
+# and has no SketchUp export without it; main.py --check fails a frozen
+# bundle that still carries it.
+datas += [(src, dst) for src, dst in collect_data_files('openskp')
+          if '_scaffold' not in src.replace('\\', '/')]
 # openskp 1.3.0 triangulates with mapbox_earcut instead of Shapely, so the
 # reader now pulls a NATIVE extension (_core*.so) that did not exist in the
 # dependency tree before. ``import openskp`` fails outright without it, so

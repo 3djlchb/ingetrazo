@@ -61,7 +61,7 @@ def test_compare_flags_geometry_and_bbox_differences():
 
 def test_load_candidate_returns_none_without_backend(tmp_path):
     # No pure backend is wired, so a .skp yields no candidate (the harness then
-    # validates skp2dae output only) — never crashes.
+    # loads only the COLLADA side) — never crashes.
     p = tmp_path / "m.skp"
     p.write_bytes(b"\x01\x02legacy")
     assert skp_diff.load_candidate(p) is None

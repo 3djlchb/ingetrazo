@@ -4,9 +4,6 @@ try to make it unique, it explodes all the subgroups»; Marco, 24-09: Make
 Component over several groups must make ONE component holding them)."""
 from __future__ import annotations
 
-import os
-import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -127,34 +124,6 @@ def test_a_copied_group_becomes_its_own_when_opened():
     finally:
         win._saved_version = win.viewport.scene.version
         win.close()
-
-
-_SKP2DAE = Path.home() / ".local/share/skp2dae/skp2dae.exe"
-
-
-@pytest.mark.skipif(not (_SKP2DAE.exists() and shutil.which("wine")),
-                    reason="needs wine and skp2dae.exe (SketchUp's SDK)")
-def test_sketchup_reads_a_group_of_groups_as_groups(tmp_path):
-    """The real test of «opens in SketchUp»: the SDK converts our .skp and
-    counts the components — a group of groups adds none, a component one."""
-    from formats.skp_out import save_skp
-    scene, hist, a, b = _two_groups()
-    hist.execute(MakeNestedGroupCommand([], [], [a, b], name="Banca"))
-
-    def components(sc, name):
-        path = tmp_path / f"{name}.skp"
-        save_skp(sc, path)
-        out = subprocess.run(
-            ["wine", str(_SKP2DAE), str(path), str(tmp_path / f"{name}.dae")],
-            capture_output=True, text=True, timeout=180,
-            env={**os.environ, "WINEDEBUG": "-all"})
-        line = [x for x in out.stdout.splitlines() if x.startswith("OK")]
-        assert line, out.stdout + out.stderr
-        return int(line[0].split("materials,")[1].split("component")[0])
-
-    assert components(scene, "grupo") == 0
-    hist.execute(GroupToComponentCommand(scene.groups[0], "Banca"))
-    assert components(scene, "componente") >= 1
 
 
 def test_an_older_file_reads_its_groups_of_groups_as_groups(tmp_path):

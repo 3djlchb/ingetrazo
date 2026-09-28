@@ -25,15 +25,15 @@
       a escala (PDF/DXF).
     </p>
     <p>
-      Opens SketchUp .skp files natively (2013–2026, read AND write, through
-      the pure-Python OpenSKP library), imports and exports COLLADA and OBJ,
+      Opens SketchUp .skp files natively (2013–2026, through the
+      pure-Python OpenSKP library), imports and exports COLLADA and OBJ,
       exports STL, glTF/GLB and IFC4 for BIM quantity take-off, and brings
       real terrain in: base-map tiles, 3D elevation, photogrammetry meshes
       and survey points.
     </p>
     <p xml:lang="es">
-      Abre archivos .skp de SketchUp de forma nativa (2013–2026, lee Y
-      escribe, vía la librería puro-Python OpenSKP), importa y exporta
+      Abre archivos .skp de SketchUp de forma nativa (2013–2026, vía la
+      librería puro-Python OpenSKP), importa y exporta
       COLLADA y OBJ, exporta STL, glTF/GLB e IFC4 para metrados BIM, y trae
       el terreno real: mapas base, elevación 3D, mallas de fotogrametría y
       puntos topográficos.

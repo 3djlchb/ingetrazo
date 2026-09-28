@@ -22,8 +22,7 @@ with its sister project [IngePresupuestos](https://ingepresupuestos.com).
 ## Status
 
 **Usable — real work gets done in it today.** Draw, extrude, edit, paint,
-dimension and annotate; open any SketchUp file from 2013 to 2026 and save
-back to `.skp`; tag BIM classes and export IFC quantities; georeference and
+dimension and annotate; open any SketchUp file from 2013 to 2026; tag BIM classes and export IFC quantities; georeference and
 import survey data. IngeTrazo is developed by dogfooding on real engineering
 projects, backed by ~2,000 automated tests, and its geometry engine refuses
 to commit a broken solid (the hermeticity guard) — your quantities stay
@@ -79,8 +78,7 @@ python main.py
   Then please [open an issue](https://github.com/ingelibre/ingetrazo/issues)
   saying whether it opens, whether the 3D view is smooth, and pasting
   anything the Terminal prints. Known gaps on macOS: DWG import (`dwg2dxf`
-  is Linux-only for now) and the optional `skp2dae` converter (Wine); the
-  native `.skp` reader and writer work everywhere. The first `.app` will be
+  is Linux-only for now); the native `.skp` reader works everywhere. The first `.app` will be
   unsigned — right-click ▸ Open the first time.
 
 Something to open right away: [`examples/`](examples/) holds four real
@@ -122,14 +120,15 @@ welcome arch with all its rebar (also attached to every release as
   occlusion and styles; texts select by their glyphs, move with the anchor
   pinned, and edit on double-click. Both survive the `.skp` round trip.
 - **Side tray** — Materials, Dimension style, Entity info panels.
-- **SketchUp import AND export** — open `.skp` files natively (double-click
-  too), every era from classic 2013–2020 to current 2021+, with materials,
-  textures, per-side face materials, translucency, layers, scenes,
-  dimensions and leader texts — and **save your model back as `.skp`**
-  (groups, shared components, holes, named materials, dimensions and leader
-  texts included). Pure Python, offline, no Wine or proprietary DLL —
-  powered by [OpenSKP](https://github.com/iamahsanmehmood/openskp)
-  (see [Acknowledgements](#acknowledgements)).
+- **SketchUp import** — open `.skp` files natively (double-click too), every
+  era from classic 2013–2020 to current 2021+, with materials, textures,
+  per-side face materials, translucency, layers, scenes, dimensions and
+  leader texts. Pure Python, offline, nothing of Trimble's — powered by
+  [OpenSKP](https://github.com/iamahsanmehmood/openskp) (see
+  [Acknowledgements](#acknowledgements)). There is no `.skp` export: the
+  writer builds on a blank document made with Trimble's SDK, which
+  IngeTrazo stopped distributing after Trimble's copyright notice
+  (2026-09-28). To take a model to SketchUp, export COLLADA `.dae`.
 - **Files** — native `.igz` save/open (self-contained: textures travel inside
   the document), **import OBJ and COLLADA `.dae`**, **export STL, OBJ,
   COLLADA and glTF/GLB** (glTF with PBR materials and geolocation; STL

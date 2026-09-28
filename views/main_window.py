@@ -48,7 +48,6 @@ from formats import obj as obj_format
 from formats import ifc as ifc_format
 from formats import stl as stl_format
 from formats import gltf as gltf_format
-from formats import skp_out as skp_out_format
 from tools.arc import CenterArcTool, ArcTool, ThreePointArcTool
 from tools.circle import CircleTool, PolygonTool
 from tools.dimension import DimensionTool
@@ -1629,7 +1628,6 @@ class MainWindow(QMainWindow):
             (tr("COLLADA (.dae)…"), self._on_export_dae),
             (tr("STL (3D printing)…"), self._on_export_stl),
             (tr("Wavefront OBJ (.obj)…"), self._on_export_obj),
-            (tr("SketchUp (.skp)…"), self._on_export_skp),
             (tr("Current view as DXF…"), self._on_export_view_dxf),
             (tr("Image (PNG / JPG)…"), self._on_export_image),
         ):
@@ -4020,7 +4018,7 @@ class MainWindow(QMainWindow):
         """Parse ``skp`` off the UI thread, keeping the event loop responsive.
 
         Returns ``(payload, exc)`` — ``payload`` is the parsed geometry (or
-        ``None``), ``exc`` is a ``NeedsConverter`` (fall back to skp2dae), any
+        ``None``), ``exc`` is a ``NeedsConverter`` (the reader cannot read it), any
         other exception (real failure), or ``None``. The parse touches no
         ``Scene`` so it is safe off-thread; ``apply_payload`` runs on the UI
         thread in the caller. A local ``QEventLoop`` blocks here until the
@@ -4138,49 +4136,16 @@ class MainWindow(QMainWindow):
         self._update_title()
         self.statusBar().showMessage(tr("Imported {name}", name=path.name), 3000)
 
-    # ---- SKP via the skp2dae satellite converter -----------------------------
-    @staticmethod
-    def _find_skp_converter():
-        """Locate the external skp2dae converter and return the command list
-        to invoke it, or ``None``. Search order: ``SKP2DAE_EXE`` env var,
-        ``~/.local/share/skp2dae/skp2dae.exe``, then ``skp2dae`` on PATH.
-        The converter is a SEPARATE program (it loads Trimble's proprietary
-        SketchUpAPI.dll, which can never ship inside GPL IngeTrazo); on
-        Linux a ``.exe`` runs through Wine."""
-        import os
-        import shutil
-        import sys as _sys
-        candidates = []
-        env = os.environ.get("SKP2DAE_EXE")
-        if env:
-            candidates.append(Path(env))
-        candidates.append(
-            Path.home() / ".local" / "share" / "skp2dae" / "skp2dae.exe")
-        which = shutil.which("skp2dae")
-        if which:
-            candidates.append(Path(which))
-        for cand in candidates:
-            if not cand.exists():
-                continue
-            if cand.suffix.lower() == ".exe" and _sys.platform != "win32":
-                wine = shutil.which("wine")
-                if wine:
-                    return [wine, str(cand)]
-                continue
-            return [str(cand)]
-        return None
-
+    # ---- SKP import: IngeTrazo's own reader (formats/skp.py) -----------------
     def import_skp_path(self, skp: Path) -> bool:
-        """Import ``skp``. Prefers a pure-Python parser backend (offline, no
-        Wine/DLL — see ``formats/skp.py``); falls back to the external skp2dae
-        converter for versions no pure backend can read yet (its .dae and
-        texture folder land NEXT TO the .skp, so texture paths stay valid for
-        the session and for saved documents)."""
+        """Import ``skp`` with IngeTrazo's own pure-Python reader (offline,
+        no Wine, nothing of Trimble's -- see ``formats/skp.py``). A file it
+        cannot read is reported, with the way around it (export COLLADA or
+        OBJ from SketchUp)."""
         from formats import skp as skp_format
         if skp_format.can_handle(skp):
-            # Heavy parse OUTSIDE the undo history: decide pure-vs-converter
-            # before touching the scene, so a failed/empty parse never leaves a
-            # half-applied edit. NeedsConverter → fall through to skp2dae.
+            # Heavy parse OUTSIDE the undo history, so a failed/empty parse
+            # never leaves a half-applied edit.
             dlg, cb = self._import_progress(
                 tr("Importing {name}…", name=skp.name))
             # The parse is heavy (seconds on a big model) and pure-Python, so
@@ -4191,10 +4156,7 @@ class MainWindow(QMainWindow):
             # thread below.
             payload, exc = self._parse_skp_threaded(skp, cb)
             if isinstance(exc, skp_format.NeedsConverter):
-                payload = None
-                self.statusBar().showMessage(tr(
-                    "Pure importer unavailable for this file — using the "
-                    "external converter (slower)."), 8000)
+                payload = None             # unreadable: said below
             elif exc is not None:
                 dlg.close()
                 QMessageBox.critical(self, tr("Import SKP failed"), str(exc))
@@ -4223,171 +4185,17 @@ class MainWindow(QMainWindow):
                     self.statusBar().showMessage(
                         tr("Imported {name}", name=skp.name), 3000)
                 return True
-            dlg.close()   # no pure backend could read it → converter below
+            dlg.close()   # the reader could not read it: said below
 
-        # ---- Fallback: the external skp2dae converter (Trimble DLL via Wine) --
-        command = self._find_skp_converter()
-        if command is None:
-            answer = QMessageBox.question(
-                self, tr("Import SKP"),
-                tr("Opening .skp needs the skp2dae converter (a separate "
-                   "program IngeTrazo launches).\n\n"
-                   "Install it automatically? This downloads:\n"
-                   "• skp2dae.exe from the IngeTrazo releases (free "
-                   "software, MIT), and\n"
-                   "• the official SketchUp library (SketchUpAPI.dll) from "
-                   "the public release of Blender's 'SketchUp Importer' "
-                   "add-on (a third-party project).\n\n"
-                   "Everything lands in ~/.local/share/skp2dae/."),
-                QMessageBox.Yes | QMessageBox.No)
-            if answer != QMessageBox.Yes:
-                return False
-            if not self._install_skp_converter():
-                return False
-            command = self._find_skp_converter()
-            if command is None:
-                return False
-        import shutil
-        import subprocess
-        import tempfile
-        import unicodedata
-        from PySide6.QtCore import Qt as _Qt
-        from PySide6.QtWidgets import QApplication
-
-        # Wine re-encodes argv to the Windows ANSI codepage, so an accented
-        # path ("Imágenes", "ñandú.skp") reaches the converter — and the
-        # SDK's UTF-8 file API — mangled. Sidestep it: convert through a
-        # temporary ASCII path and move the results next to the original.
-        # The texture folder keeps the .dae's stem (its internal refs are
-        # relative to that name), so accented stems come back sanitized.
-        ascii_stem = unicodedata.normalize("NFKD", skp.stem)
-        ascii_stem = ascii_stem.encode("ascii", "ignore").decode() or "modelo"
-        needs_tmp = any(ord(c) > 127 for c in str(skp))
-        tmpdir: Path | None = None
-        if needs_tmp:
-            tmpdir = Path(tempfile.mkdtemp(prefix="skp2dae-"))
-            work_skp = tmpdir / (ascii_stem + ".skp")
-            shutil.copy(skp, work_skp)
-        else:
-            work_skp = skp
-        work_dae = work_skp.with_suffix(".dae")
-
-        self.statusBar().showMessage(
-            tr("Converting {name}… (skp2dae)", name=skp.name))
-        QApplication.setOverrideCursor(_Qt.WaitCursor)
-        try:
-            result = subprocess.run(
-                command + [str(work_skp), str(work_dae)],
-                capture_output=True, timeout=600)
-        except Exception as exc:  # noqa: BLE001
-            QApplication.restoreOverrideCursor()
-            QMessageBox.critical(self, tr("Import SKP failed"), str(exc))
-            return False
-        QApplication.restoreOverrideCursor()
-        # The converter (under Wine) may emit codepage bytes — never assume
-        # UTF-8 when surfacing its output.
-        detail = (result.stderr or result.stdout or b"").decode(
-            "utf-8", errors="replace").strip()[-800:]
-        if result.returncode != 0 or not work_dae.exists():
-            QMessageBox.critical(
-                self, tr("Import SKP failed"),
-                detail or tr("The converter produced no output."))
-            return False
-        dae = work_dae
-        if tmpdir is not None:
-            dae = skp.parent / work_dae.name
-            shutil.move(str(work_dae), dae)
-            tex_dir = tmpdir / ascii_stem
-            if tex_dir.is_dir():
-                target = skp.parent / ascii_stem
-                if target.exists():
-                    shutil.rmtree(target)
-                shutil.move(str(tex_dir), target)
-            shutil.rmtree(tmpdir, ignore_errors=True)
-        self._import_dae_path(dae)
-        self._import_name = skp.name
-        self._update_title()
-        return True
-
-    # URL del exe limpio (solo codigo MIT: bindea la DLL en runtime, no
-    # contiene nada de Trimble) — se publica como asset de los releases.
-    _SKP2DAE_EXE_URL = ("https://github.com/ingelibre/ingetrazo/releases/"
-                        "latest/download/skp2dae.exe")
-    #: Repo público del add-on de Blender cuyo release trae SketchUpAPI.dll.
-    _SKP_ADDON_REPO = "RedHaloStudio/Sketchup_Importer"
-
-    @staticmethod
-    def _download_bytes(url: str, timeout: int = 120) -> bytes:
-        import urllib.request
-        req = urllib.request.Request(url, headers={"User-Agent": "IngeTrazo"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.read()
-
-    @staticmethod
-    def _extract_skp_dlls(zip_bytes: bytes, dest: Path) -> list[str]:
-        """Pull the SketchUp runtime DLLs out of the add-on zip into ``dest``.
-        Returns the names extracted (empty when none found)."""
-        import io
-        import zipfile
-        wanted = ("SketchUpAPI.dll", "SketchUpCommonPreferences.dll")
-        got = []
-        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-            for entry in zf.namelist():
-                base = entry.rsplit("/", 1)[-1]
-                if base in wanted and base not in got:
-                    (dest / base).write_bytes(zf.read(entry))
-                    got.append(base)
-        return got
-
-    def _install_skp_converter(self) -> bool:
-        """One-click install of the skp2dae converter for non-technical
-        users: the MIT exe comes from OUR releases; the proprietary SketchUp
-        DLL is fetched by the USER'S machine from the Blender add-on's own
-        public release (never hosted or redistributed by us)."""
-        import json as _json
-        from PySide6.QtCore import Qt as _Qt
-        from PySide6.QtWidgets import QApplication
-        dest = Path.home() / ".local" / "share" / "skp2dae"
-        dest.mkdir(parents=True, exist_ok=True)
-        QApplication.setOverrideCursor(_Qt.WaitCursor)
-        try:
-            self.statusBar().showMessage(tr("Downloading skp2dae…"))
-            QApplication.processEvents()
-            (dest / "skp2dae.exe").write_bytes(
-                self._download_bytes(self._SKP2DAE_EXE_URL))
-
-            self.statusBar().showMessage(
-                tr("Downloading the SketchUp library (Blender add-on)…"))
-            QApplication.processEvents()
-            api = (f"https://api.github.com/repos/{self._SKP_ADDON_REPO}"
-                   "/releases/latest")
-            release = _json.loads(self._download_bytes(api).decode("utf-8"))
-            asset_url = next(
-                a["browser_download_url"] for a in release.get("assets", [])
-                if a["name"].lower().endswith(".zip"))
-            got = self._extract_skp_dlls(
-                self._download_bytes(asset_url, timeout=300), dest)
-            if "SketchUpAPI.dll" not in got:
-                raise RuntimeError(
-                    tr("The add-on zip did not contain SketchUpAPI.dll"))
-        except Exception as exc:  # noqa: BLE001
-            QApplication.restoreOverrideCursor()
-            QMessageBox.critical(self, tr("Import SKP"),
-                                 tr("Automatic install failed: {err}",
-                                    err=str(exc)))
-            return False
-        QApplication.restoreOverrideCursor()
-        import shutil as _shutil
-        import sys as _sys
-        if _sys.platform != "win32" and _shutil.which("wine") is None:
-            QMessageBox.information(
-                self, tr("Import SKP"),
-                tr("Converter installed, but Wine is missing. Install it "
-                   "with your package manager (e.g. sudo apt install wine) "
-                   "and try again."))
-            return False
-        self.statusBar().showMessage(tr("skp2dae converter installed"), 4000)
-        return True
+        # No converter behind this: IngeTrazo reads .skp with its own
+        # reader only (the external converter that loaded Trimble's DLL was
+        # removed after Trimble's copyright notice of 2026-09-28).
+        QMessageBox.warning(
+            self, tr("Import SKP"),
+            tr("IngeTrazo could not read {name} with its built-in SketchUp "
+               "reader.\n\nOpen it in SketchUp and export it as COLLADA "
+               "(.dae) or OBJ, then import that file here.", name=skp.name))
+        return False
 
     def _on_import_skp(self) -> None:
         path_str, _ = file_dialogs.getOpenFileName(
@@ -5199,11 +5007,6 @@ class MainWindow(QMainWindow):
 
     def _on_export_obj(self) -> None:
         self._export("OBJ", "obj", tr("Wavefront OBJ (*.obj)"), obj_format.save_obj)
-
-    def _on_export_skp(self) -> None:
-        """Native SketchUp export — opens directly in SketchUp 2017+."""
-        self._export("SketchUp", "skp", tr("SketchUp (*.skp)"),
-                     skp_out_format.save_skp)
 
     def _on_export_glb(self) -> None:
         """Single-file 3D export (geometry + materials + textures embedded).

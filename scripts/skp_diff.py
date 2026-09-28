@@ -1,30 +1,20 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Marco Sumari Tellez and IngeTrazo contributors.
-"""Differential validation harness for the SKP import backends.
+"""Differential validation harness for IngeTrazo's .skp reader.
 
-The most valuable thing IngeTrazo can give the pure-Python `.skp` parser effort
-(OpenSKP / a fork) is a **differential oracle**: because we already run Trimble's
-SDK through the skp2dae converter, we can produce ground-truth for any `.skp` and
-diff it against the pure parser's output — a fast feedback loop toward
-"as faithful as the Blender importer".
+Ground truth is a COLLADA file **exported from SketchUp itself** by whoever
+owns the model (File ▸ Export ▸ 3D Model ▸ .dae), placed next to the .skp
+or given with ``--dae``. The harness loads it into a headless ``Scene``,
+loads the .skp through IngeTrazo's own reader (``formats/skp.py``), and
+diffs structural fingerprints (counts, bbox, materials, groups).
 
-Clean-room boundary: the Trimble SDK is used ONLY as a black-box oracle (feed a
-file in, compare the resulting model), never decompiled. See
-``docs/openskp-collaboration.md``.
-
-For a `.skp` this tool:
-
-  1. **Ground truth** — converts with skp2dae → COLLADA → loads into a headless
-     ``Scene`` → computes a structural *fingerprint* (counts, bbox, materials,
-     groups). Runnable today.
-  2. **Candidate** — loads the same `.skp` through the pure-backend seam
-     (``formats/skp.py``). Until a backend is wired this reports "unavailable",
-     and the run still validates the skp2dae output on its own.
-  3. **Diff** — compares the two fingerprints and prints the discrepancies.
+Nothing of Trimble's runs here. (Until 2026-09-28 the ground truth came
+from running Trimble's SDK through an external converter; that path was
+removed after Trimble's copyright notice.)
 
 Usage::
 
-    python scripts/skp_diff.py path/to/model.skp [--json] [--tol 0.001]
+    python scripts/skp_diff.py path/to/model.skp [--dae model.dae] [--json] [--tol 0.001]
 
 No GL is needed — everything here is headless (``Scene`` + ``load_dae``).
 """
@@ -32,7 +22,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 from pathlib import Path
 
@@ -134,48 +123,15 @@ def compare(ground: dict, candidate: dict, tol: float = 1e-3) -> list[str]:
 
 # ---- loaders -------------------------------------------------------------------
 
-def _locate_converter():
-    """skp2dae command list (headless twin of MainWindow._find_skp_converter):
-    ``SKP2DAE_EXE`` env → ``~/.local/share/skp2dae/skp2dae.exe`` → PATH. On
-    Linux a ``.exe`` runs through Wine."""
-    import os
-    import shutil
-    cands = []
-    if os.environ.get("SKP2DAE_EXE"):
-        cands.append(Path(os.environ["SKP2DAE_EXE"]))
-    cands.append(Path.home() / ".local" / "share" / "skp2dae" / "skp2dae.exe")
-    which = shutil.which("skp2dae")
-    if which:
-        cands.append(Path(which))
-    for c in cands:
-        if not c.exists():
-            continue
-        if c.suffix.lower() == ".exe" and sys.platform != "win32":
-            wine = shutil.which("wine")
-            if wine:
-                return [wine, str(c)]
-            continue
-        return [str(c)]
-    return None
-
-
-def load_ground_truth(skp: Path):
-    """Convert ``skp`` with skp2dae and load the COLLADA into a fresh Scene."""
+def load_ground_truth(dae: Path):
+    """Load a COLLADA export made by SketchUp into a fresh Scene."""
     from core.scene import Scene
     from formats import dae as dae_format
 
-    command = _locate_converter()
-    if command is None:
+    if not dae.exists():
         raise RuntimeError(
-            "skp2dae converter not found (set SKP2DAE_EXE or install it via "
-            "IngeTrazo ▸ File ▸ Import ▸ SketchUp).")
-    dae = skp.with_suffix(".dae")
-    result = subprocess.run(command + [str(skp), str(dae)],
-                            capture_output=True, timeout=600)
-    if result.returncode != 0 or not dae.exists():
-        detail = (result.stderr or result.stdout or b"").decode(
-            "utf-8", errors="replace").strip()[-500:]
-        raise RuntimeError(f"skp2dae failed: {detail}")
+            f"No ground truth: {dae} does not exist. Export the model from "
+            "SketchUp as COLLADA (.dae) next to the .skp, or pass --dae.")
     scene = Scene()
     dae_format.load_dae(scene, dae)
     return scene
@@ -198,9 +154,11 @@ def load_candidate(skp: Path):
 # ---- CLI -----------------------------------------------------------------------
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Diff a .skp: skp2dae oracle vs "
-                                             "pure backend.")
+    ap = argparse.ArgumentParser(description="Diff a .skp: SketchUp's own "
+                                             "COLLADA export vs IngeTrazo's reader.")
     ap.add_argument("skp", type=Path, help="path to the .skp file")
+    ap.add_argument("--dae", type=Path, default=None,
+                    help="SketchUp's COLLADA export of it (default: next to the .skp)")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     ap.add_argument("--tol", type=float, default=1e-3,
                     help="bbox tolerance in metres (default 1e-3)")
@@ -210,7 +168,7 @@ def main(argv=None) -> int:
         print(f"No such file: {args.skp}", file=sys.stderr)
         return 2
 
-    ground = fingerprint(load_ground_truth(args.skp))
+    ground = fingerprint(load_ground_truth(args.dae or args.skp.with_suffix(".dae")))
     from formats import skp as skp_format
     fmt = skp_format.detect_format(args.skp)
     cand_scene = load_candidate(args.skp)
@@ -224,7 +182,7 @@ def main(argv=None) -> int:
         return 0
 
     print(f"File: {args.skp.name}   format={fmt}")
-    print("\n[ground truth — skp2dae]")
+    print("\n[ground truth — SketchUp's COLLADA export]")
     for k, v in ground.items():
         print(f"  {k}: {v}")
     if candidate is None:
@@ -232,8 +190,7 @@ def main(argv=None) -> int:
         print("\n[candidate — pure backend]")
         print("  unavailable: no pure backend supports this file yet "
               f"(wired: {wired or 'none'}).")
-        print("  This run validated the skp2dae output only. Wire OpenSKP "
-              "(formats/skp.py) to enable the diff.")
+        print("  Only the COLLADA side was loaded.")
         return 0
     print("\n[candidate — pure backend]")
     for k, v in candidate.items():

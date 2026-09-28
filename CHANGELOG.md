@@ -6,6 +6,23 @@ follow [SemVer](https://semver.org).
 
 ## [Sin publicar]
 
+### Retirado — nada de Trimble
+Tras el aviso de derechos de autor de Trimble (2026-09-28), IngeTrazo ya no
+ejecuta, descarga ni enlaza nada de Trimble:
+- **El conversor skp2dae** (usaba la `SketchUpAPI.dll` de Trimble bajo Wine)
+  y su descarga automática, que bajaba esa DLL del add-on de Blender de un
+  tercero. Los `.skp` se abren sólo con el lector libre (OpenSKP); si uno no
+  se puede leer, IngeTrazo lo dice y sugiere exportarlo desde SketchUp como
+  COLLADA u OBJ.
+- **Exportar ▸ SketchUp (.skp)**: el escritor de OpenSKP arma cada archivo
+  sobre un documento en blanco que generó el SDK de Trimble, y ese molde ya
+  no se distribuye en ningún paquete (PyInstaller, Flatpak, Snap).
+  `--check` falla un paquete que todavía lo traiga. Para llevar un modelo a
+  SketchUp, exportá COLLADA (.dae).
+- Los tests y la herramienta de validación que usaban el SDK de Trimble como
+  referencia; `scripts/skp_diff.py` ahora compara contra un `.dae` que el
+  propio SketchUp exporta.
+
 ### Corregido
 - **Rotar y Transportador enganchan el eje rojo aunque la línea de
   referencia esté a pocos grados de él** (#140, @pacaeiro). El brazo se
