@@ -67,6 +67,19 @@ def test_a_guide_pulled_from_a_guide_is_parallel_at_the_offset():
     assert abs(g.point.y() - 3.5) < 1e-6
 
 
+def test_zero_offset_from_a_guide_can_create_a_coincident_guide():
+    scene = Scene()
+    first = Guide(V(0, 1, 0), V(1, 0, 0))
+    scene.guides.append(first)
+    vp = _Vp(scene, guide=first)
+    tool = TapeMeasureTool()
+    tool.on_click(_ctx(vp, 3, 1))
+    tool.on_click(_ctx(vp, 3, 1, kind=None))
+    assert len(scene.guides) == 2
+    assert scene.guides[0] is first
+    assert abs(scene.guides[1].point.y() - 1.0) < 1e-6
+
+
 def test_a_typed_distance_places_the_guide_exactly():
     scene = Scene()
     first = Guide(V(0, 1, 0), V(1, 0, 0))

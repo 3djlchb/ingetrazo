@@ -22,6 +22,7 @@ from types import SimpleNamespace
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QVector3D
 
+from core.guide import Guide
 from core.history import History
 from core.scene import Scene
 from tools.base import ToolContext
@@ -96,6 +97,34 @@ def test_and_the_second_click_places_the_guide():
     g = scene.guides[0]
     assert g.is_line
     assert abs(g.point.y() - 2.0) < 1e-6
+
+
+def test_returning_to_the_source_edge_places_a_coincident_guide():
+    scene = Scene()
+    vp = _Vp(scene, loose=None, grouped=_pseudo_edge(V(0, 0), V(4, 0)))
+    tool = TapeMeasureTool()
+    tool.on_click(_ctx(vp, 1, 0))
+    tool.on_hover(_ctx(vp, 1, 2))
+    tool.on_hover(_ctx(vp, 1, 0))
+    assert tool.guide_preview_lines()
+    tool.on_click(_ctx(vp, 1, 0))
+    assert len(scene.guides) == 1
+    guide = scene.guides[0]
+    assert guide.is_line
+    assert abs(guide.point.y()) < 1e-6
+
+
+def test_a_coincident_existing_guide_can_be_duplicated():
+    scene = Scene()
+    existing = Guide(V(0, 0), V(1, 0))
+    scene.guides.append(existing)
+    vp = _Vp(scene, loose=None, grouped=_pseudo_edge(V(0, 0), V(4, 0)))
+    tool = TapeMeasureTool()
+    tool.on_click(_ctx(vp, 1, 0))
+    tool.on_click(_ctx(vp, 1, 0))
+    assert len(scene.guides) == 2
+    assert scene.guides[0] is existing
+    assert abs(scene.guides[1].point.y()) < 1e-6
 
 
 def test_a_loose_edge_still_works():

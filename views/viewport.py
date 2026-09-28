@@ -7222,8 +7222,10 @@ class Viewport(QOpenGLWidget):
             return None
         if w0 < eps:
             c0 = c0 + (c1 - c0) * ((eps - w0) / (w1 - w0))
+            c0.setW(eps)
         elif w1 < eps:
             c1 = c1 + (c0 - c1) * ((eps - w1) / (w0 - w1))
+            c1.setW(eps)
         (x0, y0), (x1, y1) = [
             ((c.x() / c.w() * 0.5 + 0.5) * self.width(),
              (1.0 - (c.y() / c.w() * 0.5 + 0.5)) * self.height())
