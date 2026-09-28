@@ -45,6 +45,9 @@ class RotatedRectangleTool(AxisMagnet, PlaneLock, Tool):
 
     name = "Rotated Rect"
     shortcut = "K"
+    description = (
+        "Draw a rectangle at any angle and in any plane: a base edge, "
+        "then the width.")
 
     @property
     def vcb_label(self) -> str:  # type: ignore[override]

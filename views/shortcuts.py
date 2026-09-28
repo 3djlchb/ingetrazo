@@ -31,7 +31,8 @@ _TIP = "ingetrazo_tooltip_base"
 
 
 def set_tooltip(action: QAction, base: str) -> None:
-    """A toolbar tooltip that names the action's CURRENT keys: «Line  (L)».
+    """A toolbar tooltip that names the action's CURRENT keys: «Line  (L)»,
+    and under them what the action does — its status tip, when it has one.
 
     The keys used to be written into the text once, at start-up, so a
     shortcut changed in Preferences showed in the menus (Qt reads the
@@ -49,9 +50,12 @@ def _refresh_tooltip(action: QAction) -> None:
     if base is None:
         return
     keys = action.shortcut().toString(QKeySequence.NativeText)
+    tip = f"{base}  ({keys})" if keys else base
+    if action.statusTip():
+        tip += "\n" + action.statusTip()
     # setToolTip with the same text returns early, so the changed signal
     # this emits does not loop.
-    action.setToolTip(f"{base}  ({keys})" if keys else base)
+    action.setToolTip(tip)
 
 
 def _plain(text: str) -> str:

@@ -55,6 +55,7 @@ def _plane_axes(normal: QVector3D) -> tuple[QVector3D, QVector3D]:
 class RectangleTool(PlaneLock, Tool):
     name = "Rectangle"
     shortcut = "R"
+    description = "Draw a rectangle from two opposite corners."
     vcb_label = "Dimensions"
     # Only a width AND a height mean something here, so "200,100" is two
     # values (SketchUp's list comma, #152), not the decimal 200.1.

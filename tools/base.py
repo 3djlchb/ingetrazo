@@ -331,6 +331,10 @@ class Tool(ABC):
     #: it had here for a year. It is the SAME action with two shortcuts —
     #: never a second action, which is what Qt kills (tests/test_shortcuts.py).
     shortcut_alt: str | None = None
+    #: What the tool does, in a sentence — without its name or its key,
+    #: which the tooltip and F3 already show beside it (Blender's
+    #: descriptions). English; it goes through ``tr`` where it is shown.
+    description: str | None = None
     # Drawing tools snap to geometry and show the snap markers/tooltips
     # (Endpoint, On Edge, On Face, ...). Tools that only pick existing
     # geometry (Select, Push/Pull) set this False: no snap engine, no markers.

@@ -72,6 +72,9 @@ class _Grip:
 class ScaleTool(Tool):
     name = "Scale"
     shortcut = "S"
+    description = (
+        "Resize the selection by dragging the grips of its box; the "
+        "corners keep its proportions.")
     vcb_label = "Scale"
     uses_snap = False                      # grips, not geometry, take the click
     # The VCB tags unit-suffixed entries for us ("2m" = absolute size), so a

@@ -26,6 +26,8 @@ from tools.base import Tool
 class HelloTool(Tool):
     name = "Hello"
     shortcut = None      # or "Ctrl+Shift+H" — silently dropped if taken
+    # Optional: what it does, in the status bar and the F3 search.
+    description = "Say hello in the status bar."
 
     def on_activate(self, viewport):
         viewport.flash_status("Hello from a plugin!", 3000)
@@ -141,8 +143,10 @@ def setup(app):
     app.add_panel("AI", chat, panel="ai", stretch=1)
     app.show_panel(dock)                  # to the front, shown again if hidden
 
-    # An entry in the Extensions menu (a shortcut already taken is left off).
-    app.add_menu_action("Levels…", lambda: app.show_panel(dock), "Ctrl+Shift+L")
+    # An entry in the Extensions menu (a shortcut already taken is left off;
+    # `tip` says what it does, in the status bar and in F3).
+    app.add_menu_action("Levels…", lambda: app.show_panel(dock), "Ctrl+Shift+L",
+                        tip="Show the levels of the building.")
 
     # Drawn with a QPainter over every frame, whatever the active tool;
     # world points (metres) to pixels, thousands at a time:

@@ -4,6 +4,18 @@ All notable changes to IngeTrazo are documented here.
 Format inspired by [Keep a Changelog](https://keepachangelog.com); versions
 follow [SemVer](https://semver.org).
 
+## [Sin publicar]
+
+### Añadido
+- **Cada comando dice qué hace**, como las descripciones de Blender: una
+  frase breve en el recuadro del buscador F3, en la barra de estado al
+  pasar por un menú y bajo el nombre y el atajo en el globo de los botones
+  de las barras de herramientas. Cubre los comandos de la ventana
+  principal, los del compositor de láminas y los complementos incluidos
+  (un complemento propio puede dar la suya con `description` o con
+  `tip=` en `add_menu_action`), en español, inglés, portugués, chino e
+  italiano.
+
 ## [0.5.6] — 2026-09-29
 
 **Render con Blender, una pestaña para la IA y los aportes de la comunidad.**

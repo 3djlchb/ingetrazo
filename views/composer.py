@@ -2670,8 +2670,10 @@ class _SheetItem(QGraphicsItem):
         n_sel = len(self.composer._selected_sheet_items())
         arrange_slots: dict = {}
         from views.icons import tool_icon
-        for icon, label, slot in self.composer._arrange_entries()[:8]:
+        arrange.setToolTipsVisible(True)
+        for icon, label, tip, slot in self.composer._arrange_entries()[:8]:
             act = arrange.addAction(tool_icon(icon), label)
+            act.setToolTip(tip)
             act.setEnabled(n_sel >= (3 if label.startswith(tr("Distribute"))
                                      else 2))
             arrange_slots[act] = slot
@@ -5535,10 +5537,12 @@ class ComposerWindow(QMainWindow):
         from PySide6.QtWidgets import QToolBar
         from views.icons import tool_icon
         tb = QToolBar(tr("Composer tools"), self)
+        tb.toggleViewAction().setStatusTip(tr("Show or hide this toolbar."))
         tb.setObjectName("composer_tools")
         tb.setOrientation(Qt.Vertical)
         tb.setIconSize(QSize(toolbar_icon_px(), toolbar_icon_px()))
         draw = QToolBar(tr("Draw"), self)
+        draw.toggleViewAction().setStatusTip(tr("Show or hide this toolbar."))
         draw.setObjectName("composer_draw")
         draw.setIconSize(QSize(toolbar_icon_px(), toolbar_icon_px()))
         group = QActionGroup(self)
@@ -6255,6 +6259,7 @@ class ComposerWindow(QMainWindow):
         from PySide6.QtWidgets import QToolBar
         from views.icons import tool_icon
         tb = QToolBar(tr("Sheet"), self)
+        tb.toggleViewAction().setStatusTip(tr("Show or hide this toolbar."))
         tb.setObjectName("sheet_toolbar")
         tb.setToolButtonStyle(Qt.ToolButtonIconOnly)   # icons, like the tools
         tb.setIconSize(QSize(toolbar_icon_px(), toolbar_icon_px()))
@@ -8970,26 +8975,57 @@ class ComposerWindow(QMainWindow):
             tr("{n} item(s) pasted.", n=len(pasted)), 3000)
 
     def _arrange_entries(self) -> list:
-        """(icon key, label, slot) of the Arrange commands — the toolbar and
-        the items' right-click menu share them. Align needs two selected
-        items, distribute three; group / lock / duplicate have keys."""
+        """(icon key, label, what it does, slot) of the Arrange commands —
+        the toolbar and the items' right-click menu share them. Align needs
+        two selected items, distribute three; group / lock / duplicate have
+        keys."""
         return [
-            ("arr_left", tr("Align left"), lambda: self.align_selected("left")),
-            ("arr_right", tr("Align right"), lambda: self.align_selected("right")),
-            ("arr_top", tr("Align top"), lambda: self.align_selected("top")),
-            ("arr_bottom", tr("Align bottom"), lambda: self.align_selected("bottom")),
+            ("arr_left", tr("Align left"),
+             tr("Line up the left edges of the selected items with the "
+                "leftmost one."),
+             lambda: self.align_selected("left")),
+            ("arr_right", tr("Align right"),
+             tr("Line up the right edges of the selected items with the "
+                "rightmost one."),
+             lambda: self.align_selected("right")),
+            ("arr_top", tr("Align top"),
+             tr("Line up the top edges of the selected items with the "
+                "highest one."),
+             lambda: self.align_selected("top")),
+            ("arr_bottom", tr("Align bottom"),
+             tr("Line up the bottom edges of the selected items with the "
+                "lowest one."),
+             lambda: self.align_selected("bottom")),
             ("arr_hcenter", tr("Center horizontally"),
+             tr("Line up the centres of the selected items on one vertical "
+                "line, in the middle of the selection."),
              lambda: self.align_selected("hcenter")),
             ("arr_vcenter", tr("Center vertically"),
+             tr("Line up the centres of the selected items on one "
+                "horizontal line, in the middle of the selection."),
              lambda: self.align_selected("vcenter")),
             ("arr_dist_h", tr("Distribute horizontally"),
+             tr("Space three or more selected items evenly from left to "
+                "right."),
              lambda: self.distribute_selected("x")),
             ("arr_dist_v", tr("Distribute vertically"),
+             tr("Space three or more selected items evenly from top to "
+                "bottom."),
              lambda: self.distribute_selected("y")),
-            ("arr_duplicate", tr("Duplicate (Ctrl+D)"), self.duplicate_selected),
-            ("arr_group", tr("Group (Ctrl+G)"), self.group_selected),
-            ("arr_ungroup", tr("Ungroup (Ctrl+Shift+G)"), self.ungroup_selected),
-            ("arr_lock", tr("Lock / unlock (Ctrl+L)"), self.lock_selected)]
+            ("arr_duplicate", tr("Duplicate (Ctrl+D)"),
+             tr("Place a copy of the selected items a little below and to "
+                "the right."),
+             self.duplicate_selected),
+            ("arr_group", tr("Group (Ctrl+G)"),
+             tr("Join the selected items into a group that moves as one."),
+             self.group_selected),
+            ("arr_ungroup", tr("Ungroup (Ctrl+Shift+G)"),
+             tr("Break the selected group back into its items."),
+             self.ungroup_selected),
+            ("arr_lock", tr("Lock / unlock (Ctrl+L)"),
+             tr("Lock the selected items so they cannot be moved by "
+                "accident; when they all are locked, unlock them."),
+             self.lock_selected)]
 
     def _build_arrange_toolbar(self) -> None:
         """The Arrange toolbar: shown by default since 2026-09-14 (Marco kept
@@ -9001,13 +9037,15 @@ class ComposerWindow(QMainWindow):
         from PySide6.QtGui import QAction
         from PySide6.QtWidgets import QToolBar
         tb = QToolBar(tr("Arrange"), self)
+        tb.toggleViewAction().setStatusTip(tr("Show or hide this toolbar."))
         tb.setObjectName("arrange_toolbar")
         tb.setIconSize(QSize(toolbar_icon_px(), toolbar_icon_px()))
         from views.icons import tool_icon
-        for icon, label, slot in self._arrange_entries():
+        for icon, label, tip, slot in self._arrange_entries():
             act = QAction(tool_icon(icon), label, self)
             act.setProperty("icon_key", icon)
-            act.setToolTip(label)
+            act.setToolTip(f"{label}\n{tip}")
+            act.setStatusTip(tip)
             act.triggered.connect(lambda _c, s=slot: s())
             tb.addAction(act)
         self.addToolBar(Qt.TopToolBarArea, tb)
@@ -12273,6 +12311,9 @@ class ComposerWindow(QMainWindow):
         self.addAction(act)
         self._act_sidebar = act
         clean = QAction(tr("Clean screen"), self)
+        clean.setStatusTip(tr(
+            "Fold away every toolbar, panel and bar so only the sheet "
+            "shows; once more brings them all back."))
         clean.setShortcut(QKeySequence("Ctrl+0"))
         clean.setCheckable(True)
         clean.toggled.connect(self._toggle_clean_screen)
