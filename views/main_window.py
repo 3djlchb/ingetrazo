@@ -84,6 +84,29 @@ from views.viewport import Viewport
 IGZ_FILE_FILTER = "IngeTrazo document (*.igz);;All files (*)"
 
 
+def _repeatable(label: str):
+    """Mark a one-shot command as the one Repeat (Shift+R) replays.
+
+    Blender's Shift+R: after Reverse Faces on one face, select the next and
+    repeat. Recorded on the SLOT, not on a
+    QAction, because the right-click menu builds its actions afresh each
+    time — a remembered context-menu QAction would be a dead object by the
+    next repeat. Arguments the command takes (Intersect's mode) are kept;
+    the ``checked`` flag Qt may append to a menu's ``triggered`` is not."""
+    import functools
+    import inspect
+
+    def deco(fn):
+        takes = len(inspect.signature(fn).parameters) - 1    # minus self
+
+        @functools.wraps(fn)
+        def wrapper(self, *args):
+            args = args[:takes]
+            self._remember_command(label, lambda: fn(self, *args))
+            return fn(self, *args)
+        return wrapper
+    return deco
+
 
 def _obj_parts(temp):
     """The container a multi-part OBJ imported as, its pieces' facet seams
@@ -735,6 +758,19 @@ class MainWindow(QMainWindow):
         )
         self._redo_action.triggered.connect(self._on_redo)
         edit_menu.addAction(self._redo_action)
+
+        # Blender's Shift+R (R alone is the Rectangle), and the first entry
+        # of the right-click menu. Not Enter, not Space: Space is SketchUp's
+        # Select, and a habit-pressed key that repeats could bring back the
+        # Eraser or run Explode on whatever happens to be selected.
+        self._repeat_action = QAction(tr("Repeat last command"), self)
+        # Its text names what it would repeat, so the shortcut editor (#138)
+        # needs a key that does not change with it.
+        self._repeat_action.setObjectName("repeat_last_command")
+        self._repeat_action.setShortcut(QKeySequence("Shift+R"))
+        self._repeat_action.setEnabled(False)
+        self._repeat_action.triggered.connect(self.repeat_last_command)
+        edit_menu.addAction(self._repeat_action)
         # On the Main toolbar right after the pointer, as SketchUp has them
         # (Marco, 23-09). The SAME actions as the Edit menu: a second QAction
         # with Ctrl+Z would make the shortcut ambiguous, and an ambiguous
@@ -1520,7 +1556,9 @@ class MainWindow(QMainWindow):
         Plugin tools are one-shot (they open a dialog and return): the
         viewport's active tool is left untouched, so the status bar keeps
         telling the truth about which drawing tool is current."""
-        self._tools[key].on_activate(self.viewport)
+        tool = self._tools[key]
+        self._remember_command(tool.name, lambda: tool.on_activate(self.viewport))
+        tool.on_activate(self.viewport)
 
     def _on_gl_ready(self, info: dict) -> None:
         """A viewport drawn on the CPU is the usual reason a Windows machine
@@ -1701,6 +1739,15 @@ class MainWindow(QMainWindow):
         theme_style(self._coord_label, "color:{muted}; padding:0 8px;")
         bar.addPermanentWidget(self._coord_label)
 
+        # What Repeat would run, on the right while Select is up — the VCB
+        # box is hidden then, so the corner is free. It cannot ride on the
+        # Select hint: in Spanish that line would pass the 112-character
+        # cap and lose its end (test_status_hints_fit).
+        self._repeat_label = QLabel("")
+        theme_style(self._repeat_label, "color:{muted}; padding:0 8px;")
+        self._repeat_label.hide()
+        bar.addPermanentWidget(self._repeat_label)
+
         # SketchUp-style Measurements box (VCB), pinned bottom-right: a caption
         # ("Length" / "Dimensions" / "Distance") plus a boxed field showing the
         # live measurement, or what you're typing (highlighted while typing).
@@ -1778,6 +1825,7 @@ class MainWindow(QMainWindow):
             name = tr(tool.name)
         else:
             name = ""
+        self._refresh_repeat_hint()
         if name and text:
             text = f"{name} — {text}"
         elif name:
@@ -1843,6 +1891,54 @@ class MainWindow(QMainWindow):
         self._tool_label.setText(tr("Tool: {name}", name=tr(tool.name)))
         self._refresh_vcb()
         self._update_status_hint()
+        # Select is where Repeat is pressed FROM, and the two tools entered
+        # from a right-click need the face or group that click was on.
+        if key not in ("select", "texture_position", "change_axes"):
+            self._remember_command(tool.name,
+                                   lambda k=key: self._activate_tool(k))
+
+    # ---- Repeat last command (Blender Shift+R, right-click ▸ Repeat) -------
+    def _remember_command(self, label: str, run) -> None:
+        self._last_command = (label, run)
+        act = getattr(self, "_repeat_action", None)
+        if act is not None:
+            act.setText(tr("Repeat {name}", name=tr(label)))
+            act.setEnabled(True)
+        self._refresh_repeat_hint()
+
+    def _refresh_repeat_hint(self) -> None:
+        """Say what Repeat would run, before it runs — with the keys it has
+        NOW: the shortcut editor (#138) may have moved or cleared them."""
+        lab = getattr(self, "_repeat_label", None)
+        if lab is None:
+            return
+        last = getattr(self, "_last_command", None)
+        show = (last is not None
+                and self.viewport.active_tool is self._tools["select"])
+        if show:
+            keys = self._repeat_action.shortcut().toString(
+                QKeySequence.NativeText)
+            text = (tr("{keys}: repeat {name}", keys=keys, name=tr(last[0]))
+                    if keys else tr("Repeat {name}", name=tr(last[0])))
+            if lab.text() != text:
+                lab.setText(text)
+        lab.setVisible(show)
+
+    def repeat_last_command(self) -> bool:
+        """Run again the last tool picked or one-shot command applied.
+
+        A tool comes back as if its key were pressed; a command runs on the
+        CURRENT selection — the point of it: reverse this face, select the
+        next, repeat."""
+        last = getattr(self, "_last_command", None)
+        if last is None:
+            self.viewport.flash_status(tr("Nothing to repeat yet"), 3000)
+            return False
+        label, run = last
+        run()
+        self.viewport.flash_status(tr("Repeat: {name}", name=tr(label)), 2000)
+        self.viewport.update()
+        return True
 
     def _activate_nav(self, key: str) -> None:
         self.viewport.set_nav_mode(key)
@@ -1854,6 +1950,7 @@ class MainWindow(QMainWindow):
         self._refresh_vcb()
         self._update_status_hint()
 
+    @_repeatable("Make Group")
     def _on_make_group(self) -> None:
         """SketchUp's Make Group (G) over the selection.
 
@@ -1904,6 +2001,7 @@ class MainWindow(QMainWindow):
         self.viewport.history.execute(MakeGroupCommand(faces, edges))
         self.viewport.update()
 
+    @_repeatable("Make Component")
     def _on_make_component(self) -> None:
         """SketchUp's Make Component (G): the selection becomes a shared
         DEFINITION placed as an instance — every copy shares it."""
@@ -1975,6 +2073,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(tr(
             "Component created — copies will share its definition"), 4000)
 
+    @_repeatable("Make Unique")
     def _on_make_unique(self) -> None:
         from core.history import MakeUniqueCommand
         for g in [g for g in self.viewport.scene.selection
@@ -1982,6 +2081,7 @@ class MainWindow(QMainWindow):
             self.viewport.history.execute(MakeUniqueCommand(g))
         self.viewport.update()
 
+    @_repeatable("Merge Groups")
     def _on_merge_groups(self) -> None:
         from core.history import MergeGroupsCommand
         groups = [e for e in self.viewport.scene.selection
@@ -2009,6 +2109,7 @@ class MainWindow(QMainWindow):
                             (WITH_CONTEXT, tr("With Context"))):
             menu.addAction(label, lambda m=mode: self._on_intersect_faces(m))
 
+    @_repeatable("Intersect Faces")
     def _on_intersect_faces(self, mode: str) -> None:
         """SketchUp's Intersect Faces: edges wherever the selection's faces
         cross the others (core/intersect.py), added to the context being
@@ -2028,6 +2129,7 @@ class MainWindow(QMainWindow):
         self.viewport.flash_status(
             tr("{n} intersection edges added", n=len(segs)), 3000)
 
+    @_repeatable("Split into Pieces")
     def _on_split_into_pieces(self) -> None:
         """Regroup the selected group's contents by physical piece — the
         solids that do not touch (see :mod:`core.pieces`). The group stays
@@ -2062,6 +2164,7 @@ class MainWindow(QMainWindow):
             n=len(pieces)), 5000)
         self.viewport.update()
 
+    @_repeatable("Explode Group")
     def _on_explode_group(self) -> None:
         if self.viewport.scene.edit_group is not None:
             self.viewport.flash_status(tr(
@@ -2074,6 +2177,7 @@ class MainWindow(QMainWindow):
         if groups:
             self.viewport.update()
 
+    @_repeatable("Convert Path to Geometry")
     def _on_convert_geopath(self) -> None:
         """Bake selected georef paths into real mesh geometry (Track G bridge).
 
@@ -2260,6 +2364,7 @@ class MainWindow(QMainWindow):
         if panel is not None:
             panel.refresh()
 
+    @_repeatable("Delete Guides")
     def _on_delete_guides(self) -> None:
         """Remove every construction guide (SketchUp's Edit ▸ Delete Guides)."""
         from core.history import DeleteGuidesCommand
@@ -2367,6 +2472,13 @@ class MainWindow(QMainWindow):
         lone_group = (len(sel) == 1 and has_group)
         sec_planes = [e for e in sel if isinstance(e, SectionPlane)]
         menu = QMenu(self)
+
+        # AutoCAD's first right-click entry: where a mouse-only hand looks.
+        last = getattr(self, "_last_command", None)
+        if last is not None:
+            menu.addAction(tr("Repeat {name}", name=tr(last[0])),
+                           self.repeat_last_command)
+            menu.addSeparator()
 
         if locked_image is not None and locked_image not in sel:
             name = getattr(locked_image, "name", "") or tr("image")
@@ -2695,6 +2807,7 @@ class MainWindow(QMainWindow):
         return [e for e in entities
                 if isinstance(e, (Edge, Face, Group)) and not _is_hidden(e)]
 
+    @_repeatable("Hide")
     def _on_hide(self) -> None:
         """SketchUp's Edit ▸ Hide: the selected objects (groups,
         components), faces and edges stop drawing, picking and exporting —
@@ -2791,6 +2904,7 @@ class MainWindow(QMainWindow):
             panel.refresh()
         self.viewport.update()
 
+    @_repeatable("Divide")
     def _on_divide(self) -> None:
         """Divide the selected edges / curves into N equal pieces (#63)."""
         from PySide6.QtWidgets import QInputDialog
@@ -2814,6 +2928,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             tr("Divided into {n} segments", n=n), 3000)
 
+    @_repeatable("Reverse Faces")
     def _on_reverse_faces(self) -> None:
         """SketchUp's Reverse Faces: flip the winding (and thus the front/back
         sides) of the selected faces."""
@@ -2830,6 +2945,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             tr("Reversed {n} face(s).", n=len(faces)), 3000)
 
+    @_repeatable("Orient Faces")
     def _on_orient_faces(self) -> None:
         """SketchUp's Orient Faces (issue #77): every face connected to the
         chosen one turns to wind like it — its front side is the one the
@@ -2851,6 +2967,7 @@ class MainWindow(QMainWindow):
             tr("Oriented {n} face(s) like the selected one.", n=len(flip))
             if flip else tr("The connected faces already match."), 3000)
 
+    @_repeatable("Heal Overlapping Faces")
     def _on_heal_overlaps(self) -> None:
         cmd = HealOverlapsCommand()
         self.viewport.history.execute(cmd)
@@ -2859,6 +2976,7 @@ class MainWindow(QMainWindow):
             tr("Healed {n} overlapping face(s).", n=cmd.healed) if cmd.healed
             else tr("No overlapping faces found."), 3000)
 
+    @_repeatable("Rebuild Faces (Planar)")
     def _on_rebuild_planar(self) -> None:
         # With faces selected, rebuild just THEIR plane — the per-plane
         # rebuild every stroke already runs — so a 3D model keeps the tool
@@ -3884,6 +4002,7 @@ class MainWindow(QMainWindow):
             italic_check.isChecked(), height_spin.value(),
             depth_spin.value())
 
+    @_repeatable("3D Text")
     def _on_insert_3d_text(self) -> None:
         """SketchUp's 3D Text: the dialog generates REAL extruded geometry —
         a container group with ONE GROUP PER LETTER, editable later from
