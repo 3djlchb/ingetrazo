@@ -615,9 +615,9 @@ class ArcTool(AxisMagnet, PlaneLock, Tool):
             reach.append((e.v0.position - e.v1.position).length())
         if reach and d > min(reach) + 1e-6:
             viewport.flash_status(tr(
-                "Radius {r} m needs {d} m of edge on each side of the "
-                "corner; the shorter one is {e} m",
-                r=f"{radius:.2f}", d=f"{d:.2f}", e=f"{min(reach):.2f}"))
+                "Radius {r} needs {d} of edge on each side of the "
+                "corner; the shorter one is {e}",
+                r=fmt_len(radius), d=fmt_len(d), e=fmt_len(min(reach))))
             return True
         self.start_point = V + ua * d
         self.end_point = V + ub * d
@@ -648,8 +648,8 @@ class ArcTool(AxisMagnet, PlaneLock, Tool):
             return False
         if radius < half - 1e-9:
             viewport.flash_status(tr(
-                "Radius {r} m is smaller than half the chord ({h} m)",
-                r=f"{radius:.2f}", h=f"{half:.2f}"))
+                "Radius {r} is smaller than half the chord ({h})",
+                r=fmt_len(radius), h=fmt_len(half)))
             return True
         radius = max(radius, half)
         h = radius - math.sqrt(max(radius * radius - half * half, 0.0))

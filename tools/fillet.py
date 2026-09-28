@@ -15,6 +15,7 @@ from __future__ import annotations
 from PySide6.QtGui import QVector3D
 
 from core.fillet import apply_fillet, plan_fillet
+from core.units import fmt_len_fine
 from core.i18n import tr
 from core.mesh import Edge
 from tools.base import Tool, ToolContext
@@ -163,8 +164,8 @@ class FilletTool(Tool):
         if self.edges:
             self._commit(viewport)
         else:
-            viewport.flash_status(tr("Radius {r} m — click an edge.",
-                                     r=f"{value:.3f}"), 3000)
+            viewport.flash_status(tr("Radius {r} — click an edge.",
+                                     r=fmt_len_fine(value)), 3000)
             self._replan()
             viewport.update()
         return True
@@ -231,8 +232,8 @@ class FilletTool(Tool):
         set_hover = getattr(viewport, "set_hover", None)
         if set_hover is not None:
             set_hover(None)
-        viewport.flash_status(tr("Rounded {n} edge(s), radius {r} m.",
-                                 n=n, r=f"{r:.3f}"), 3000)
+        viewport.flash_status(tr("Rounded {n} edge(s), radius {r}.",
+                                 n=n, r=fmt_len_fine(r)), 3000)
         viewport.update()
 
     # ---- Preview --------------------------------------------------------------
@@ -258,4 +259,5 @@ class FilletTool(Tool):
         mid = (e.a + e.b) * 0.5
         if self._message:
             return (self._message, mid)
-        return (f"R {FilletTool.radius:.3f} m  ({FilletTool.segments} seg)", mid)
+        return ("R " + fmt_len_fine(FilletTool.radius) + "  ("
+                + tr("{n} segments", n=FilletTool.segments) + ")", mid)

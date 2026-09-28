@@ -46,6 +46,7 @@ from array import array
 from pathlib import Path
 from typing import Optional
 from core.units import fmt_len as _fmt_len
+from core.units import typed_value_text as _typed_value_text
 
 # Perf telemetry (INGETRAZO_PERF=1): every operation slower than 50 ms and a
 # once-per-second frame summary land in ~/ingetrazo-perf.log — the tool for
@@ -6783,7 +6784,7 @@ class Viewport(QOpenGLWidget):
         if pixel is None:
             return
         if self._value_buffer:
-            text = f"{self._value_buffer} m"
+            text = _typed_value_text(self._value_buffer)
             fg = QColor("#0F141B")
             shadow = QColor(255, 220, 130, 235)  # warm tint while typing
         else:
