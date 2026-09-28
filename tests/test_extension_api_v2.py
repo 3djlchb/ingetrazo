@@ -44,6 +44,14 @@ def win(tmp_path, monkeypatch):
     factory = lambda *a: QSettings(str(path), QSettings.IniFormat)  # noqa: E731
     monkeypatch.setattr(qc, "QSettings", factory)
     monkeypatch.setattr(mw, "QSettings", factory, raising=False)
+    # Isolate the user plugin folder too (test_extension_api.py's own
+    # pattern) — on a machine with a user extension installed,
+    # MainWindow() would discover and load it, and
+    # test_panels_have_stable_names_a_menu_entry_and_are_added_once would
+    # see its panel among the window's own and fail.
+    import core.extensions as extensions
+    monkeypatch.setattr(extensions, "user_plugins_dir",
+                        lambda: tmp_path / "plugins")
     from views.main_window import MainWindow
     w = MainWindow()
     w.resize(1400, 900)
@@ -175,6 +183,27 @@ def test_an_extension_opens_its_own_file_type(win):
     assert ".xyz" in win.file_openers
     assert win.open_path(Path("/tmp/job.XYZ"))
     assert opened == [Path("/tmp/job.XYZ")]
+
+
+@pytest.mark.parametrize("suffix", [".igz", ".dae", ".skp", ".dxf", ".dwg",
+                                    ".obj", ".stl", ".glb"])
+def test_a_core_suffix_cannot_be_claimed(win, caplog, suffix):
+    _app_for(win).add_file_opener(suffix, lambda p: True)
+    assert suffix not in win.file_openers
+    assert any("core format" in r.message for r in caplog.records)
+
+
+def test_a_suffix_already_claimed_is_refused_not_overwritten(win, caplog):
+    app = _app_for(win, key="first")
+    first_opened = []
+    app.add_file_opener(".xyz", lambda p: first_opened.append(p) or True)
+    second_opened = []
+    _app_for(win, key="second").add_file_opener(
+        ".xyz", lambda p: second_opened.append(p) or True)
+    assert win.open_path(Path("/tmp/job.xyz"))
+    assert first_opened == [Path("/tmp/job.xyz")]
+    assert second_opened == []
+    assert any("already taken" in r.message for r in caplog.records)
 
 
 def test_the_launcher_hands_an_extension_file_to_the_window():

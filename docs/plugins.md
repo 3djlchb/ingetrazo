@@ -157,6 +157,11 @@ that is not JSON-safe is dropped on save rather than failing it.
 
 ### A document type of its own, and workspaces (API 2)
 
+**Provisional while IngeTrazo is 0.x:** this protocol (`add_file_opener`,
+`enter_workspace`/`leave_workspace`, the `workspace` object's shape) may
+still change in a later 0.x release without a major-version bump. Pin to
+a specific IngeTrazo version if you rely on it.
+
 A bigger extension may have documents of its own — a CAM job, say, with
 its drawing on the stock and its operations:
 
@@ -169,7 +174,9 @@ def setup(app):
     # Files ending in .xyz are this extension's: opened from Open Recent,
     # the command line or a double-click, they go to open_job(path) (True
     # when it opened). The file dialog stays IngeTrazo's own; offer an
-    # «Open…» in the extension's panel.
+    # «Open…» in the extension's panel. A core suffix (.igz, .dae, .skp,
+    # .dxf, .dwg, .obj, .stl, .glb), or one another extension already
+    # claimed, is refused — logged, not raised.
     app.add_file_opener(".xyz", open_job)
 ```
 

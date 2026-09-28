@@ -31,13 +31,26 @@ opening an extension's own file type, and workspaces.
   user put them.
 - **File openers** take a suffix for the extension: a document of that
   type opened from Open Recent, the command line or a double-click goes to
-  the extension, never to the .igz reader.
+  the extension, never to the .igz reader. A core suffix, or one another
+  extension already claimed, is refused (logged, not raised).
 - A **workspace** shows the extension's own document instead of the model,
   which waits untouched ("parked") until the workspace is left.
 """
 from __future__ import annotations
 
+import logging
+
+log = logging.getLogger("ingetrazo.plugins")
+
 API_VERSION = 2
+
+#: Suffixes the core itself reads (natively, or as an import): an extension
+#: claiming one would never actually see it, since ``open_path`` consults
+#: ``file_openers`` first — it's the extension's own opener that would
+#: silently steal Open Recent / CLI / double-click from the core reader.
+CORE_FILE_SUFFIXES = frozenset({
+    ".igz", ".dae", ".skp", ".dxf", ".dwg", ".obj", ".stl", ".glb",
+})
 
 
 class ExtensionApp:
@@ -141,11 +154,28 @@ class ExtensionApp:
         """Documents ending in ``suffix`` (``".xyz"``) are the extension's:
         opened from Open Recent, the command line or a double-click (once
         the system associates the type with IngeTrazo), they go to
-        ``fn(path)``, which returns True when it opened the document."""
+        ``fn(path)``, which returns True when it opened the document.
+
+        Refused, with a warning logged, for one of the core's own suffixes
+        (:data:`CORE_FILE_SUFFIXES` — ``.igz``, ``.dae``, ``.skp``, ``.dxf``,
+        ``.dwg``, ``.obj``, ``.stl``, ``.glb``) or one an earlier extension
+        already claimed: :meth:`views.main_window.MainWindow.open_path`
+        consults ``file_openers`` before anything else, so a claim that
+        went through would silently steal that suffix from its rightful
+        reader instead of just failing to be read itself."""
         suffix = suffix.lower()
         if not suffix.startswith("."):
             suffix = "." + suffix
-        self._window.file_openers[suffix] = fn
+        if suffix in CORE_FILE_SUFFIXES:
+            log.warning("extension %r may not claim %r: a core format",
+                        self.key, suffix)
+            return
+        openers = self._window.file_openers
+        if suffix in openers:
+            log.warning("extension %r's claim on %r ignored: already "
+                        "taken", self.key, suffix)
+            return
+        openers[suffix] = fn
 
     def enter_workspace(self, workspace) -> bool:
         """Show the extension's own document instead of the model, which is
