@@ -202,6 +202,42 @@ class OrbitCamera:
             math.radians(-89.0),
         )
 
+    def orbit_about(self, pivot: QVector3D, dx_pixels: float,
+                    dy_pixels: float, viewport_h: int) -> None:
+        """:meth:`orbit` around ``pivot`` instead of the target (#164).
+
+        Same drag convention and the same yaw/pitch change, but the whole
+        camera (eye AND target) turns rigidly about ``pivot``: the model
+        point the gesture started on stays where it was on screen, instead
+        of the view swinging around the target -- which, on a model far
+        from the origin, was a point nowhere near what you were looking at.
+        The yaw turn is about the world vertical through the pivot, the
+        pitch turn about the view's horizontal axis, so the horizon stays
+        level (no roll) and the distance to the target never changes.
+        """
+        from PySide6.QtGui import QQuaternion
+
+        old_yaw, old_pitch = self.yaw, self.pitch
+        self.orbit(dx_pixels, dy_pixels, viewport_h)     # the angles, clamped
+        d_yaw = self.yaw - old_yaw
+        d_pitch = self.pitch - old_pitch
+        if abs(d_yaw) < 1e-12 and abs(d_pitch) < 1e-12:
+            return
+        z = QVector3D(0.0, 0.0, 1.0)
+        rot_yaw = QQuaternion.fromAxisAndAngle(z, math.degrees(d_yaw))
+        # the eye's direction from the target after the yaw turn; raising
+        # its elevation is a turn about (offset x Z), right-handed
+        cp = math.cos(old_pitch)
+        offset = QVector3D(cp * math.cos(self.yaw), cp * math.sin(self.yaw),
+                           math.sin(old_pitch))
+        axis = QVector3D.crossProduct(offset, z)
+        if axis.length() < 1e-9:
+            rot = rot_yaw
+        else:
+            rot = QQuaternion.fromAxisAndAngle(
+                axis.normalized(), math.degrees(d_pitch)) * rot_yaw
+        self.target = pivot + rot.rotatedVector(self.target - pivot)
+
     def pan(self, dx_pixels: float, dy_pixels: float, viewport_h: int) -> None:
         cp = math.cos(self.pitch)
         sp = math.sin(self.pitch)

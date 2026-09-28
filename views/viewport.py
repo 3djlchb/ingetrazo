@@ -239,6 +239,26 @@ SHADER_DIR = app_root() / "resources" / "shaders"
 _LOOSE_SNAP_CAP = 3000
 
 
+def _ray_aabb_span(o, d, lo, hi):
+    """``(t_in, t_out)`` of the forward ray (t >= 0) through the AABB, or
+    ``None`` if it misses. Plain floats."""
+    tmin, tmax = 0.0, float("inf")
+    for i in range(3):
+        di = d[i]
+        if -1e-12 < di < 1e-12:
+            if o[i] < lo[i] - 1e-9 or o[i] > hi[i] + 1e-9:
+                return None
+            continue
+        t1 = (lo[i] - o[i]) / di
+        t2 = (hi[i] - o[i]) / di
+        if t1 > t2:
+            t1, t2 = t2, t1
+        tmin, tmax = max(tmin, t1), min(tmax, t2)
+        if tmin > tmax:
+            return None
+    return tmin, tmax
+
+
 def _ray_aabb(o, d, lo, hi) -> bool:
     """Slab test: does the forward ray (t >= 0) touch the AABB? Plain
     floats — the pick prefilter tests ~tens of chunk boxes per ray."""
@@ -993,6 +1013,8 @@ class Viewport(QOpenGLWidget):
         # Camera navigation state (middle button)
         self._last_pos = None
         self._pan_mode = False
+        #: where the current orbit gesture turns (#164); None = the target
+        self._orbit_pivot = None
         # A mouse-look drag for a tool with ``on_look`` (First Person):
         # (button, last local point) while a button is held, else None.
         self._look_drag = None
@@ -9976,6 +9998,7 @@ class Viewport(QOpenGLWidget):
         # any camera drag it was in the middle of.
         self.nav_mode = None
         self._last_pos = None
+        self._orbit_pivot = None
         self._pan_mode = False
         self._look_drag = None
         self.unsetCursor()
@@ -10368,9 +10391,45 @@ class Viewport(QOpenGLWidget):
             return False          # the container and what lives inside it
         return self._owner_of(group) is not ctx
 
+    def _orbit_pivot_at(self, x: float, y: float):
+        """Where an orbit gesture that starts at pixel ``(x, y)`` turns (#164).
+
+        1. The model point under the cursor -- the nearest face the pick
+           ray hits (loose geometry and groups alike);
+        2. else, with the cursor on sky or ground, the middle of the
+           stretch of the view's central ray that crosses the model's
+           bounding box -- the middle of what is on screen;
+        3. else the camera target (an empty scene, a model off screen).
+        Worked out once per gesture: the pivot stays put while dragging.
+        """
+        origin, direction = self._pixel_to_ray(x, y)
+        if origin is not None and direction is not None:
+            try:
+                idx = self._pick_index()
+                if idx.entities:
+                    import numpy as np
+                    face_t = self._hover_face_t(idx, origin, direction)
+                    if face_t is not None and len(face_t):
+                        t = float(np.min(face_t))
+                        if math.isfinite(t) and t > 0.0:
+                            return origin + direction * t
+            except Exception:                  # noqa: BLE001 - fall back
+                pass
+        lo, hi = self.scene.bounds()
+        if lo is not None:
+            o, d = self._pixel_to_ray(self.width() / 2.0, self.height() / 2.0)
+            if o is not None and d is not None:
+                span = _ray_aabb_span(
+                    (o.x(), o.y(), o.z()), (d.x(), d.y(), d.z()),
+                    (lo.x(), lo.y(), lo.z()), (hi.x(), hi.y(), hi.z()))
+                if span is not None:
+                    return o + d * ((span[0] + span[1]) * 0.5)
+        return QVector3D(self.camera.target)
+
     def _end_camera_drag(self) -> None:
         """Forget a camera drag in progress (orbit, pan or zoom by drag)."""
         self._last_pos = None
+        self._orbit_pivot = None
         self._pan_mode = False
         if self.nav_mode is not None:
             self._apply_nav_cursor()
@@ -10392,6 +10451,7 @@ class Viewport(QOpenGLWidget):
         self.last_snap = None
         self.nav_mode = mode
         self._last_pos = None             # a drag in progress ends here
+        self._orbit_pivot = None
         self._pan_mode = False
         if mode is not None:
             self._apply_nav_cursor()      # orbit / pan / magnifier icons
@@ -10454,6 +10514,8 @@ class Viewport(QOpenGLWidget):
         if ev.button() == Qt.MiddleButton:
             self._last_pos = ev.position().toPoint()
             self._pan_mode = bool(ev.modifiers() & Qt.ShiftModifier)
+            self._orbit_pivot = self._orbit_pivot_at(
+                ev.position().x(), ev.position().y())
             # SketchUp: while the wheel-drag lasts, the pointer becomes the
             # orbit (or pan) icon; the tool cursor comes back on release.
             from views.icons import tool_cursor
@@ -10475,6 +10537,9 @@ class Viewport(QOpenGLWidget):
                 self.nav_mode == "pan"
                 or bool(ev.modifiers() & Qt.ShiftModifier)
             )
+            self._orbit_pivot = (
+                self._orbit_pivot_at(ev.position().x(), ev.position().y())
+                if self.nav_mode == "orbit" else None)
             # The orbit/pan icon stays through the drag (SketchUp).
             self._apply_nav_cursor()
             return
@@ -10650,8 +10715,12 @@ class Viewport(QOpenGLWidget):
             elif self._pan_mode:
                 self.camera.pan(dx, dy, self.height())
             else:
-                self.camera.orbit(
-                    dx, -dy if self._invert_orbit_y else dy, self.height())
+                pivot = getattr(self, "_orbit_pivot", None)
+                ody = -dy if self._invert_orbit_y else dy
+                if pivot is not None:
+                    self.camera.orbit_about(pivot, dx, ody, self.height())
+                else:
+                    self.camera.orbit(dx, ody, self.height())
             self.update()
             return
 
@@ -10832,6 +10901,7 @@ class Viewport(QOpenGLWidget):
             return
         if ev.button() == Qt.MiddleButton:
             self._last_pos = None
+            self._orbit_pivot = None
             self._pan_mode = False
             if self.nav_mode is not None:
                 self._apply_nav_cursor()
@@ -10851,6 +10921,7 @@ class Viewport(QOpenGLWidget):
 
         if ev.button() == Qt.LeftButton and self.nav_mode is not None:
             self._last_pos = None
+            self._orbit_pivot = None
             self._pan_mode = False
             self._apply_nav_cursor()
             return
