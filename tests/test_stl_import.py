@@ -248,3 +248,33 @@ def test_simplify_keeps_curved_facets_separate(tmp_path):
 
     assert len(scene.groups) == 1
     assert segments < len(scene.groups[0].mesh.faces) < segments * 2
+
+
+def test_exploded_stl_group_can_be_simplified_as_an_undoable_edit(tmp_path):
+    from core.history import ExplodeGroupCommand, SimplifyMeshCommand
+
+    path = tmp_path / "large_flat_grid.stl"
+    triangles = []
+    for x in range(21):
+        for y in range(10):
+            a, b = (x, y, 0), (x + 1, y, 0)
+            c, d = (x + 1, y + 1, 0), (x, y + 1, 0)
+            triangles.extend(((a, b, c), (a, c, d)))
+    _binary(path, triangles)
+    scene = Scene()
+    history = History(scene)
+
+    stl_format.load_stl(scene, path)
+    assert len(scene.groups) == 1
+    history.execute(ExplodeGroupCommand(scene.groups[0]))
+    assert not scene.groups
+    assert len(scene.mesh.faces) == len(triangles)
+
+    history.execute(SimplifyMeshCommand())
+
+    assert history.last_error is None
+    assert len(scene.mesh.faces) == 1
+    assert history.undo()
+    assert len(scene.mesh.faces) == len(triangles)
+    assert history.redo()
+    assert len(scene.mesh.faces) == 1

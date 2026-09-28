@@ -1742,6 +1742,24 @@ def _first_person(p, ink):
         p.drawPath(cap)
 
 
+def _simplify_mesh(p, ink):
+    outline = QPolygonF([
+        QPointF(11, 34), QPointF(18, 13), QPointF(37, 17),
+        QPointF(32, 36),
+    ])
+    p.setBrush(Qt.NoBrush)
+    p.drawPolygon(outline)
+    p.save()
+    pen = QPen(ink, 1.8, Qt.DashLine)
+    p.setPen(pen)
+    p.drawLine(QPointF(11, 34), QPointF(27, 25))
+    p.drawLine(QPointF(18, 13), QPointF(27, 25))
+    p.drawLine(QPointF(37, 17), QPointF(27, 25))
+    p.drawLine(QPointF(32, 36), QPointF(27, 25))
+    p.restore()
+    _dot(p, 27, 25, 3.0)
+
+
 _DRAW = {
     **_SOLID_ICONS,
     "select": _select, "line": _line, "freehand": _freehand,
@@ -1781,6 +1799,7 @@ _DRAW = {
     "styles": _styles_icon, "shadows": _shadows_icon,
     "section_planes": _section_planes, "section_cuts": _section_cuts,
     "section_fill": _section_fill,
+    "simplify_mesh": _simplify_mesh,
     "zoom": _zoom, "zoom_window": _zoom_window,
     "position_camera": _position_camera, "walk": _walk,
     "look_around": _look_around, "first_person": _first_person,

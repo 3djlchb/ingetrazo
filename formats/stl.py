@@ -237,32 +237,11 @@ def _load_stl_inner(scene, path: Path, progress=None, scale: float = 1.0,
 
     from formats.dae import _MAX_FUSE_LOOPS
     if simplify_mode != "none":
-        from core.mesh import Mesh
-        from formats.dae import _add_fused
-        from formats.fuse import fuse_coplanar_loops, soften_smooth_edges
+        from formats.fuse import simplify_mesh
 
         _tick(progress, 0.75, "Merging flat surfaces…")
-        loops = [(face.vertices, None) for face in target.faces]
-        fused = fuse_coplanar_loops(
-            loops, cos_tol=0.9999999,
-            principal_planes=simplify_mode == "principal")
-        simplified = Mesh()
-        for index, region in enumerate(fused):
-            _add_fused(simplified, [region])
-            if index % 256 == 0:
-                _tick(progress, 0.75 + 0.1 * (index + 1) /
-                      max(len(fused), 1), "Merging flat surfaces…")
-        while True:
-            collapsed = False
-            for vertex in list(simplified.vertices):
-                if simplified.collapsible_vertex(vertex):
-                    simplified.collapse_vertex(vertex)
-                    collapsed = True
-                    break
-            if not collapsed:
-                break
-        soften_smooth_edges(simplified)
-        target = simplified
+        simplify_mesh(
+            target, principal_planes=simplify_mode == "principal")
 
     if len(target.faces) > _MAX_FUSE_LOOPS:
         from core.group import Group

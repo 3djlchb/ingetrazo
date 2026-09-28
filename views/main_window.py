@@ -595,6 +595,14 @@ class MainWindow(QMainWindow):
         main_tb.addAction(self._act_eyedropper)
         self._icon_actions.append((self._act_eyedropper, "eyedropper"))
 
+        self._act_simplify_mesh = QAction(
+            tool_icon("simplify_mesh"), tr("Simplify Mesh…"), self)
+        self._act_simplify_mesh.setToolTip(tr(
+            "Simplify Mesh — merge coplanar and near-coplanar faces"))
+        self._act_simplify_mesh.triggered.connect(self._on_simplify_mesh)
+        main_tb.addAction(self._act_simplify_mesh)
+        self._icon_actions.append((self._act_simplify_mesh, "simplify_mesh"))
+
         # The Sections toolbar carries SketchUp's three display toggles next
         # to the tool: Display Section Planes / Cuts / Fill. Created here
         # (the menubar builds later and reuses the same actions).
@@ -814,6 +822,8 @@ class MainWindow(QMainWindow):
         split_action = QAction(tr("Split into Pieces"), self)
         split_action.triggered.connect(self._on_split_into_pieces)
         edit_menu.addAction(split_action)
+
+        edit_menu.addAction(self._act_simplify_mesh)
 
         convert_path_action = QAction(tr("Convert Path to Geometry"), self)
         convert_path_action.triggered.connect(self._on_convert_geopath)
@@ -2076,6 +2086,42 @@ class MainWindow(QMainWindow):
             self.viewport.history.execute(ExplodeGroupCommand(g))
         if groups:
             self.viewport.update()
+
+    def _on_simplify_mesh(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+        from core.history import SimplifyMeshCommand
+
+        scene = self.viewport.scene
+        if not scene.mesh.faces:
+            if scene.groups:
+                self.viewport.flash_status(tr(
+                    "Explode the imported group first, then simplify the mesh"))
+            else:
+                self.viewport.flash_status(tr("There is no mesh to simplify"))
+            return
+
+        angle, ok = QInputDialog.getDouble(
+            self, tr("Simplify Mesh"),
+            tr("Maximum facet angle in degrees "
+               "(0 = coplanar only; higher values may change rounded geometry):"),
+            1.0, 0.0, 5.0, 2)
+        if not ok:
+            return
+
+        self.viewport.history.execute(SimplifyMeshCommand(angle))
+        error = self.viewport.history.last_error
+        if error:
+            QMessageBox.warning(self, tr("Simplify Mesh failed"), error)
+            return
+        command = self.viewport.history.undo_stack[-1]
+        removed = getattr(command, "faces_removed", 0)
+        if removed:
+            self.viewport.flash_status(
+                tr("Simplified mesh: removed {count} faces", count=removed),
+                5000)
+        else:
+            self.viewport.flash_status(tr("No faces could be simplified"))
+        self.viewport.update()
 
     def _on_convert_geopath(self) -> None:
         """Bake selected georef paths into real mesh geometry (Track G bridge).

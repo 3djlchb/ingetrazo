@@ -2554,6 +2554,36 @@ class SnapshotMutation(Command):
             scene.version += 1
 
 
+class SimplifyMeshCommand(Command):
+    """Merge near-coplanar faces of the active mesh with snapshot undo."""
+
+    def __init__(self, max_angle_degrees: float = 0.0) -> None:
+        self.max_angle_degrees = float(max_angle_degrees)
+        self.before: Optional[dict] = None
+        self.after: Optional[dict] = None
+        self.before_selection: set = set()
+        self.faces_removed = 0
+
+    def do(self, scene) -> None:
+        if self.after is None:
+            from formats.fuse import simplify_mesh
+            self.before = scene.mesh.capture_state()
+            self.before_selection = set(scene.selection)
+            self.faces_removed = simplify_mesh(
+                scene.mesh, self.max_angle_degrees)
+            self.after = scene.mesh.capture_state()
+        else:
+            scene.mesh.restore_state(self.after)
+        scene.selection.clear()
+        scene.version += 1
+
+    def undo(self, scene) -> None:
+        if self.before is not None:
+            scene.mesh.restore_state(self.before)
+            scene.selection = set(self.before_selection)
+            scene.version += 1
+
+
 class SnapshotImport(Command):
     """Wrap a file import that may add loose geometry AND/OR reference groups
     (big DAE/OBJ models land as a Group). SnapshotMutation only snapshots the

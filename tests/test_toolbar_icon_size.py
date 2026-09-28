@@ -69,6 +69,23 @@ def test_the_main_toolbar_starts_with_save(settings_file, monkeypatch):
         win.close()
 
 
+def test_simplify_mesh_is_a_button_and_edit_menu_action(settings_file):
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    try:
+        action = win._act_simplify_mesh
+        assert action in win.toolbars["main"].actions()
+        assert not action.icon().isNull()
+        edit_menu = next(
+            item.menu() for item in win.menuBar().actions()
+            if item.text() == "Edit")
+        assert action in edit_menu.actions()
+    finally:
+        win._saved_version = win.viewport.scene.version
+        win.close()
+
+
 def test_a_fresh_install_gets_marcos_layout_and_large_icons(settings_file, monkeypatch):
     """No saved state → the factory blob (resources/ui/default_layout.state)
     and 32 px icons: Draw and Annotate stand at the left, the rest along
