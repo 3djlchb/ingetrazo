@@ -3971,12 +3971,6 @@ class MainWindow(QMainWindow):
         QMessageBox.information(
             self, tr("Get more models and textures"),
             tr("Free sources that open directly in IngeTrazo:") + "<br><br>"
-            "<b>3D Warehouse</b> — "
-            "<a href='https://3dwarehouse.sketchup.com'>"
-            "3dwarehouse.sketchup.com</a><br>"
-            + tr("Download as COLLADA (.dae) — or the .skp itself — and use "
-                 "File → Import.")
-            + "<br><br>"
             "<b>Poly Haven</b> — <a href='https://polyhaven.com'>"
             "polyhaven.com</a> " + tr("(CC0: models OBJ and PBR textures)")
             + "<br><b>ambientCG</b> — <a href='https://ambientcg.com'>"
