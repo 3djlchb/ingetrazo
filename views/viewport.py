@@ -11407,8 +11407,11 @@ class Viewport(QOpenGLWidget):
                                               direction flip it, SketchUp-style).
         - ``"30cm"`` / ``"1500mm"`` / ``"2m"`` → unit suffix per field; bare
                                               numbers are metres (project unit).
-        Comma is always the decimal separator; ``;`` and space are field
-        separators (SketchUp convention adapted to our locale).
+        Comma is the decimal separator; ``;`` and space are field
+        separators (SketchUp convention adapted to our locale) -- except for
+        a tool that only takes several values (``vcb_comma_lists``, the
+        Rectangle): there ``200,100`` is two fields, as in SketchUp (#152).
+        See :meth:`_parse_value_buffer`.
         """
         if self.active_tool is None:
             return False
@@ -11419,7 +11422,9 @@ class Viewport(QOpenGLWidget):
         if key in (Qt.Key_Return, Qt.Key_Enter):
             if not self._value_buffer:
                 return False
-            value = self._parse_value_buffer(self._value_buffer)
+            value = self._parse_value_buffer(
+                self._value_buffer,
+                comma_lists=getattr(self.active_tool, "vcb_comma_lists", False))
             if value is None:
                 self._set_value_buffer("")
                 return True
@@ -11528,7 +11533,7 @@ class Viewport(QOpenGLWidget):
         return False
 
     @staticmethod
-    def _parse_value_buffer(buffer: str):
+    def _parse_value_buffer(buffer: str, comma_lists: bool = False):
         """Return a float, a 2-tuple ``(w, h)`` (rectangle dimensions), a
         3-tuple ``(dx, dy, dz)`` (delta), or ``None`` on parse error. Each tool's
         ``on_value`` accepts the arity it understands and ignores the rest.
@@ -11536,7 +11541,20 @@ class Viewport(QOpenGLWidget):
         ``in`` or ``"``, ``ft`` or ``'``, feet-and-inches ``1'6"``, fractions
         ``3/4"`` (SketchUp's forms, so a 2×4 is typed ``2";4"`` while the
         span stays ``3.2``). Bare numbers are metres, and a leading minus is
-        kept (direction tools flip on it)."""
+        kept (direction tools flip on it).
+
+        **The comma (#152).** ``;`` and whitespace always separate fields.
+        A comma is a decimal separator (``2,5`` is 2.5, ``2,5;1,2`` is
+        2.5 × 1.2 -- Spanish and Portuguese write decimals that way) --
+        EXCEPT when ``comma_lists`` is set and the entry has no ``;`` and no
+        space: then commas separate fields, so ``200,100`` is 200 × 100 as
+        in SketchUp. ``comma_lists`` is the caller's word that the tool takes
+        only several values (the Rectangle), where a lone decimal could never
+        be meant; a user who wants decimals there separates with ``;``
+        (``1,5;2,5``), which is SketchUp's own rule in comma-decimal locales."""
+        if (comma_lists and ";" not in buffer
+                and not any(ch.isspace() for ch in buffer.strip())):
+            buffer = buffer.replace(",", " ")
         normalized = buffer.replace(",", ".").replace(";", " ")
         stripped = normalized.strip()
         # SketchUp's arrays after a copy: "3x" / "3*" / "*3" (external) and

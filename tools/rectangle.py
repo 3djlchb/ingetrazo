@@ -56,6 +56,9 @@ class RectangleTool(PlaneLock, Tool):
     name = "Rectangle"
     shortcut = "R"
     vcb_label = "Dimensions"
+    # Only a width AND a height mean something here, so "200,100" is two
+    # values (SketchUp's list comma, #152), not the decimal 200.1.
+    vcb_comma_lists = True
     # Within this fraction of the longer side, the two sides count as equal and
     # the rectangle snaps to a perfect square ("Cuadrado"), SketchUp-style.
     SQUARE_TOL = 0.04
