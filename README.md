@@ -81,23 +81,34 @@ welcome arch with all its rebar (also attached to every release as
 
 ## What works today
 
-- **Viewport** — Z-up orbit camera, grid, colored axes,
-  perspective ↔ parallel, standard views, zoom-extents, hidden-line removal.
+- **Viewport** — Z-up camera that orbits around the point under the cursor,
+  grid, colored axes, perspective ↔ parallel and two-point perspective,
+  standard views, zoom-extents, hidden-line removal, real-sun shadows.
+- **Walkthrough** — Position Camera, Walk and Look Around at eye height.
 - **Drawing tools** — Line, Rectangle, Rotated Rectangle, Circle, Polygon,
   Arc (2-point) and 3-Point Arc, with inferencing, snapping, axis locks and a
-  Value Control Box (type exact lengths/coordinates).
+  Value Control Box (type exact lengths/coordinates, `200,100` or `200;100`
+  for two values), plus Freehand, Pie, 3D Text and images. **Repeat the last
+  command** with Shift+R or from the right-click menu.
 - **Push/Pull** — robust, watertight extrude / recess / step / through-hole,
   solid-aware, with a **BIM-grade hermeticity guard** (never commits a broken
   solid — the difference that makes the geometry valid for quantity takeoff).
 - **Offset** — walls with real thickness from a face outline.
-- **Move** — with snap, inference and exact measured input.
+- **Follow Me** and **Fillet** — sweep a profile along a path; round a corner.
+- **Move, Scale, Flip** — with snap, inference and exact measured input.
+- **Tape Measure & guides** — guide points and lines that every tool snaps
+  to, Push/Pull included (stop a face exactly at a guide's height).
+- **Eraser, Hide/Unhide, Invert Selection, Intersect Faces.**
+- **Solid tools** — Outer Shell, Union, Subtract, Trim, Intersect, Split.
+- **Section planes** — live cuts with section fill.
 - **Groups & components** — isolate geometry, move / explode / edit as a
   unit, and **copy/paste** with a solid, textured preview under the cursor;
   pasted component copies share their definition.
-- **Rotate & Protractor** — SketchUp's protractor: plane inference with
+- **Rotate & Protractor** — plane inference with
   axis-coloured disc, 15° tick snapping near it, slope input as rise:run
   (`3:12`), rotate-a-copy (Ctrl), fold-axis by dragging, and angled guide
-  lines that feed the snap engine.
+  lines that feed the snap engine; a click snapped to a point rotates by the
+  exact angle to it.
 - **Display styles** — Default, Architectural (textures on white), Shaded,
   Hidden line, Monochrome, Wireframe and X-ray; scenes remember their
   style and the sheet composer renders each viewport in any of them.
@@ -110,8 +121,10 @@ welcome arch with all its rebar (also attached to every release as
   carry the real names.
 - **Dimensions & leader texts** — static annotations with hidden-line
   occlusion and styles; texts select by their glyphs, move with the anchor
-  pinned, and edit on double-click. Both survive the `.skp` round trip.
-- **Side tray** — Materials, Dimension style, Entity info panels.
+  pinned, and edit on double-click. Both come in from `.skp` files.
+- **Side tray** — Entity info, Layers, Scenes, Materials (213 RAL colours and
+  a textured library at real size), **Components** (scale figures, furniture,
+  trees, vehicles, your own face-me PNGs), Dimension style.
 - **SketchUp import** — open `.skp` files natively (double-click too), every
   era from classic 2013–2020 to current 2021+, with materials, textures,
   per-side face materials, translucency, layers, scenes, dimensions and
@@ -122,8 +135,8 @@ welcome arch with all its rebar (also attached to every release as
   IngeTrazo stopped distributing after Trimble's copyright notice
   (2026-09-28). To take a model to SketchUp, export COLLADA `.dae`.
 - **Files** — native `.igz` save/open (self-contained: textures travel inside
-  the document), **import OBJ and COLLADA `.dae`**, **export STL, OBJ,
-  COLLADA and glTF/GLB** (glTF with PBR materials and geolocation; STL
+  the document), **import OBJ, COLLADA `.dae`, DXF and DWG**, **export STL,
+  OBJ, COLLADA, glTF/GLB and the current view as DXF** (glTF with PBR materials and geolocation; STL
   goes to a slicer as is — dedicated 3D-printing tools are planned for the
   future).
 - **Layers & Scenes** — visibility/lock tags (plans emerge from one model)
