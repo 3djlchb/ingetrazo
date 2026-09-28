@@ -5246,8 +5246,24 @@ class MainWindow(QMainWindow):
             return not self._is_dirty()
         return answer == QMessageBox.Discard
 
+    # "Saved" is recorded as the scene version at that moment (as every
+    # caller and test has always written it) and kept as the CONTENT version:
+    # a later selection bumps ``scene.version`` for the GL caches but not
+    # ``content_version``, so a click after Ctrl+S no longer asks to save
+    # again (issue #159). -1 stays "never saved".
+    @property
+    def _saved_version(self) -> int:
+        return self._saved_content
+
+    @_saved_version.setter
+    def _saved_version(self, version: int) -> None:
+        viewport = getattr(self, "viewport", None)
+        scene = getattr(viewport, "scene", None)
+        view = getattr(scene, "view_version", 0) if version >= 0 else 0
+        self._saved_content = version - view
+
     def _is_dirty(self) -> bool:
-        return self.viewport.scene.version != self._saved_version
+        return self.viewport.scene.content_version != self._saved_content
 
     def _on_scene_version_changed(self, _version: int) -> None:
         self._update_title()

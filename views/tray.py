@@ -1158,7 +1158,7 @@ class ComponentsPanel(QWidget):
         scene = self._window.viewport.scene
         scene.selection.clear()
         scene.selection.update(groups)
-        scene.version += 1
+        scene.bump_view()
         self._window.viewport.update()
 
 
@@ -1498,7 +1498,7 @@ class PartsPanel(QWidget):
         self._shown_selection = tuple(
             id(it.data(0, Qt.UserRole)) for it in self._items
             if it.data(0, Qt.UserRole) in scene.selection)
-        scene.version += 1
+        scene.bump_view()
         vp.update()
 
     def _on_item_changed(self, item, column) -> None:
@@ -3607,7 +3607,7 @@ class BimPanel(QWidget):
             scene.selection.add(obj["group"])
         else:
             scene.selection.update(obj["faces"])
-        scene.version += 1
+        scene.bump_view()
         self._window.viewport.update()
 
     def _on_export_csv(self) -> None:
