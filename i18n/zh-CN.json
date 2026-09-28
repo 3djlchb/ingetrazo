@@ -1,5 +1,6 @@
 {
  "Add a terrain profile along a traced path (two clicks or drag)": "沿着已绘制路径添加地形剖面（两次点击或拖动）",
+ "Guide point": "参考点",
  "IngeTrazo could not read {name} with its built-in SketchUp reader.\n\nOpen it in SketchUp and export it as COLLADA (.dae) or OBJ, then import that file here.": "IngeTrazo 无法用内置的 SketchUp 读取器读取 {name}。\n\n请在 SketchUp 中打开它并导出为 COLLADA (.dae) 或 OBJ，然后在这里导入该文件。",
  "Traced path": "已绘制路径",
  "Fit to width": "适应宽度",
