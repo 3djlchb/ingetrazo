@@ -5293,7 +5293,8 @@ class ComposerWindow(QMainWindow):
         from PySide6.QtCore import QSettings
         from PySide6.QtWidgets import QSplitter
         split = QSplitter(Qt.Horizontal)
-        split.addWidget(self._build_canvas_area(view))
+        self._canvas_area = self._build_canvas_area(view)
+        split.addWidget(self._canvas_area)
         split.addWidget(panel)
         split.setStretchFactor(0, 1)      # the canvas absorbs resizes
         split.setStretchFactor(1, 0)
@@ -5474,6 +5475,23 @@ class ComposerWindow(QMainWindow):
          "the value, as the standard asks", False),
     )
 
+    #: The tools' names — their text in F3 and wherever an action is
+    #: listed. The long sentence of TOOLS is the tooltip: as a name it was
+    #: F3's row, cut off halfway (Marco, 2026-09-28).
+    TOOL_NAMES = {
+        "select": "Select", "pan": "Pan", "zoom": "Zoom",
+        "zoom_ventana": "Zoom window", "estilo": "Format painter",
+        "vista": "Model view", "texto": "Text", "etiqueta": "Label",
+        "nivel": "Level mark", "llamada": "Detail callout", "imagen": "Image",
+        "cajetin": "Title block", "escala": "Scale bar",
+        "norte": "North arrow", "leyenda": "Layer legend",
+        "perfil": "Terrain profile", "linea": "Line", "flecha": "Arrow",
+        "terreno": "Ground line", "rect": "Rectangle", "elipse": "Ellipse",
+        "poligono": "Polygon", "cota": "Dimension",
+        "cota_cadena": "Chain dimension", "cota_base": "Baseline dimension",
+        "cota_ang": "Angular dimension", "cota_radio": "Radius dimension",
+    }
+
     def set_toolbar_icon_size(self, px: int) -> None:
         """Every toolbar of the composer at ``px`` (Preferences ▸ General)."""
         from PySide6.QtWidgets import QToolBar
@@ -5503,7 +5521,9 @@ class ComposerWindow(QMainWindow):
         group.setExclusive(True)
         self._tool_actions = {}
         for mode, icon_key, tip, _drag in self.TOOLS:
-            act = QAction(tool_icon(icon_key), tr(tip), self)
+            act = QAction(tool_icon(icon_key),
+                          tr(self.TOOL_NAMES.get(mode, tip)), self)
+            act.setToolTip(tr(tip))
             act.setProperty("icon_key", icon_key)   # redrawn on theme change
             act.setCheckable(True)
             act.setChecked(mode == "select")
@@ -12234,6 +12254,18 @@ class ComposerWindow(QMainWindow):
         clean.toggled.connect(self._toggle_clean_screen)
         self.addAction(clean)
         self._act_clean_screen = clean
+        # F3, the command search of the main window, over this window's
+        # own commands (views/command_search.py).
+        from views.command_search import OBJECT_NAME, open_search
+        search = QAction(tr("Search commands…"), self)
+        search.setObjectName(OBJECT_NAME)
+        search.setShortcut(QKeySequence("F3"))
+        search.triggered.connect(lambda: open_search(self))
+        self.addAction(search)
+
+    def command_search_area(self):
+        """Where F3 opens: the sheet with its rulers, not the side panel."""
+        return self._canvas_area
 
     @property
     def _panel(self):

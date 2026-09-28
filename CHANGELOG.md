@@ -35,6 +35,25 @@ ejecuta, descarga ni enlaza nada de Trimble:
   suavizada, ni de una arista oculta** (#140): lanzaba líneas de trazos a
   través de la esfera.
 
+### Añadido
+- **Buscador de comandos (F3)**, como el F3 de Blender, la búsqueda de
+  SketchUp o la línea de comandos de Rhino: se escriben unas letras y
+  Enter ejecuta el comando. Encuentra cualquier acción de la ventana
+  (menús, herramientas, paneles, complementos) en el idioma de los menús
+  o en inglés, por su ruta de menú, por iniciales («rf» → Invertir caras,
+  en inglés *Reverse Faces*) y aunque tenga una errata («orinetar»), sin
+  importar tildes ni mayúsculas. Cada resultado es una sola fila, como en
+  Blender (ruta atenuada ▸ icono y nombre, atajo a la derecha), el cuadro
+  se abre bajo el ratón, dentro del área de modelado y sin tapar las
+  barras laterales ni superiores, con diez filas a la vista, clic derecho ▸
+  Cambiar atajo… lleva a Preferencias, y una letra escrita con un menú
+  abierto busca solo en ese menú. Al dejar el ratón sobre un resultado
+  aparece, como en Blender, un recuadro con el nombre, qué hace y su atajo,
+  sin textos cortados. También en Ayuda ▸ Buscar comandos… y en el
+  compositor de láminas, con sus propios comandos.
+- **Las herramientas del compositor tienen nombre corto** («Cota en
+  cadena»); la explicación larga queda en el recuadro de ayuda.
+
 ## [0.5.4] — 2026-09-26
 
 **Un día de reportes, resuelto.** Tirar hacia arriba contra una pared (la

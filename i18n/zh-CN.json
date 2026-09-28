@@ -2107,5 +2107,21 @@
  "the arrow keys lock an axis while drawing": "绘图时方向键用于锁定轴",
  "it types a measure in the value box": "它用于在数值框中输入尺寸",
  "«{keys}» cannot be a shortcut: {why}.": "「{keys}」不能作为快捷键：{why}。",
- "Click here and press the keys": "点击此处并按下按键"
+ "Click here and press the keys": "点击此处并按下按键",
+ "Search commands…": "搜索命令…",
+ "Search a command…": "输入命令名称…",
+ "No results found": "未找到结果",
+ "Backspace in the empty box searches everywhere": "在空白框中按退格键可搜索全部",
+ "Change shortcut…": "更改快捷键…",
+ "Shortcut: {keys}": "快捷键：{keys}",
+ "Toolbars": "工具栏",
+ "Zoom": "缩放",
+ "Format painter": "格式刷",
+ "Model view": "模型视图",
+ "Level mark": "高程标记",
+ "Layer legend": "图层图例",
+ "Chain dimension": "连锁尺寸",
+ "Baseline dimension": "基线尺寸",
+ "Angular dimension": "角度尺寸",
+ "Radius dimension": "半径尺寸"
 }

@@ -2106,5 +2106,21 @@
  "the arrow keys lock an axis while drawing": "las flechas bloquean un eje mientras dibujas",
  "it types a measure in the value box": "sirve para escribir medidas en la casilla de valores",
  "«{keys}» cannot be a shortcut: {why}.": "«{keys}» no puede ser un atajo: {why}.",
- "Click here and press the keys": "Haz clic aquí y pulsa las teclas"
+ "Click here and press the keys": "Haz clic aquí y pulsa las teclas",
+ "Search commands…": "Buscar comandos…",
+ "Search a command…": "Buscar un comando…",
+ "No results found": "No se encontraron resultados",
+ "Backspace in the empty box searches everywhere": "Retroceso con la casilla vacía busca en todo",
+ "Change shortcut…": "Cambiar atajo…",
+ "Shortcut: {keys}": "Atajo: {keys}",
+ "Toolbars": "Barras de herramientas",
+ "Zoom": "Zoom",
+ "Format painter": "Pincel de formato",
+ "Model view": "Vista del modelo",
+ "Level mark": "Cota de nivel",
+ "Layer legend": "Leyenda de capas",
+ "Chain dimension": "Cota en cadena",
+ "Baseline dimension": "Cota desde línea base",
+ "Angular dimension": "Cota angular",
+ "Radius dimension": "Cota de radio"
 }
