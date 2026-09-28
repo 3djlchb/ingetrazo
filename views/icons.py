@@ -98,14 +98,17 @@ def _line(p, ink):
 
 
 def _freehand(p, ink):
-    # A hand-drawn squiggle — SketchUp's Freehand (the Line flyout).
+    # Freehand: a cursive stroke with a loop in the middle, the start of the
+    # stroke marked by the accent dot (where the drag began).
     path = QPainterPath()
-    path.moveTo(10, 34)
-    path.cubicTo(16, 18, 22, 40, 28, 24)
-    path.cubicTo(32, 14, 36, 18, 38, 14)
+    path.moveTo(9, 33)
+    path.cubicTo(15, 33, 19, 16, 26, 17)
+    path.cubicTo(33, 18, 30, 30, 24, 28)
+    path.cubicTo(19, 26, 24, 14, 31, 16)
+    path.cubicTo(36, 17, 37, 26, 40, 29)
     p.setBrush(Qt.NoBrush)
     p.drawPath(path)
-    _dot(p, 10, 34)
+    _dot(p, 9, 33)
 
 
 def _guide(p, ink, a, b, dashed: bool = True) -> None:
@@ -120,9 +123,9 @@ def _guide(p, ink, a, b, dashed: bool = True) -> None:
     p.restore()
 
 
-# Drawing tools: the shape in ink, its DEFINING POINTS as accent dots and the
-# construction line it is built on as a thin dashed guide — SketchUp's red
-# dots and blue guides, in the program's own colours (Marco, 2026-09-14).
+# Drawing tools: the shape in ink, its DEFINING POINTS (the clicks) as accent
+# dots and the construction line it is built on as a thin dashed guide
+# (Marco, 2026-09-14).
 
 def _rectangle(p, ink):
     p.setBrush(Qt.NoBrush)
@@ -143,28 +146,36 @@ def _rectangle_center(p, ink):
 
 
 def _rotated_rect(p, ink):
-    # Rotated rectangle as its three clicks: the pivot (bigger dot), the
-    # end of the first edge and the width — with the horizontal base line
-    # and the arc of the turn at the pivot as guides (Marco's pick,
-    # 2026-09-14, after SketchUp's icon).
-    P = (10.0, 36.0)
-    ang = math.radians(30)
-    L, W = 26.0, 16.0
+    # Rotated rectangle: the rectangle standing at an angle, its first corner
+    # (the pivot) as the accent dot, and a curved accent arrow above its far
+    # corner telling that it turns.
+    P = (10.0, 38.0)
+    ang = math.radians(28)
+    L, W = 23.0, 13.0
     B = (P[0] + L * math.cos(ang), P[1] - L * math.sin(ang))
     C = (B[0] - W * math.sin(ang), B[1] - W * math.cos(ang))
     D = (P[0] - W * math.sin(ang), P[1] - W * math.cos(ang))
     p.setBrush(Qt.NoBrush)
     p.drawPolygon(QPolygonF([QPointF(*P), QPointF(*B), QPointF(*C), QPointF(*D)]))
-    _guide(p, ink, P, (P[0] + 24, P[1]))                     # the base line
-    pen = QPen(QColor(ink.red(), ink.green(), ink.blue(), 160), 1.8)
-    pen.setCapStyle(Qt.RoundCap)
+    # the turning arrow: a quarter circle round the pivot, outside the shape
+    cx, cy, r = P[0], P[1], 30.0
     p.save()
-    p.setPen(pen)
-    p.drawArc(QRectF(P[0] - 10, P[1] - 10, 20, 20), 0, 30 * 16)   # the turn
+    p.setPen(_rpen(_accent(), 2.8))
+    p.setBrush(Qt.NoBrush)
+    p.drawArc(QRectF(cx - r, cy - r, 2 * r, 2 * r), 12 * 16, 58 * 16)
+    a = math.radians(70)
+    tip = QPointF(cx + r * math.cos(a), cy - r * math.sin(a))
+    p.setPen(Qt.NoPen)
+    p.setBrush(_accent())
+    # arrowhead pointing along the turn (counter-clockwise, towards the left)
+    tx, ty = -math.sin(a), -math.cos(a)          # tangent, screen y down
+    nx, ny = -ty, tx
+    p.drawPolygon(QPolygonF([
+        QPointF(tip.x() + tx * 6.5, tip.y() + ty * 6.5),
+        QPointF(tip.x() + nx * 4.5, tip.y() + ny * 4.5),
+        QPointF(tip.x() - nx * 4.5, tip.y() - ny * 4.5)]))
     p.restore()
     _dot(p, P[0], P[1], 3.3)
-    _dot(p, B[0], B[1], 2.6)
-    _dot(p, C[0], C[1], 2.6)
 
 
 def _circle(p, ink):
@@ -214,17 +225,22 @@ def _arc3(p, ink):
 
 
 def _pie(p, ink):
-    # SketchUp's Pie: a closed wedge — arc plus its two radius edges.
+    # Pie: a closed wedge — the arc and its two radii — with the slice
+    # itself filled in the accent, so it reads as a shape and not a stroke.
+    rect = QRectF(9, 11, 30, 30)
+    wedge = QPainterPath()
+    wedge.moveTo(24, 26)
+    wedge.arcTo(rect, 20, 110)
+    wedge.closeSubpath()
+    acc = _accent()
+    p.save()
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(acc.red(), acc.green(), acc.blue(), 110))
+    p.drawPath(wedge)
+    p.restore()
     p.setBrush(Qt.NoBrush)
-    p.drawArc(QRectF(10, 10, 28, 28), 15 * 16, 115 * 16)
-    for adeg in (15, 130):
-        a = math.radians(adeg)
-        p.drawLine(QPointF(24, 24),
-                   QPointF(24 + 14 * math.cos(a), 24 - 14 * math.sin(a)))
-    _dot(p, 24, 24, 2.9)
-    for adeg in (15, 130):
-        a = math.radians(adeg)
-        _dot(p, 24 + 14 * math.cos(a), 24 - 14 * math.sin(a), 2.5)
+    p.drawPath(wedge)
+    _dot(p, 24, 26, 2.9)
 
 
 def _rotate(p, ink):
@@ -491,9 +507,9 @@ def _move(p, ink):
 
 
 def _eyedropper(p, ink):
-    """The Paint tool while Alt is held: SketchUp swaps the bucket for an
-    eyedropper, which is how you know the next click SAMPLES instead of
-    paints. Drawn like Inkscape's dropper (Marco, 2026-09-14): a slanted
+    """The Paint tool while Alt is held: the bucket becomes an eyedropper,
+    which is how you know the next click SAMPLES instead of paints. Drawn
+    like Inkscape's dropper (Marco, 2026-09-14): a slanted
     outlined tube from the tip at the hotspot up to a collar, a solid
     rubber bulb top-right, a drop of the sampled colour at the tip."""
     pen = QPen(ink, 3.0)
@@ -567,20 +583,20 @@ def _paint(p, ink):
 
 
 def _dim_tick(p, ink, x: float, y: float, s: float = 3.5) -> None:
-    """SketchUp's slash tick at a dimension line's end."""
-    pen = QPen(ink, 3.0)
-    pen.setCapStyle(Qt.RoundCap)
+    """A dimension line's end: a solid round terminator (a dot), which
+    reads at any size and needs no direction."""
     p.save()
-    p.setPen(pen)
-    p.drawLine(QPointF(x - s, y + s), QPointF(x + s, y - s))
+    p.setPen(Qt.NoPen)
+    p.setBrush(QBrush(ink))
+    p.drawEllipse(QPointF(x, y), s * 0.8, s * 0.8)
     p.restore()
 
 
 def _dimension(p, ink):
     # A dimension as it is drawn: the measured edge with its two points in
     # the accent (the clicks), extension lines up to the dimension line,
-    # slash ticks and a plain «3» as the value (Marco's pick, 2026-09-14,
-    # after SketchUp's icon; «1.20» read as noise at toolbar size).
+    # round terminators and a plain «3» as the value («1.20» read as noise
+    # at toolbar size).
     A, B = (10.0, 39.0), (38.0, 39.0)
     p.drawLine(QPointF(*A), QPointF(*B))                     # the measured edge
     _guide(p, ink, (A[0], 37.0), (A[0], 17.0))               # extension lines
@@ -846,28 +862,28 @@ def _pan(p, ink):
 
 
 def _eraser(p, ink):
-    # A tilted rubber eraser with a coloured working end — SketchUp's Eraser.
+    # Eraser: a line being rubbed out — solid where it stays, faint dashes
+    # where the eraser has passed — and the eraser itself, an upright block
+    # with a band across it, standing on the boundary.
+    keep = QPen(ink, 3.0)
+    keep.setCapStyle(Qt.RoundCap)
+    p.setPen(keep)
+    p.drawLine(QPointF(8, 38), QPointF(20, 38))
+    faint = QColor(ink)
+    faint.setAlpha(110)
+    gone = QPen(faint, 2.2, Qt.DashLine)
+    gone.setCapStyle(Qt.FlatCap)
+    p.setPen(gone)
+    p.drawLine(QPointF(28, 38), QPointF(41, 38))
+    body = QRectF(19, 10, 12, 24)
+    p.setPen(QPen(ink, 3.0))
+    p.setBrush(Qt.NoBrush)
+    p.drawRoundedRect(body, 2.5, 2.5)
     p.save()
-    p.translate(24, 22)
-    p.rotate(-30)
-    # Coloured (pink) working tip.
     p.setPen(Qt.NoPen)
     p.setBrush(_accent())
-    p.drawRoundedRect(QRectF(-13, -6, 9.5, 12), 2.5, 2.5)
-    # Body outline over it.
-    p.setBrush(Qt.NoBrush)
-    body_pen = QPen(ink, 3.0)
-    body_pen.setJoinStyle(Qt.RoundJoin)
-    p.setPen(body_pen)
-    p.drawRoundedRect(QRectF(-13, -6, 26, 12), 2.5, 2.5)
-    p.drawLine(QPointF(-3.5, -6), QPointF(-3.5, 6))   # seam
+    p.drawRect(QRectF(20.5, 17.5, 9, 5))                 # the band
     p.restore()
-    # Motion lines trailing the swipe.
-    trail = QPen(ink, 2.0)
-    trail.setCapStyle(Qt.RoundCap)
-    p.setPen(trail)
-    p.drawLine(QPointF(12, 37), QPointF(18, 37))
-    p.drawLine(QPointF(14, 41), QPointF(21, 41))
 
 
 def _tape(p, ink):
@@ -911,44 +927,47 @@ def _zoom_window(p, ink):
 
 
 def _zoom_extents(p, ink):
-    # SketchUp's Zoom Extents, so its users find it (#112): a magnifier with
-    # the handle to the lower-left and three fat accent arrows pushing out to
-    # the free corners. Sized a notch under the plain Zoom lens so it keeps
-    # proportion beside it in the Camera toolbar (Marco chose "A2", 25-09).
-    cx = cy = 24.0
-    r = 8.5
-    d = r / math.sqrt(2)
-    p.setBrush(Qt.NoBrush)
-    p.drawEllipse(QPointF(cx, cy), r, r)
+    # Zoom Extents (#112): the four corners of the view as accent brackets
+    # and a magnifier in the middle — everything brought inside the frame.
     p.save()
-    p.setPen(_rpen(ink, 4.0))
-    p.drawLine(QPointF(cx - d, cy + d), QPointF(cx - d - 7.5, cy + d + 7.5))
-    p.setBrush(_accent())
-    head, half = 7.5, 7.5 * 0.62
-    for sx, sy in ((-1, -1), (1, -1), (1, 1)):
-        tip = QPointF(cx + sx * 18, cy + sy * 18)
-        # Unit vector along the diagonal and its normal, for the arrowhead.
-        ux, uy = sx / math.sqrt(2), sy / math.sqrt(2)
-        base = QPointF(tip.x() - ux * head, tip.y() - uy * head)
-        p.setPen(_rpen(_accent(), 4.2))
-        p.drawLine(QPointF(cx + sx * 10.5, cy + sy * 10.5), base)
-        p.setPen(Qt.NoPen)
-        p.drawPolygon(QPolygonF([
-            tip,
-            QPointF(base.x() - uy * half, base.y() + ux * half),
-            QPointF(base.x() + uy * half, base.y() - ux * half),
-        ]))
+    p.setPen(_rpen(_accent(), 3.4))
+    p.setBrush(Qt.NoBrush)
+    a, b, arm = 7.0, 41.0, 8.0
+    for x, y, dx, dy in ((a, a, 1, 1), (b, a, -1, 1), (a, b, 1, -1), (b, b, -1, -1)):
+        p.drawLine(QPointF(x, y), QPointF(x + dx * arm, y))
+        p.drawLine(QPointF(x, y), QPointF(x, y + dy * arm))
     p.restore()
+    _magnifier(p, ink, 22.0, 22.0, 7.5)
 
 
-# ---- Standard-view icons: a little house drawn from each viewpoint ----------
-# Like SketchUp, each orthographic view shows a recognisable house from that
-# direction — ONE gable house, consistently, no windows: the door on the
-# front gable, the chimney on the right slope toward the back (right of
-# the apex from the front, left of it from behind, at the far end from
-# each side, a square at the back-right of the roof from above). The wall
-# you look at is filled with the accent, which is what tells the views
-# apart at a glance (Marco, 2026-09-14, chosen among a dozen candidates).
+# ---- Standard-view icons: a cube with the viewed face highlighted -----------
+# Every standard view is the same isometric cube; the face the view looks at
+# is filled in the accent. Faces at the back (Back, Left, Bottom) are hidden
+# behind the cube, so their edges are drawn dashed and their fill is lighter
+# — the eye reads "that side, behind". Iso fills the three visible faces.
+
+_CUBE_TOP = QPointF(24, 7)       # back corner of the top face
+_CUBE_R = QPointF(39, 15.5)      # right corner, top
+_CUBE_F = QPointF(24, 24)        # front corner, top
+_CUBE_L = QPointF(9, 15.5)       # left corner, top
+_CUBE_H = 18.0                   # vertical edge length
+
+
+def _down(pt: QPointF) -> QPointF:
+    return QPointF(pt.x(), pt.y() + _CUBE_H)
+
+
+def _cube_faces() -> dict:
+    t, r, f, l = _CUBE_TOP, _CUBE_R, _CUBE_F, _CUBE_L
+    return {
+        "top": QPolygonF([t, r, f, l]),
+        "front": QPolygonF([l, f, _down(f), _down(l)]),
+        "right": QPolygonF([f, r, _down(r), _down(f)]),
+        "back": QPolygonF([t, r, _down(r), _down(t)]),
+        "left": QPolygonF([l, t, _down(t), _down(l)]),
+        "bottom": QPolygonF([_down(l), _down(f), _down(r), _down(t)]),
+    }
+
 
 def _accent_fill(p, poly, alpha: int = 150) -> None:
     acc = _accent()
@@ -962,7 +981,9 @@ def _accent_fill(p, poly, alpha: int = 150) -> None:
     p.restore()
 
 
+
 def _solid(p, ink, poly) -> None:
+    """Fill ``poly`` (a rect or polygon) solid in the ink, no outline."""
     p.save()
     p.setPen(Qt.NoPen)
     p.setBrush(QBrush(ink))
@@ -973,126 +994,70 @@ def _solid(p, ink, poly) -> None:
     p.restore()
 
 
-def _chimney(p, ink, x: float, roof_y: float, h: float = 6.0, w: float = 4.0):
-    """A chimney stack rising ``h`` above the roof line at ``x``."""
-    _solid(p, ink, QRectF(x - w / 2, roof_y - h, w, h))
-
-
-_GABLE = QPolygonF([QPointF(9, 22), QPointF(23, 9), QPointF(37, 22)])
-_GABLE_WALL = QRectF(12, 22, 22, 15)
-
-
-def _view_front(p, ink):
-    # Gable end seen head-on: the wall in accent, ONE wide door, chimney
-    # RIGHT of the apex. (Front)
-    _accent_fill(p, _GABLE_WALL)
-    p.setBrush(Qt.NoBrush)
-    p.drawRect(_GABLE_WALL)
-    p.drawPolygon(_GABLE)
-    _chimney(p, ink, 31.0, 15.0, h=6.5)
-    _solid(p, ink, QRectF(18, 28, 10, 9))                  # wide door
-
-
-def _view_back(p, ink):
-    # Same gable end from behind: blank wall in accent, chimney LEFT. (Back)
-    _accent_fill(p, _GABLE_WALL)
-    p.setBrush(Qt.NoBrush)
-    p.drawRect(_GABLE_WALL)
-    p.drawPolygon(_GABLE)
-    _chimney(p, ink, 15.0, 15.0, h=6.5)
-
-
-def _house_side(mirror: bool):
-    # Long wall seen side-on, in accent, under a low roof; the chimney at
-    # the BACK end — the right end seen from the right, the left end seen
-    # from the left (mirror images).
-    def draw(p, ink):
+def _cube(p, ink, face: str | None) -> None:
+    faces = _cube_faces()
+    hidden = face in ("back", "left", "bottom")
+    if face == "iso":
+        _accent_fill(p, faces["top"], 70)
+        _accent_fill(p, faces["front"], 160)
+        _accent_fill(p, faces["right"], 110)
+    elif face is not None:
+        _accent_fill(p, faces[face], 125 if hidden else 160)
+    if hidden:
+        # the three edges that meet at the hidden back-bottom corner
+        faint = QColor(ink)
+        faint.setAlpha(150)
+        pen = QPen(faint, 2.0, Qt.DashLine)
         p.save()
-        if mirror:
-            p.translate(48, 0)
-            p.scale(-1, 1)
-        # A touch wider than the front — the house is square in plan, but a
-        # hair of length tells the side from the gable at a glance (Marco,
-        # 2026-09-14).
-        wall = QRectF(11, 23, 27, 14)
-        _accent_fill(p, wall)
-        p.setBrush(Qt.NoBrush)
-        p.drawRect(wall)
-        p.drawPolygon(QPolygonF([QPointF(9, 23), QPointF(14, 15),
-                                 QPointF(35, 15), QPointF(40, 23)]))  # roof
-        _chimney(p, ink, 33.0, 15.0, h=6.0)
+        p.setPen(pen)
+        hb = _down(_CUBE_TOP)
+        for q in (_CUBE_TOP, _down(_CUBE_L), _down(_CUBE_R)):
+            p.drawLine(hb, q)
         p.restore()
+    p.setBrush(Qt.NoBrush)
+    outline = QPolygonF([_CUBE_TOP, _CUBE_R, _down(_CUBE_R), _down(_CUBE_F),
+                         _down(_CUBE_L), _CUBE_L])
+    p.drawPolygon(outline)
+    p.drawLine(_CUBE_L, _CUBE_F)
+    p.drawLine(_CUBE_F, _CUBE_R)
+    p.drawLine(_CUBE_F, _down(_CUBE_F))
+
+
+def _view_face(face: str):
+    def draw(p, ink):
+        _cube(p, ink, face)
     return draw
 
 
-def _view_top(p, ink):
-    # The gable roof from directly above: the footprint in accent, ONE
-    # ridge line down the middle (two slopes, not four), the chimney as a
-    # square at the back-right.
-    roof = QRectF(9, 11, 24, 24)
-    _accent_fill(p, roof)
-    p.setBrush(Qt.NoBrush)
-    p.drawRect(roof)
-    p.drawLine(QPointF(21, 11), QPointF(21, 35))           # ridge
-    _solid(p, ink, QRectF(25.5, 13.5, 4.5, 4.5))           # chimney
-    # a hint of the front: the door's end is the bottom edge — a short
-    # tick there keeps top and bottom apart from the other symbols
-    p.drawLine(QPointF(17, 35), QPointF(25, 35))
+_view_front = _view_face("front")
+_view_back = _view_face("back")
+_view_top = _view_face("top")
+_view_bottom = _view_face("bottom")
+_view_iso = _view_face("iso")
 
 
-def _view_bottom(p, ink):
-    # The slab from below, in accent, with the walls starting off it: a
-    # short diagonal stub at each corner (Marco's pick, 2026-09-14).
-    slab = QRectF(9, 11, 24, 24)
-    _accent_fill(p, slab)
-    p.setBrush(Qt.NoBrush)
-    p.drawRect(slab)
-    for x in (9.0, 33.0):
-        for y in (11.0, 35.0):
-            p.drawLine(QPointF(x, y),
-                       QPointF(x + (4.0 if x == 9.0 else -4.0),
-                               y + (4.0 if y == 11.0 else -4.0)))
-
-
-def _view_iso(p, ink):
-    # The same house in isometric with its EAVES: gable end (door) at the
-    # left, long side at the right, the roof slope overhanging both wall
-    # and gable, chimney at the back of the slope.
-    wl, wf, wr = QPointF(11, 23), QPointF(23, 29), QPointF(37, 22)
-    bl, bf, br = QPointF(11, 35), QPointF(23, 41), QPointF(37, 34)
-    apex = QPointF(17, 15.5)
-    back_apex = apex + (wr - wf)
-    gable = QPolygonF([bl, bf, wf, apex, wl])
-    side = QPolygonF([wf, wr, br, bf])
-    out = QPointF(-2.4, -1.2)          # forward, through the gable plane
-    eave = QPointF(2.6, 1.6)           # outward past the side wall
-    r_front_top, r_back_top = apex + out, back_apex - out * 0.4
-    r_front_low = wf + out + eave + QPointF(0, -1.0)
-    r_back_low = wr - out * 0.4 + eave + QPointF(0, -1.0)
-    slope = QPolygonF([r_front_top, r_back_top, r_back_low, r_front_low])
-    _accent_fill(p, gable, 150)
-    _accent_fill(p, side, 90)
-    _accent_fill(p, slope, 60)
-    p.setBrush(Qt.NoBrush)
-    p.drawPolygon(gable)
-    p.drawPolygon(side)
-    p.drawPolygon(slope)
-    p.drawLine(r_front_top, wl + out)                      # left rake edge
-    cx, cy = 30.5, 13.5
-    _solid(p, ink, QRectF(cx - 1.8, cy - 1, 3.6, 7))       # chimney
-    _solid(p, ink, QPolygonF([QPointF(15, 30.5), QPointF(19, 32.5),
-                              QPointF(19, 39.5), QPointF(15, 37.5)]))   # door
+def _house_side(mirror: bool):
+    # Kept as the factory the registry calls: Right is the cube's right
+    # face, Left its hidden left face.
+    return _view_face("left" if mirror else "right")
 
 
 def _text(p, ink):
-    # An "A" with a leader line pointing down-left (SketchUp's Text).
-    f = p.font()
-    f.setPixelSize(24)
-    f.setBold(True)
-    p.setFont(f)
-    p.drawText(QPointF(20, 26), "A")
-    p.drawLine(QPointF(10, 38), QPointF(19, 29))
-    p.drawEllipse(QPointF(10, 38), 2.0, 2.0)
+    # Text: a capital T inside a text frame (dashed), with the insertion
+    # point as the accent dot at the frame's corner.
+    faint = QColor(ink)
+    faint.setAlpha(150)
+    p.save()
+    p.setPen(QPen(faint, 1.8, Qt.DashLine))
+    p.setBrush(Qt.NoBrush)
+    p.drawRect(QRectF(9, 10, 30, 28))
+    p.restore()
+    p.save()
+    p.setPen(_rpen(ink, 3.6))
+    p.drawLine(QPointF(16, 17), QPointF(32, 17))
+    p.drawLine(QPointF(24, 17), QPointF(24, 32))
+    p.restore()
+    _dot(p, 9, 38, 3.0)
 
 
 def _text3d(p, ink):
@@ -1485,102 +1450,91 @@ def _disc(cx: float, cy: float, r: float) -> QPainterPath:
 
 
 def _position_camera(p, ink):
-    # SketchUp's Position Camera: a camera on a tripod, drawn in line with
-    # an orange lens. Marco picked it over a figure on a crosshair
-    # (2026-09-19, from SketchUp's own toolbar).
-    p.setPen(_rpen(ink, 2.6))
-    p.drawLine(QPointF(24, 31), QPointF(12, 45))
-    p.drawLine(QPointF(24, 31), QPointF(36, 45))
-    p.drawLine(QPointF(24, 31), QPointF(24, 46))
-    body = QPainterPath()
-    body.addRoundedRect(QRectF(9, 13, 30, 19), 3.5, 3.5)
-    body.addRoundedRect(QRectF(15, 8, 12, 6), 2, 2)
+    # Position Camera: a map pin where the eye will stand, and the view cone
+    # it will look along, filled in the accent.
+    acc = _accent()
+    cone = QPolygonF([QPointF(17, 20), QPointF(42, 8), QPointF(42, 30)])
+    p.save()
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(acc.red(), acc.green(), acc.blue(), 120))
+    p.drawPolygon(cone)
+    p.setPen(_rpen(acc, 2.2))
+    p.drawLine(QPointF(17, 20), QPointF(42, 8))
+    p.drawLine(QPointF(17, 20), QPointF(42, 30))
+    p.restore()
+    pin = QPainterPath()
+    pin.moveTo(15, 43)
+    pin.cubicTo(8, 32, 5, 27, 5, 21)
+    pin.arcTo(QRectF(5, 11, 20, 20), 180, -180)
+    pin.cubicTo(25, 27, 22, 32, 15, 43)
     p.setPen(_rpen(ink, 2.8))
     p.setBrush(Qt.NoBrush)
-    p.drawPath(body)
-    p.drawEllipse(QPointF(24, 22.5), 6.0, 6.0)
+    p.drawPath(pin)
     p.setPen(Qt.NoPen)
-    p.setBrush(_accent())
-    p.drawPath(_disc(24, 22.5, 2.8))
+    p.setBrush(QBrush(ink))
+    p.drawPath(_disc(15, 21, 3.4))
 
 
 def _walk(p, ink):
-    # SketchUp's Walk: a hiker mid-stride, solid, with an orange backpack
-    # and a walking stick (Marco's pick, 2026-09-19).
-    x, y = 22.0, 46.0
-    p.setPen(_rpen(ink, 4.0))
-    p.drawLine(QPointF(x - 1, y - 20), QPointF(x - 10, y - 2))    # back leg
-    p.drawLine(QPointF(x - 1, y - 20), QPointF(x + 6, y - 11))    # front leg
-    p.drawLine(QPointF(x + 6, y - 11), QPointF(x + 7, y))
-    p.setPen(Qt.NoPen)
-    p.setBrush(ink)
-    p.drawPolygon(QPolygonF([QPointF(x - 6, y - 32), QPointF(x + 4, y - 34),
-                             QPointF(x + 6, y - 20), QPointF(x - 4, y - 18)]))
-    p.drawPath(_disc(x + 2, y - 39, 4.2))                          # head
-    p.setPen(_rpen(ink, 3.4))
-    p.drawLine(QPointF(x - 2, y - 30), QPointF(x - 8, y - 22))    # back arm
-    p.drawLine(QPointF(x + 3, y - 30), QPointF(x + 12, y - 25))   # front arm
-    p.setPen(_rpen(_accent(), 2.2))
-    p.drawLine(QPointF(x + 13, y - 27), QPointF(x + 14, y + 1))   # the stick
-    pack = QPainterPath()
-    pack.addRoundedRect(QRectF(x - 12, y - 33, 7, 12), 3, 3)
-    p.setPen(Qt.NoPen)
-    p.setBrush(_accent())
-    p.drawPath(pack)
+    # Walk: two footprints stepping forward up the icon, the leading one in
+    # the accent — the camera advances as you walk.
+    def foot(cx, cy, angle, colour):
+        p.save()
+        p.translate(cx, cy)
+        p.rotate(angle)
+        p.setPen(Qt.NoPen)
+        p.setBrush(colour)
+        p.drawEllipse(QRectF(-5.5, -10.0, 11.0, 15.0))     # sole
+        p.drawEllipse(QRectF(-4.2, 7.0, 8.4, 7.0))         # heel
+        p.restore()
+    foot(15.5, 30.0, -14, QBrush(ink))
+    foot(32.0, 17.0, -14, _accent())
 
 
 def _look_around(p, ink):
-    # SketchUp's Look Around: an eye with lashes and a lid, orange iris.
-    # No white in the eyeball and a pupil that is always dark, so it reads
-    # the same on a dark toolbar (the white blob Marco saw, 2026-09-19).
-    cx, cy, w, h = 24.0, 26.0, 17.0, 10.0
-    outline = QPainterPath()
-    outline.moveTo(cx - w, cy)
-    outline.cubicTo(cx - w * 0.5, cy - h * 1.6, cx + w * 0.5, cy - h * 1.6, cx + w, cy)
-    outline.cubicTo(cx + w * 0.5, cy + h * 1.4, cx - w * 0.5, cy + h * 1.4, cx - w, cy)
-    p.setPen(_rpen(ink, 3.0))
-    p.setBrush(Qt.NoBrush)
-    p.drawPath(outline)
+    # Look Around: a head seen from above with its view cone, and a curved
+    # arrow sweeping round it — the view turns, the eye stays put.
+    acc = _accent()
+    cx, cy = 24.0, 30.0
+    cone = QPolygonF([QPointF(cx, cy), QPointF(cx - 12, 9), QPointF(cx + 12, 9)])
     p.save()
-    p.setClipPath(outline)
     p.setPen(Qt.NoPen)
-    p.setBrush(_accent())
-    p.drawPath(_disc(cx, cy, 7.0))
-    p.setBrush(QColor(30, 33, 40))
-    p.drawPath(_disc(cx, cy, 3.4))
-    p.setBrush(QColor(255, 255, 255, 230))
-    p.drawPath(_disc(cx - 2.4, cy - 2.6, 1.6))
+    p.setBrush(QColor(acc.red(), acc.green(), acc.blue(), 120))
+    p.drawPolygon(cone)
     p.restore()
-    lid = QPainterPath()
-    lid.moveTo(cx - w, cy)
-    lid.cubicTo(cx - w * 0.5, cy - h * 1.6, cx + w * 0.5, cy - h * 1.6, cx + w, cy)
-    lid.cubicTo(cx + w * 0.5, cy - h * 0.55, cx - w * 0.5, cy - h * 0.55, cx - w, cy)
+    p.setPen(_rpen(ink, 2.8))
+    p.setBrush(Qt.NoBrush)
+    p.drawPath(_disc(cx, cy, 6.0))                       # the head
+    p.save()
     p.setPen(Qt.NoPen)
-    p.setBrush(ink)
-    p.drawPath(lid)
-    p.setPen(_rpen(ink, 2.6))
-    for ax, ay, bx, by in ((cx - w - 1, cy - 2, cx - w - 7, cy - 4),
-                           (cx - w + 1, cy - 6, cx - w - 5, cy - 11),
-                           (cx - w + 5, cy - 9, cx - w, cy - 15)):
-        p.drawLine(QPointF(ax, ay), QPointF(bx, by))
+    p.setBrush(QBrush(ink))
+    p.drawPath(_disc(cx, cy - 6.5, 2.2))                 # the nose: facing up
+    p.restore()
+    arc = QRectF(cx - 14, cy - 14, 28, 28)
+    p.save()
+    p.setPen(_rpen(acc, 2.8))
+    p.drawArc(arc, 200 * 16, 140 * 16)                    # the sweep below
+    end = math.radians(340)
+    tip = QPointF(cx + 14 * math.cos(end), cy - 14 * math.sin(end))
+    p.setPen(Qt.NoPen)
+    p.setBrush(acc)
+    p.drawPolygon(QPolygonF([tip + QPointF(-1.5, -5.5), tip + QPointF(4.5, 1.5),
+                             tip + QPointF(-4.5, 2.5)]))
+    p.restore()
 
 
-
-# ---- Solid Tools (SketchUp's toolbar, redrawn) ------------------------------
-# SketchUp's vocabulary — two overlapping squares, what the result KEEPS
-# drawn solid and filled, what goes away dotted — in IngeTrazo's colours:
-# the theme's ink for the outline and the orange accent for the fill, like
-# every other toolbar here (Marco, 2026-09-23: SketchUp's blue «no hace
-# juego con el tema de iconos de IngeTrazo»).
-_SA = QRectF(7, 7, 23, 23)          # first solid (upper left)
-_SB = QRectF(18, 18, 23, 23)        # second solid (lower right)
+# ---- Solid Tools: two overlapping discs ------------------------------------
+# Each boolean is the Venn picture of its result: two discs, the part the
+# result KEEPS filled in the accent with an ink outline, what goes away as a
+# faint dashed outline.
+_DA = (18.0, 20.0, 12.5)          # first solid: centre x, y, radius
+_DB = (30.0, 28.0, 12.5)          # second solid
 
 
-def _solid_path(*rects):
-    from PySide6.QtGui import QPainterPath
+def _solid_path(*discs):
     path = QPainterPath()
-    for r in rects:
-        path.addRect(r)
+    for cx, cy, r in discs:
+        path.addEllipse(QPointF(cx, cy), r, r)
     return path
 
 
@@ -1588,7 +1542,7 @@ def _solid_keep(p, ink, path, alpha: int = 150):
     acc = _accent()
     p.save()
     pen = QPen(ink, 2.6)
-    pen.setJoinStyle(Qt.MiterJoin)
+    pen.setJoinStyle(Qt.RoundJoin)
     p.setPen(pen)
     p.setBrush(QColor(acc.red(), acc.green(), acc.blue(), alpha))
     p.drawPath(path)
@@ -1596,77 +1550,69 @@ def _solid_keep(p, ink, path, alpha: int = 150):
 
 
 def _dotted(ink, width: float) -> QPen:
-    """Square dots a dot's width apart (SketchUp's «goes away»), in a
-    lighter ink so they read as absent."""
+    """A faint dashed outline: the part of a solid the result drops."""
     faint = QColor(ink)
-    faint.setAlpha(150)
-    pen = QPen(faint, width)
+    faint.setAlpha(140)
+    pen = QPen(faint, width, Qt.DashLine)
     pen.setCapStyle(Qt.FlatCap)
-    pen.setJoinStyle(Qt.MiterJoin)
-    pen.setDashPattern([1.0, 1.0])
     return pen
 
 
-def _solid_gone(p, ink, rect):
+def _solid_gone(p, ink, path):
     p.save()
-    p.setPen(_dotted(ink, 2.4))
+    p.setPen(_dotted(ink, 1.8))
     p.setBrush(Qt.NoBrush)
-    p.drawRect(rect)
-    p.restore()
-
-
-def _solid_seam(p, ink, rect):
-    """The inner edges that go away, dotted across the overlap."""
-    p.save()
-    p.setPen(_dotted(ink, 2.0))
-    p.setBrush(Qt.NoBrush)
-    p.drawRect(rect)
+    p.drawPath(path)
     p.restore()
 
 
 def _solid_outer_shell(p, ink):
-    _solid_keep(p, ink, _solid_path(_SA).united(_solid_path(_SB)))
-    _solid_seam(p, ink, _SA.intersected(_SB))
+    # Outer shell: only the outside skin survives — the union's outline,
+    # drawn heavy, over a light fill.
+    a, b = _solid_path(_DA), _solid_path(_DB)
+    _solid_keep(p, ink, a.united(b), 70)
+    p.save()
+    p.setPen(QPen(ink, 3.6))
+    p.setBrush(Qt.NoBrush)
+    p.drawPath(a.united(b))
+    p.restore()
 
 
 def _solid_union(p, ink):
-    shell = _solid_path(_SA).united(_solid_path(_SB))
-    void = QRectF(29, 29, 7, 7)                 # the kept inner void
-    _solid_keep(p, ink, shell.subtracted(_solid_path(void)))
-    p.save()
-    p.setPen(QPen(ink, 2.0))
-    p.setBrush(Qt.NoBrush)
-    p.drawRect(void)
-    p.restore()
+    # Union: one solid from both, the overlap included.
+    a, b = _solid_path(_DA), _solid_path(_DB)
+    _solid_keep(p, ink, a.united(b), 150)
+    _solid_gone(p, ink, a.intersected(b))
 
 
 def _solid_subtract(p, ink):
-    _solid_gone(p, ink, _SA)
-    _solid_keep(p, ink, _solid_path(_SB).subtracted(_solid_path(_SA)))
+    # Subtract: the first solid carves itself out of the second and goes.
+    a, b = _solid_path(_DA), _solid_path(_DB)
+    _solid_gone(p, ink, a)
+    _solid_keep(p, ink, b.subtracted(a))
 
 
 def _solid_trim(p, ink):
-    _solid_keep(p, ink, _solid_path(_SA).subtracted(_solid_path(_SB)))
-    _solid_keep(p, ink, _solid_path(_SB))
-    p.save()
-    p.setPen(_dotted(ink, 2.0))
-    ov = _SA.intersected(_SB)
-    p.drawLine(QPointF(ov.left(), ov.bottom()), QPointF(ov.right(), ov.bottom()))
-    p.drawLine(QPointF(ov.right(), ov.top()), QPointF(ov.right(), ov.bottom()))
-    p.restore()
+    # Trim: like Subtract, but the first solid stays.
+    a, b = _solid_path(_DA), _solid_path(_DB)
+    _solid_keep(p, ink, a, 90)
+    _solid_keep(p, ink, b.subtracted(a))
 
 
 def _solid_intersect(p, ink):
-    _solid_gone(p, ink, _SA)
-    _solid_gone(p, ink, _SB)
-    _solid_keep(p, ink, _solid_path(_SA.intersected(_SB)))
+    # Intersect: only the lens both share remains.
+    a, b = _solid_path(_DA), _solid_path(_DB)
+    _solid_gone(p, ink, a)
+    _solid_gone(p, ink, b)
+    _solid_keep(p, ink, a.intersected(b))
 
 
 def _solid_split(p, ink):
-    a, b = _solid_path(_SA), _solid_path(_SB)
+    # Split: three separate solids — each side and the shared lens.
+    a, b = _solid_path(_DA), _solid_path(_DB)
     _solid_keep(p, ink, a.subtracted(b), 60)
     _solid_keep(p, ink, b.subtracted(a), 60)
-    _solid_keep(p, ink, _solid_path(_SA.intersected(_SB)), 190)
+    _solid_keep(p, ink, a.intersected(b), 200)
 
 
 _SOLID_ICONS = {
@@ -1677,9 +1623,9 @@ _SOLID_ICONS = {
 
 
 def solid_cursor(state: str):
-    """SketchUp's Solid Tools pointer: an arrow with a red circle-and-slash
-    over anything that is not a solid, and a «1» or «2» in a circle over a
-    solid, for the pick it will be."""
+    """The Solid Tools pointer: an arrow with a grey «×» badge over anything
+    that is not a solid, and a «1» or «2» on an accent disc over a solid,
+    for the pick it will be."""
     from PySide6.QtGui import QCursor, QPainterPath, QPixmap
     key = ("solid", state)
     cached = _cursor_cache.get(key)
@@ -1704,14 +1650,17 @@ def solid_cursor(state: str):
     p.drawPath(arrow)
     c = QPointF(22, 22)
     if state == "no":
-        p.setBrush(Qt.NoBrush)
-        p.setPen(QPen(QColor(220, 40, 40), 2.4))
-        p.drawEllipse(c, 7, 7)
-        p.drawLine(QPointF(17, 17), QPointF(27, 27))
+        p.setPen(QPen(Qt.white, 1.2))
+        p.setBrush(QColor(90, 94, 102))
+        p.drawRoundedRect(QRectF(15, 15, 14, 14), 3, 3)
+        p.setPen(QPen(Qt.white, 2.2))
+        p.drawLine(QPointF(18.5, 18.5), QPointF(25.5, 25.5))
+        p.drawLine(QPointF(25.5, 18.5), QPointF(18.5, 25.5))
     else:
-        p.setPen(QPen(Qt.black, 1.6))
-        p.setBrush(Qt.white)
+        p.setPen(QPen(Qt.white, 1.2))
+        p.setBrush(_accent())
         p.drawEllipse(c, 7.5, 7.5)
+        p.setPen(Qt.white)
         font = p.font()
         font.setPixelSize(11)
         font.setBold(True)
@@ -1785,7 +1734,7 @@ _DRAW = {
     "position_camera": _position_camera, "walk": _walk,
     "look_around": _look_around, "first_person": _first_person,
     "zoom_extents": _zoom_extents, "view_iso": _view_iso,
-    # Standard views — a house drawn from each viewpoint (SketchUp-style).
+    # Standard views — the cube with the viewed face highlighted.
     "view_top": _view_top,
     "view_bottom": _view_bottom,
     "view_front": _view_front,
@@ -1806,19 +1755,19 @@ def tool_icon(key: str) -> QIcon:
     return QIcon(pm)
 
 
-# ---- Tool cursors (SketchUp-style) ------------------------------------------
-# The mouse pointer BECOMES the active tool — no crosshair. Like SketchUp,
-# each cursor's hotspot is the tool's natural action point: the pencil TIP
+# ---- Tool cursors --------------------------------------------------------------
+# The mouse pointer BECOMES the active tool — no crosshair. Each cursor's
+# hotspot is the tool's natural action point: the pencil TIP
 # for the drawing tools (whose cursor is a pencil with the shape as a small
 # badge), the eraser's working corner, the paint bucket's spout, the centre
 # of the move cross / protractor. Haloed so it reads over any background.
-# "select" keeps the standard arrow (SketchUp's Select is the plain pointer).
+# "select" keeps the standard arrow.
 
 _CURSOR_SIZE = 32   # logical cursor canvas (48-space icons scale onto it)
 _cursor_cache: dict = {}
 
 # Drawing tools: pencil cursor + a mini badge of the shape at bottom-right
-# (None = bare pencil, SketchUp's Line). Hotspot = the pencil tip.
+# (None = bare pencil, for Line). Hotspot = the pencil tip.
 _PENCIL_TOOLS = {
     "line": None, "freehand": "freehand",
     "rectangle": "rectangle", "rectangle_center": "rectangle_center",
@@ -1855,7 +1804,7 @@ _CURSOR_HOTSPOTS = {
 
 
 def _pencil(p, ink) -> None:
-    """SketchUp-style pencil pointing up-right, tip at (6, 42) in 48-space."""
+    """A pencil pointing up-right, tip at (6, 42) in 48-space."""
     p.save()
     p.translate(6.0, 42.0)
     p.rotate(-45.0)                 # +x runs up-right along the shaft
@@ -1893,10 +1842,10 @@ def _silhouette(src: QPixmap, color: QColor) -> QPixmap:
 
 
 def tool_cursor(key: str | None, plus: bool = False) -> QCursor | None:
-    """A cursor that IS the tool (SketchUp-style), or ``None`` to keep the
-    standard arrow (unknown keys, and Select — SketchUp's plain pointer).
+    """A cursor that IS the tool, or ``None`` to keep the standard arrow
+    (unknown keys, and Select).
 
-    ``plus`` adds SketchUp's little ``+``: on the Tape and the Protractor it
+    ``plus`` adds a little ``+``: on the Tape and the Protractor it
     is the ENTIRE interface of the Ctrl toggle — a plus beside the cursor
     means this measurement will leave a guide, no plus means it only
     measures. Without it the mode is invisible and you find out after the
@@ -1932,7 +1881,7 @@ def tool_cursor(key: str | None, plus: bool = False) -> QCursor | None:
         _pencil(p, ink)
         badge = _DRAW.get(_PENCIL_TOOLS[key] or "")
         if badge is not None:
-            # Mini badge of the shape at the bottom-right (SketchUp).
+            # Mini badge of the shape at the bottom-right.
             p.save()
             p.translate(28.0, 28.0)
             p.scale(20.0 / _PX, 20.0 / _PX)
@@ -1945,7 +1894,7 @@ def tool_cursor(key: str | None, plus: bool = False) -> QCursor | None:
     else:
         draw(p, ink)
     if plus:
-        # SketchUp's guide-mode plus, top-right so it never sits under the
+        # The guide-mode plus, top-right so it never sits under the
         # hotspot. Drawn before the halo so it gets one too.
         ppen = QPen(ink, 4.0)
         ppen.setCapStyle(Qt.RoundCap)
