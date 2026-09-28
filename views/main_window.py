@@ -48,7 +48,6 @@ from formats import obj as obj_format
 from formats import ifc as ifc_format
 from formats import stl as stl_format
 from formats import gltf as gltf_format
-from formats import skp_out as skp_out_format
 from tools.arc import CenterArcTool, ArcTool, ThreePointArcTool
 from tools.circle import CircleTool, PolygonTool
 from tools.dimension import DimensionTool
@@ -84,6 +83,29 @@ from views.viewport import Viewport
 
 IGZ_FILE_FILTER = "IngeTrazo document (*.igz);;All files (*)"
 
+
+def _repeatable(label: str):
+    """Mark a one-shot command as the one Repeat (Shift+R) replays.
+
+    Blender's Shift+R: after Reverse Faces on one face, select the next and
+    repeat. Recorded on the SLOT, not on a
+    QAction, because the right-click menu builds its actions afresh each
+    time — a remembered context-menu QAction would be a dead object by the
+    next repeat. Arguments the command takes (Intersect's mode) are kept;
+    the ``checked`` flag Qt may append to a menu's ``triggered`` is not."""
+    import functools
+    import inspect
+
+    def deco(fn):
+        takes = len(inspect.signature(fn).parameters) - 1    # minus self
+
+        @functools.wraps(fn)
+        def wrapper(self, *args):
+            args = args[:takes]
+            self._remember_command(label, lambda: fn(self, *args))
+            return fn(self, *args)
+        return wrapper
+    return deco
 
 
 def _obj_parts(temp):
@@ -736,6 +758,19 @@ class MainWindow(QMainWindow):
         )
         self._redo_action.triggered.connect(self._on_redo)
         edit_menu.addAction(self._redo_action)
+
+        # Blender's Shift+R (R alone is the Rectangle), and the first entry
+        # of the right-click menu. Not Enter, not Space: Space is SketchUp's
+        # Select, and a habit-pressed key that repeats could bring back the
+        # Eraser or run Explode on whatever happens to be selected.
+        self._repeat_action = QAction(tr("Repeat last command"), self)
+        # Its text names what it would repeat, so the shortcut editor (#138)
+        # needs a key that does not change with it.
+        self._repeat_action.setObjectName("repeat_last_command")
+        self._repeat_action.setShortcut(QKeySequence("Shift+R"))
+        self._repeat_action.setEnabled(False)
+        self._repeat_action.triggered.connect(self.repeat_last_command)
+        edit_menu.addAction(self._repeat_action)
         # On the Main toolbar right after the pointer, as SketchUp has them
         # (Marco, 23-09). The SAME actions as the Edit menu: a second QAction
         # with Ctrl+Z would make the shortcut ambiguous, and an ambiguous
@@ -1521,7 +1556,9 @@ class MainWindow(QMainWindow):
         Plugin tools are one-shot (they open a dialog and return): the
         viewport's active tool is left untouched, so the status bar keeps
         telling the truth about which drawing tool is current."""
-        self._tools[key].on_activate(self.viewport)
+        tool = self._tools[key]
+        self._remember_command(tool.name, lambda: tool.on_activate(self.viewport))
+        tool.on_activate(self.viewport)
 
     def _on_gl_ready(self, info: dict) -> None:
         """A viewport drawn on the CPU is the usual reason a Windows machine
@@ -1629,7 +1666,6 @@ class MainWindow(QMainWindow):
             (tr("COLLADA (.dae)…"), self._on_export_dae),
             (tr("STL (3D printing)…"), self._on_export_stl),
             (tr("Wavefront OBJ (.obj)…"), self._on_export_obj),
-            (tr("SketchUp (.skp)…"), self._on_export_skp),
             (tr("Current view as DXF…"), self._on_export_view_dxf),
             (tr("Image (PNG / JPG)…"), self._on_export_image),
         ):
@@ -1702,6 +1738,15 @@ class MainWindow(QMainWindow):
         self._coord_label = QLabel("")
         theme_style(self._coord_label, "color:{muted}; padding:0 8px;")
         bar.addPermanentWidget(self._coord_label)
+
+        # What Repeat would run, on the right while Select is up — the VCB
+        # box is hidden then, so the corner is free. It cannot ride on the
+        # Select hint: in Spanish that line would pass the 112-character
+        # cap and lose its end (test_status_hints_fit).
+        self._repeat_label = QLabel("")
+        theme_style(self._repeat_label, "color:{muted}; padding:0 8px;")
+        self._repeat_label.hide()
+        bar.addPermanentWidget(self._repeat_label)
 
         # SketchUp-style Measurements box (VCB), pinned bottom-right: a caption
         # ("Length" / "Dimensions" / "Distance") plus a boxed field showing the
@@ -1780,6 +1825,7 @@ class MainWindow(QMainWindow):
             name = tr(tool.name)
         else:
             name = ""
+        self._refresh_repeat_hint()
         if name and text:
             text = f"{name} — {text}"
         elif name:
@@ -1845,6 +1891,54 @@ class MainWindow(QMainWindow):
         self._tool_label.setText(tr("Tool: {name}", name=tr(tool.name)))
         self._refresh_vcb()
         self._update_status_hint()
+        # Select is where Repeat is pressed FROM, and the two tools entered
+        # from a right-click need the face or group that click was on.
+        if key not in ("select", "texture_position", "change_axes"):
+            self._remember_command(tool.name,
+                                   lambda k=key: self._activate_tool(k))
+
+    # ---- Repeat last command (Blender Shift+R, right-click ▸ Repeat) -------
+    def _remember_command(self, label: str, run) -> None:
+        self._last_command = (label, run)
+        act = getattr(self, "_repeat_action", None)
+        if act is not None:
+            act.setText(tr("Repeat {name}", name=tr(label)))
+            act.setEnabled(True)
+        self._refresh_repeat_hint()
+
+    def _refresh_repeat_hint(self) -> None:
+        """Say what Repeat would run, before it runs — with the keys it has
+        NOW: the shortcut editor (#138) may have moved or cleared them."""
+        lab = getattr(self, "_repeat_label", None)
+        if lab is None:
+            return
+        last = getattr(self, "_last_command", None)
+        show = (last is not None
+                and self.viewport.active_tool is self._tools["select"])
+        if show:
+            keys = self._repeat_action.shortcut().toString(
+                QKeySequence.NativeText)
+            text = (tr("{keys}: repeat {name}", keys=keys, name=tr(last[0]))
+                    if keys else tr("Repeat {name}", name=tr(last[0])))
+            if lab.text() != text:
+                lab.setText(text)
+        lab.setVisible(show)
+
+    def repeat_last_command(self) -> bool:
+        """Run again the last tool picked or one-shot command applied.
+
+        A tool comes back as if its key were pressed; a command runs on the
+        CURRENT selection — the point of it: reverse this face, select the
+        next, repeat."""
+        last = getattr(self, "_last_command", None)
+        if last is None:
+            self.viewport.flash_status(tr("Nothing to repeat yet"), 3000)
+            return False
+        label, run = last
+        run()
+        self.viewport.flash_status(tr("Repeat: {name}", name=tr(label)), 2000)
+        self.viewport.update()
+        return True
 
     def _activate_nav(self, key: str) -> None:
         self.viewport.set_nav_mode(key)
@@ -1856,6 +1950,7 @@ class MainWindow(QMainWindow):
         self._refresh_vcb()
         self._update_status_hint()
 
+    @_repeatable("Make Group")
     def _on_make_group(self) -> None:
         """SketchUp's Make Group (G) over the selection.
 
@@ -1906,6 +2001,7 @@ class MainWindow(QMainWindow):
         self.viewport.history.execute(MakeGroupCommand(faces, edges))
         self.viewport.update()
 
+    @_repeatable("Make Component")
     def _on_make_component(self) -> None:
         """SketchUp's Make Component (G): the selection becomes a shared
         DEFINITION placed as an instance — every copy shares it."""
@@ -1977,6 +2073,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(tr(
             "Component created — copies will share its definition"), 4000)
 
+    @_repeatable("Make Unique")
     def _on_make_unique(self) -> None:
         from core.history import MakeUniqueCommand
         for g in [g for g in self.viewport.scene.selection
@@ -1984,6 +2081,7 @@ class MainWindow(QMainWindow):
             self.viewport.history.execute(MakeUniqueCommand(g))
         self.viewport.update()
 
+    @_repeatable("Merge Groups")
     def _on_merge_groups(self) -> None:
         from core.history import MergeGroupsCommand
         groups = [e for e in self.viewport.scene.selection
@@ -2011,6 +2109,7 @@ class MainWindow(QMainWindow):
                             (WITH_CONTEXT, tr("With Context"))):
             menu.addAction(label, lambda m=mode: self._on_intersect_faces(m))
 
+    @_repeatable("Intersect Faces")
     def _on_intersect_faces(self, mode: str) -> None:
         """SketchUp's Intersect Faces: edges wherever the selection's faces
         cross the others (core/intersect.py), added to the context being
@@ -2030,6 +2129,7 @@ class MainWindow(QMainWindow):
         self.viewport.flash_status(
             tr("{n} intersection edges added", n=len(segs)), 3000)
 
+    @_repeatable("Split into Pieces")
     def _on_split_into_pieces(self) -> None:
         """Regroup the selected group's contents by physical piece — the
         solids that do not touch (see :mod:`core.pieces`). The group stays
@@ -2064,6 +2164,7 @@ class MainWindow(QMainWindow):
             n=len(pieces)), 5000)
         self.viewport.update()
 
+    @_repeatable("Explode Group")
     def _on_explode_group(self) -> None:
         if self.viewport.scene.edit_group is not None:
             self.viewport.flash_status(tr(
@@ -2076,6 +2177,7 @@ class MainWindow(QMainWindow):
         if groups:
             self.viewport.update()
 
+    @_repeatable("Convert Path to Geometry")
     def _on_convert_geopath(self) -> None:
         """Bake selected georef paths into real mesh geometry (Track G bridge).
 
@@ -2262,6 +2364,7 @@ class MainWindow(QMainWindow):
         if panel is not None:
             panel.refresh()
 
+    @_repeatable("Delete Guides")
     def _on_delete_guides(self) -> None:
         """Remove every construction guide (SketchUp's Edit ▸ Delete Guides)."""
         from core.history import DeleteGuidesCommand
@@ -2369,6 +2472,13 @@ class MainWindow(QMainWindow):
         lone_group = (len(sel) == 1 and has_group)
         sec_planes = [e for e in sel if isinstance(e, SectionPlane)]
         menu = QMenu(self)
+
+        # AutoCAD's first right-click entry: where a mouse-only hand looks.
+        last = getattr(self, "_last_command", None)
+        if last is not None:
+            menu.addAction(tr("Repeat {name}", name=tr(last[0])),
+                           self.repeat_last_command)
+            menu.addSeparator()
 
         if locked_image is not None and locked_image not in sel:
             name = getattr(locked_image, "name", "") or tr("image")
@@ -2697,6 +2807,7 @@ class MainWindow(QMainWindow):
         return [e for e in entities
                 if isinstance(e, (Edge, Face, Group)) and not _is_hidden(e)]
 
+    @_repeatable("Hide")
     def _on_hide(self) -> None:
         """SketchUp's Edit ▸ Hide: the selected objects (groups,
         components), faces and edges stop drawing, picking and exporting —
@@ -2793,6 +2904,7 @@ class MainWindow(QMainWindow):
             panel.refresh()
         self.viewport.update()
 
+    @_repeatable("Divide")
     def _on_divide(self) -> None:
         """Divide the selected edges / curves into N equal pieces (#63)."""
         from PySide6.QtWidgets import QInputDialog
@@ -2816,6 +2928,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             tr("Divided into {n} segments", n=n), 3000)
 
+    @_repeatable("Reverse Faces")
     def _on_reverse_faces(self) -> None:
         """SketchUp's Reverse Faces: flip the winding (and thus the front/back
         sides) of the selected faces."""
@@ -2832,6 +2945,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             tr("Reversed {n} face(s).", n=len(faces)), 3000)
 
+    @_repeatable("Orient Faces")
     def _on_orient_faces(self) -> None:
         """SketchUp's Orient Faces (issue #77): every face connected to the
         chosen one turns to wind like it — its front side is the one the
@@ -2853,6 +2967,7 @@ class MainWindow(QMainWindow):
             tr("Oriented {n} face(s) like the selected one.", n=len(flip))
             if flip else tr("The connected faces already match."), 3000)
 
+    @_repeatable("Heal Overlapping Faces")
     def _on_heal_overlaps(self) -> None:
         cmd = HealOverlapsCommand()
         self.viewport.history.execute(cmd)
@@ -2861,6 +2976,7 @@ class MainWindow(QMainWindow):
             tr("Healed {n} overlapping face(s).", n=cmd.healed) if cmd.healed
             else tr("No overlapping faces found."), 3000)
 
+    @_repeatable("Rebuild Faces (Planar)")
     def _on_rebuild_planar(self) -> None:
         # With faces selected, rebuild just THEIR plane — the per-plane
         # rebuild every stroke already runs — so a 3D model keeps the tool
@@ -3886,6 +4002,7 @@ class MainWindow(QMainWindow):
             italic_check.isChecked(), height_spin.value(),
             depth_spin.value())
 
+    @_repeatable("3D Text")
     def _on_insert_3d_text(self) -> None:
         """SketchUp's 3D Text: the dialog generates REAL extruded geometry —
         a container group with ONE GROUP PER LETTER, editable later from
@@ -3973,12 +4090,6 @@ class MainWindow(QMainWindow):
         QMessageBox.information(
             self, tr("Get more models and textures"),
             tr("Free sources that open directly in IngeTrazo:") + "<br><br>"
-            "<b>3D Warehouse</b> — "
-            "<a href='https://3dwarehouse.sketchup.com'>"
-            "3dwarehouse.sketchup.com</a><br>"
-            + tr("Download as COLLADA (.dae) — or the .skp itself — and use "
-                 "File → Import.")
-            + "<br><br>"
             "<b>Poly Haven</b> — <a href='https://polyhaven.com'>"
             "polyhaven.com</a> " + tr("(CC0: models OBJ and PBR textures)")
             + "<br><b>ambientCG</b> — <a href='https://ambientcg.com'>"
@@ -4020,7 +4131,7 @@ class MainWindow(QMainWindow):
         """Parse ``skp`` off the UI thread, keeping the event loop responsive.
 
         Returns ``(payload, exc)`` — ``payload`` is the parsed geometry (or
-        ``None``), ``exc`` is a ``NeedsConverter`` (fall back to skp2dae), any
+        ``None``), ``exc`` is a ``NeedsConverter`` (the reader cannot read it), any
         other exception (real failure), or ``None``. The parse touches no
         ``Scene`` so it is safe off-thread; ``apply_payload`` runs on the UI
         thread in the caller. A local ``QEventLoop`` blocks here until the
@@ -4138,49 +4249,16 @@ class MainWindow(QMainWindow):
         self._update_title()
         self.statusBar().showMessage(tr("Imported {name}", name=path.name), 3000)
 
-    # ---- SKP via the skp2dae satellite converter -----------------------------
-    @staticmethod
-    def _find_skp_converter():
-        """Locate the external skp2dae converter and return the command list
-        to invoke it, or ``None``. Search order: ``SKP2DAE_EXE`` env var,
-        ``~/.local/share/skp2dae/skp2dae.exe``, then ``skp2dae`` on PATH.
-        The converter is a SEPARATE program (it loads Trimble's proprietary
-        SketchUpAPI.dll, which can never ship inside GPL IngeTrazo); on
-        Linux a ``.exe`` runs through Wine."""
-        import os
-        import shutil
-        import sys as _sys
-        candidates = []
-        env = os.environ.get("SKP2DAE_EXE")
-        if env:
-            candidates.append(Path(env))
-        candidates.append(
-            Path.home() / ".local" / "share" / "skp2dae" / "skp2dae.exe")
-        which = shutil.which("skp2dae")
-        if which:
-            candidates.append(Path(which))
-        for cand in candidates:
-            if not cand.exists():
-                continue
-            if cand.suffix.lower() == ".exe" and _sys.platform != "win32":
-                wine = shutil.which("wine")
-                if wine:
-                    return [wine, str(cand)]
-                continue
-            return [str(cand)]
-        return None
-
+    # ---- SKP import: IngeTrazo's own reader (formats/skp.py) -----------------
     def import_skp_path(self, skp: Path) -> bool:
-        """Import ``skp``. Prefers a pure-Python parser backend (offline, no
-        Wine/DLL — see ``formats/skp.py``); falls back to the external skp2dae
-        converter for versions no pure backend can read yet (its .dae and
-        texture folder land NEXT TO the .skp, so texture paths stay valid for
-        the session and for saved documents)."""
+        """Import ``skp`` with IngeTrazo's own pure-Python reader (offline,
+        no Wine, nothing of Trimble's -- see ``formats/skp.py``). A file it
+        cannot read is reported, with the way around it (export COLLADA or
+        OBJ from SketchUp)."""
         from formats import skp as skp_format
         if skp_format.can_handle(skp):
-            # Heavy parse OUTSIDE the undo history: decide pure-vs-converter
-            # before touching the scene, so a failed/empty parse never leaves a
-            # half-applied edit. NeedsConverter → fall through to skp2dae.
+            # Heavy parse OUTSIDE the undo history, so a failed/empty parse
+            # never leaves a half-applied edit.
             dlg, cb = self._import_progress(
                 tr("Importing {name}…", name=skp.name))
             # The parse is heavy (seconds on a big model) and pure-Python, so
@@ -4191,10 +4269,7 @@ class MainWindow(QMainWindow):
             # thread below.
             payload, exc = self._parse_skp_threaded(skp, cb)
             if isinstance(exc, skp_format.NeedsConverter):
-                payload = None
-                self.statusBar().showMessage(tr(
-                    "Pure importer unavailable for this file — using the "
-                    "external converter (slower)."), 8000)
+                payload = None             # unreadable: said below
             elif exc is not None:
                 dlg.close()
                 QMessageBox.critical(self, tr("Import SKP failed"), str(exc))
@@ -4223,171 +4298,17 @@ class MainWindow(QMainWindow):
                     self.statusBar().showMessage(
                         tr("Imported {name}", name=skp.name), 3000)
                 return True
-            dlg.close()   # no pure backend could read it → converter below
+            dlg.close()   # the reader could not read it: said below
 
-        # ---- Fallback: the external skp2dae converter (Trimble DLL via Wine) --
-        command = self._find_skp_converter()
-        if command is None:
-            answer = QMessageBox.question(
-                self, tr("Import SKP"),
-                tr("Opening .skp needs the skp2dae converter (a separate "
-                   "program IngeTrazo launches).\n\n"
-                   "Install it automatically? This downloads:\n"
-                   "• skp2dae.exe from the IngeTrazo releases (free "
-                   "software, MIT), and\n"
-                   "• the official SketchUp library (SketchUpAPI.dll) from "
-                   "the public release of Blender's 'SketchUp Importer' "
-                   "add-on (a third-party project).\n\n"
-                   "Everything lands in ~/.local/share/skp2dae/."),
-                QMessageBox.Yes | QMessageBox.No)
-            if answer != QMessageBox.Yes:
-                return False
-            if not self._install_skp_converter():
-                return False
-            command = self._find_skp_converter()
-            if command is None:
-                return False
-        import shutil
-        import subprocess
-        import tempfile
-        import unicodedata
-        from PySide6.QtCore import Qt as _Qt
-        from PySide6.QtWidgets import QApplication
-
-        # Wine re-encodes argv to the Windows ANSI codepage, so an accented
-        # path ("Imágenes", "ñandú.skp") reaches the converter — and the
-        # SDK's UTF-8 file API — mangled. Sidestep it: convert through a
-        # temporary ASCII path and move the results next to the original.
-        # The texture folder keeps the .dae's stem (its internal refs are
-        # relative to that name), so accented stems come back sanitized.
-        ascii_stem = unicodedata.normalize("NFKD", skp.stem)
-        ascii_stem = ascii_stem.encode("ascii", "ignore").decode() or "modelo"
-        needs_tmp = any(ord(c) > 127 for c in str(skp))
-        tmpdir: Path | None = None
-        if needs_tmp:
-            tmpdir = Path(tempfile.mkdtemp(prefix="skp2dae-"))
-            work_skp = tmpdir / (ascii_stem + ".skp")
-            shutil.copy(skp, work_skp)
-        else:
-            work_skp = skp
-        work_dae = work_skp.with_suffix(".dae")
-
-        self.statusBar().showMessage(
-            tr("Converting {name}… (skp2dae)", name=skp.name))
-        QApplication.setOverrideCursor(_Qt.WaitCursor)
-        try:
-            result = subprocess.run(
-                command + [str(work_skp), str(work_dae)],
-                capture_output=True, timeout=600)
-        except Exception as exc:  # noqa: BLE001
-            QApplication.restoreOverrideCursor()
-            QMessageBox.critical(self, tr("Import SKP failed"), str(exc))
-            return False
-        QApplication.restoreOverrideCursor()
-        # The converter (under Wine) may emit codepage bytes — never assume
-        # UTF-8 when surfacing its output.
-        detail = (result.stderr or result.stdout or b"").decode(
-            "utf-8", errors="replace").strip()[-800:]
-        if result.returncode != 0 or not work_dae.exists():
-            QMessageBox.critical(
-                self, tr("Import SKP failed"),
-                detail or tr("The converter produced no output."))
-            return False
-        dae = work_dae
-        if tmpdir is not None:
-            dae = skp.parent / work_dae.name
-            shutil.move(str(work_dae), dae)
-            tex_dir = tmpdir / ascii_stem
-            if tex_dir.is_dir():
-                target = skp.parent / ascii_stem
-                if target.exists():
-                    shutil.rmtree(target)
-                shutil.move(str(tex_dir), target)
-            shutil.rmtree(tmpdir, ignore_errors=True)
-        self._import_dae_path(dae)
-        self._import_name = skp.name
-        self._update_title()
-        return True
-
-    # URL del exe limpio (solo codigo MIT: bindea la DLL en runtime, no
-    # contiene nada de Trimble) — se publica como asset de los releases.
-    _SKP2DAE_EXE_URL = ("https://github.com/ingelibre/ingetrazo/releases/"
-                        "latest/download/skp2dae.exe")
-    #: Repo público del add-on de Blender cuyo release trae SketchUpAPI.dll.
-    _SKP_ADDON_REPO = "RedHaloStudio/Sketchup_Importer"
-
-    @staticmethod
-    def _download_bytes(url: str, timeout: int = 120) -> bytes:
-        import urllib.request
-        req = urllib.request.Request(url, headers={"User-Agent": "IngeTrazo"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.read()
-
-    @staticmethod
-    def _extract_skp_dlls(zip_bytes: bytes, dest: Path) -> list[str]:
-        """Pull the SketchUp runtime DLLs out of the add-on zip into ``dest``.
-        Returns the names extracted (empty when none found)."""
-        import io
-        import zipfile
-        wanted = ("SketchUpAPI.dll", "SketchUpCommonPreferences.dll")
-        got = []
-        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-            for entry in zf.namelist():
-                base = entry.rsplit("/", 1)[-1]
-                if base in wanted and base not in got:
-                    (dest / base).write_bytes(zf.read(entry))
-                    got.append(base)
-        return got
-
-    def _install_skp_converter(self) -> bool:
-        """One-click install of the skp2dae converter for non-technical
-        users: the MIT exe comes from OUR releases; the proprietary SketchUp
-        DLL is fetched by the USER'S machine from the Blender add-on's own
-        public release (never hosted or redistributed by us)."""
-        import json as _json
-        from PySide6.QtCore import Qt as _Qt
-        from PySide6.QtWidgets import QApplication
-        dest = Path.home() / ".local" / "share" / "skp2dae"
-        dest.mkdir(parents=True, exist_ok=True)
-        QApplication.setOverrideCursor(_Qt.WaitCursor)
-        try:
-            self.statusBar().showMessage(tr("Downloading skp2dae…"))
-            QApplication.processEvents()
-            (dest / "skp2dae.exe").write_bytes(
-                self._download_bytes(self._SKP2DAE_EXE_URL))
-
-            self.statusBar().showMessage(
-                tr("Downloading the SketchUp library (Blender add-on)…"))
-            QApplication.processEvents()
-            api = (f"https://api.github.com/repos/{self._SKP_ADDON_REPO}"
-                   "/releases/latest")
-            release = _json.loads(self._download_bytes(api).decode("utf-8"))
-            asset_url = next(
-                a["browser_download_url"] for a in release.get("assets", [])
-                if a["name"].lower().endswith(".zip"))
-            got = self._extract_skp_dlls(
-                self._download_bytes(asset_url, timeout=300), dest)
-            if "SketchUpAPI.dll" not in got:
-                raise RuntimeError(
-                    tr("The add-on zip did not contain SketchUpAPI.dll"))
-        except Exception as exc:  # noqa: BLE001
-            QApplication.restoreOverrideCursor()
-            QMessageBox.critical(self, tr("Import SKP"),
-                                 tr("Automatic install failed: {err}",
-                                    err=str(exc)))
-            return False
-        QApplication.restoreOverrideCursor()
-        import shutil as _shutil
-        import sys as _sys
-        if _sys.platform != "win32" and _shutil.which("wine") is None:
-            QMessageBox.information(
-                self, tr("Import SKP"),
-                tr("Converter installed, but Wine is missing. Install it "
-                   "with your package manager (e.g. sudo apt install wine) "
-                   "and try again."))
-            return False
-        self.statusBar().showMessage(tr("skp2dae converter installed"), 4000)
-        return True
+        # No converter behind this: IngeTrazo reads .skp with its own
+        # reader only (the external converter that loaded Trimble's DLL was
+        # removed after Trimble's copyright notice of 2026-09-28).
+        QMessageBox.warning(
+            self, tr("Import SKP"),
+            tr("IngeTrazo could not read {name} with its built-in SketchUp "
+               "reader.\n\nOpen it in SketchUp and export it as COLLADA "
+               "(.dae) or OBJ, then import that file here.", name=skp.name))
+        return False
 
     def _on_import_skp(self) -> None:
         path_str, _ = file_dialogs.getOpenFileName(
@@ -5200,11 +5121,6 @@ class MainWindow(QMainWindow):
     def _on_export_obj(self) -> None:
         self._export("OBJ", "obj", tr("Wavefront OBJ (*.obj)"), obj_format.save_obj)
 
-    def _on_export_skp(self) -> None:
-        """Native SketchUp export — opens directly in SketchUp 2017+."""
-        self._export("SketchUp", "skp", tr("SketchUp (*.skp)"),
-                     skp_out_format.save_skp)
-
     def _on_export_glb(self) -> None:
         """Single-file 3D export (geometry + materials + textures embedded).
         Best format for 'send it so a colleague can view it' — no texture folder
@@ -5323,8 +5239,11 @@ class MainWindow(QMainWindow):
             QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
             self)
         box.setOption(QMessageBox.Option.DontUseNativeDialog, True)
-        # Qt names its standard buttons in English unless a Qt translator
-        # is installed, and none is: name them through our own catalog.
+        # main.py installs a Qt translator that already names the standard
+        # buttons in the app language, but only when the qtbase_<lang>.qm
+        # file is found, and «Don't Save» is worded differently per
+        # platform: name all three through our own catalog so they read
+        # the same everywhere.
         for button, text in ((QMessageBox.Save, "Save"),
                              (QMessageBox.Discard, "Don't Save"),
                              (QMessageBox.Cancel, "Cancel")):
@@ -5336,8 +5255,24 @@ class MainWindow(QMainWindow):
             return not self._is_dirty()
         return answer == QMessageBox.Discard
 
+    # "Saved" is recorded as the scene version at that moment (as every
+    # caller and test has always written it) and kept as the CONTENT version:
+    # a later selection bumps ``scene.version`` for the GL caches but not
+    # ``content_version``, so a click after Ctrl+S no longer asks to save
+    # again (issue #159). -1 stays "never saved".
+    @property
+    def _saved_version(self) -> int:
+        return self._saved_content
+
+    @_saved_version.setter
+    def _saved_version(self, version: int) -> None:
+        viewport = getattr(self, "viewport", None)
+        scene = getattr(viewport, "scene", None)
+        view = getattr(scene, "view_version", 0) if version >= 0 else 0
+        self._saved_content = version - view
+
     def _is_dirty(self) -> bool:
-        return self.viewport.scene.version != self._saved_version
+        return self.viewport.scene.content_version != self._saved_content
 
     def _on_scene_version_changed(self, _version: int) -> None:
         self._update_title()

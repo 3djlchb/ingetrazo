@@ -259,8 +259,8 @@ class PositionCameraTool(_EyeTool):
         viewport.update()
         flash = getattr(viewport, "flash_status", None)
         if flash is not None:
-            flash(tr("Eye placed {h:.2f} m above the point — drag to look "
-                     "around, Walk to move", h=eye_height()), 4000)
+            flash(tr("Eye placed {h} above the point — drag to look "
+                     "around, Walk to move", h=fmt_len(eye_height())), 4000)
 
     def on_value(self, viewport, value) -> bool:
         """«Height offset»: the eye height itself. Typed after placing, the

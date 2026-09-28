@@ -238,26 +238,24 @@ def _self_check() -> int:
     if not ok:
         problems.append("AI recipe book")
 
-    # The .skp writer builds every file on top of openskp's bundled blank
-    # (``_scaffold/blank_v17.skp``, package data PyInstaller doesn't collect
-    # by itself): a bundle without it starts fine and dies on Export ▸
-    # SketchUp with "[Errno 2]" — 0.4.1 on Windows shipped exactly that.
+    # openskp ships a blank .skp template made with Trimble's SketchUp SDK
+    # (its writer builds files on top of it). IngeTrazo does not distribute
+    # it since Trimble's notice of 2026-09-28 and has no SketchUp export:
+    # a bundle that still carries it is a packaging regression.
     try:
         from importlib import resources
 
         scaffold = resources.files("openskp") / "_scaffold" / "blank_v17.skp"
-        ok = scaffold.is_file()
-        where = str(scaffold)
-    except Exception as exc:  # openskp itself missing or unimportable
-        ok, where = False, f"({exc})"
-    print(f"  skp scaffold   : {'found' if ok else 'MISSING'}  {where}")
-    if not ok:
-        problems.append("skp scaffold")
+        shipped = scaffold.is_file()
+    except Exception:  # openskp itself missing: reported below
+        shipped = False
+    print(f"  skp template   : {'SHIPPED (remove it)' if shipped else 'not shipped'}")
+    if shipped and getattr(sys, "frozen", False):
+        problems.append("SketchUp SDK template shipped")
 
     # openskp 1.3.0 triangulates with mapbox_earcut, a NATIVE extension that
     # ``import openskp`` needs before it will load at all. Reported on its
-    # own line: without it the scaffold probe above fails too, and its
-    # message would blame the wrong thing.
+    # own line.
     try:
         import mapbox_earcut  # noqa: F401
         ok, where = True, getattr(mapbox_earcut, "__file__", "?")
@@ -278,12 +276,17 @@ def _self_check() -> int:
     if not ok:
         problems.append("manifold3d")
 
-    # The .skp fallback converter is optional (user-installed, runs under
-    # Wine); report presence without failing on absence.
-    wine = shutil.which("wine")
-    skp2dae = Path.home() / ".local" / "share" / "skp2dae" / "skp2dae.exe"
-    print(f"  wine (optional): {wine or 'not installed'}")
-    print(f"  skp2dae (opt.) : {skp2dae if skp2dae.is_file() else 'not installed'}")
+    # Qt's own catalog for the standard buttons (see _install_qt_translator).
+    # Optional: without the file the buttons stay in English, as before, so
+    # it is reported but never fails the check.
+    try:
+        from PySide6.QtCore import QLibraryInfo
+        folder = Path(QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath))
+        have = sorted(f.stem[len("qtbase_"):] for f in folder.glob("qtbase_*.qm"))
+        where = f"{len(have)} languages, es {'yes' if 'es' in have else 'NO'}  {folder}"
+    except Exception as exc:  # noqa: BLE001
+        where = f"({exc})"
+    print(f"  Qt buttons (opt): {where}")
 
     if problems:
         print(f"\nNOT OK — missing: {', '.join(problems)}")

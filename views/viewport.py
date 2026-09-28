@@ -46,6 +46,7 @@ from array import array
 from pathlib import Path
 from typing import Optional
 from core.units import fmt_len as _fmt_len
+from core.units import typed_value_text as _typed_value_text
 
 # Perf telemetry (INGETRAZO_PERF=1): every operation slower than 50 ms and a
 # once-per-second frame summary land in ~/ingetrazo-perf.log — the tool for
@@ -236,6 +237,26 @@ SHADER_DIR = app_root() / "resources" / "shaders"
 #: ~a dozen times per hover, and an exploded medium import (9k faces =
 #: ~20k edges) froze every mouse move (user report, piscina.igz).
 _LOOSE_SNAP_CAP = 3000
+
+
+def _ray_aabb_span(o, d, lo, hi):
+    """``(t_in, t_out)`` of the forward ray (t >= 0) through the AABB, or
+    ``None`` if it misses. Plain floats."""
+    tmin, tmax = 0.0, float("inf")
+    for i in range(3):
+        di = d[i]
+        if -1e-12 < di < 1e-12:
+            if o[i] < lo[i] - 1e-9 or o[i] > hi[i] + 1e-9:
+                return None
+            continue
+        t1 = (lo[i] - o[i]) / di
+        t2 = (hi[i] - o[i]) / di
+        if t1 > t2:
+            t1, t2 = t2, t1
+        tmin, tmax = max(tmin, t1), min(tmax, t2)
+        if tmin > tmax:
+            return None
+    return tmin, tmax
 
 
 def _ray_aabb(o, d, lo, hi) -> bool:
@@ -783,6 +804,7 @@ class Viewport(QOpenGLWidget):
         "through_point": "Through point",
         "perp_face": "Perpendicular to face",
         "center": "Center",
+        "guide_point": "Guide point",
     }
 
     def __init__(self, parent=None) -> None:
@@ -991,6 +1013,8 @@ class Viewport(QOpenGLWidget):
         # Camera navigation state (middle button)
         self._last_pos = None
         self._pan_mode = False
+        #: where the current orbit gesture turns (#164); None = the target
+        self._orbit_pivot = None
         # A mouse-look drag for a tool with ``on_look`` (First Person):
         # (button, last local point) while a button is held, else None.
         self._look_drag = None
@@ -6734,6 +6758,8 @@ class Viewport(QOpenGLWidget):
         rgb, label = {
             "edge": (COLOR_ON_EDGE, "on_edge"),
             "face": (COLOR_ON_FACE, "on_face"),
+            "guide_line": (COLOR_ON_EDGE, "on_line"),
+            "guide_point": (COLOR_ENDPOINT, "guide_point"),
         }.get(kind, (COLOR_ENDPOINT, "endpoint"))
         color = QColor.fromRgbF(*rgb, 1.0)
         painter.setPen(QPen(QColor(255, 255, 255, 230), 4.0))
@@ -6783,7 +6809,7 @@ class Viewport(QOpenGLWidget):
         if pixel is None:
             return
         if self._value_buffer:
-            text = f"{self._value_buffer} m"
+            text = _typed_value_text(self._value_buffer)
             fg = QColor("#0F141B")
             shadow = QColor(255, 220, 130, 235)  # warm tint while typing
         else:
@@ -9972,6 +9998,7 @@ class Viewport(QOpenGLWidget):
         # any camera drag it was in the middle of.
         self.nav_mode = None
         self._last_pos = None
+        self._orbit_pivot = None
         self._pan_mode = False
         self._look_drag = None
         self.unsetCursor()
@@ -10364,9 +10391,45 @@ class Viewport(QOpenGLWidget):
             return False          # the container and what lives inside it
         return self._owner_of(group) is not ctx
 
+    def _orbit_pivot_at(self, x: float, y: float):
+        """Where an orbit gesture that starts at pixel ``(x, y)`` turns (#164).
+
+        1. The model point under the cursor -- the nearest face the pick
+           ray hits (loose geometry and groups alike);
+        2. else, with the cursor on sky or ground, the middle of the
+           stretch of the view's central ray that crosses the model's
+           bounding box -- the middle of what is on screen;
+        3. else the camera target (an empty scene, a model off screen).
+        Worked out once per gesture: the pivot stays put while dragging.
+        """
+        origin, direction = self._pixel_to_ray(x, y)
+        if origin is not None and direction is not None:
+            try:
+                idx = self._pick_index()
+                if idx.entities:
+                    import numpy as np
+                    face_t = self._hover_face_t(idx, origin, direction)
+                    if face_t is not None and len(face_t):
+                        t = float(np.min(face_t))
+                        if math.isfinite(t) and t > 0.0:
+                            return origin + direction * t
+            except Exception:                  # noqa: BLE001 - fall back
+                pass
+        lo, hi = self.scene.bounds()
+        if lo is not None:
+            o, d = self._pixel_to_ray(self.width() / 2.0, self.height() / 2.0)
+            if o is not None and d is not None:
+                span = _ray_aabb_span(
+                    (o.x(), o.y(), o.z()), (d.x(), d.y(), d.z()),
+                    (lo.x(), lo.y(), lo.z()), (hi.x(), hi.y(), hi.z()))
+                if span is not None:
+                    return o + d * ((span[0] + span[1]) * 0.5)
+        return QVector3D(self.camera.target)
+
     def _end_camera_drag(self) -> None:
         """Forget a camera drag in progress (orbit, pan or zoom by drag)."""
         self._last_pos = None
+        self._orbit_pivot = None
         self._pan_mode = False
         if self.nav_mode is not None:
             self._apply_nav_cursor()
@@ -10388,6 +10451,7 @@ class Viewport(QOpenGLWidget):
         self.last_snap = None
         self.nav_mode = mode
         self._last_pos = None             # a drag in progress ends here
+        self._orbit_pivot = None
         self._pan_mode = False
         if mode is not None:
             self._apply_nav_cursor()      # orbit / pan / magnifier icons
@@ -10450,6 +10514,8 @@ class Viewport(QOpenGLWidget):
         if ev.button() == Qt.MiddleButton:
             self._last_pos = ev.position().toPoint()
             self._pan_mode = bool(ev.modifiers() & Qt.ShiftModifier)
+            self._orbit_pivot = self._orbit_pivot_at(
+                ev.position().x(), ev.position().y())
             # SketchUp: while the wheel-drag lasts, the pointer becomes the
             # orbit (or pan) icon; the tool cursor comes back on release.
             from views.icons import tool_cursor
@@ -10471,6 +10537,9 @@ class Viewport(QOpenGLWidget):
                 self.nav_mode == "pan"
                 or bool(ev.modifiers() & Qt.ShiftModifier)
             )
+            self._orbit_pivot = (
+                self._orbit_pivot_at(ev.position().x(), ev.position().y())
+                if self.nav_mode == "orbit" else None)
             # The orbit/pan icon stays through the drag (SketchUp).
             self._apply_nav_cursor()
             return
@@ -10646,8 +10715,12 @@ class Viewport(QOpenGLWidget):
             elif self._pan_mode:
                 self.camera.pan(dx, dy, self.height())
             else:
-                self.camera.orbit(
-                    dx, -dy if self._invert_orbit_y else dy, self.height())
+                pivot = getattr(self, "_orbit_pivot", None)
+                ody = -dy if self._invert_orbit_y else dy
+                if pivot is not None:
+                    self.camera.orbit_about(pivot, dx, ody, self.height())
+                else:
+                    self.camera.orbit(dx, ody, self.height())
             self.update()
             return
 
@@ -10828,6 +10901,7 @@ class Viewport(QOpenGLWidget):
             return
         if ev.button() == Qt.MiddleButton:
             self._last_pos = None
+            self._orbit_pivot = None
             self._pan_mode = False
             if self.nav_mode is not None:
                 self._apply_nav_cursor()
@@ -10847,6 +10921,7 @@ class Viewport(QOpenGLWidget):
 
         if ev.button() == Qt.LeftButton and self.nav_mode is not None:
             self._last_pos = None
+            self._orbit_pivot = None
             self._pan_mode = False
             self._apply_nav_cursor()
             return
@@ -11280,6 +11355,7 @@ class Viewport(QOpenGLWidget):
             shift_lock_color=self._shift_lock[1] if self._shift_lock else None,
             linear_mode=self.linear_inference_mode,
             work_plane_normal=self._work_plane_normal(),
+            radial_arm=bool(getattr(self.active_tool, "radial_arm", False)),
         )
         snap = self._axis_source_cue(snap, px_x, px_y)
         snap = self._extension_snap(snap, px_x, px_y)
@@ -11406,8 +11482,11 @@ class Viewport(QOpenGLWidget):
                                               direction flip it, SketchUp-style).
         - ``"30cm"`` / ``"1500mm"`` / ``"2m"`` → unit suffix per field; bare
                                               numbers are metres (project unit).
-        Comma is always the decimal separator; ``;`` and space are field
-        separators (SketchUp convention adapted to our locale).
+        Comma is the decimal separator; ``;`` and space are field
+        separators (SketchUp convention adapted to our locale) -- except for
+        a tool that only takes several values (``vcb_comma_lists``, the
+        Rectangle): there ``200,100`` is two fields, as in SketchUp (#152).
+        See :meth:`_parse_value_buffer`.
         """
         if self.active_tool is None:
             return False
@@ -11418,7 +11497,9 @@ class Viewport(QOpenGLWidget):
         if key in (Qt.Key_Return, Qt.Key_Enter):
             if not self._value_buffer:
                 return False
-            value = self._parse_value_buffer(self._value_buffer)
+            value = self._parse_value_buffer(
+                self._value_buffer,
+                comma_lists=getattr(self.active_tool, "vcb_comma_lists", False))
             if value is None:
                 self._set_value_buffer("")
                 return True
@@ -11527,7 +11608,7 @@ class Viewport(QOpenGLWidget):
         return False
 
     @staticmethod
-    def _parse_value_buffer(buffer: str):
+    def _parse_value_buffer(buffer: str, comma_lists: bool = False):
         """Return a float, a 2-tuple ``(w, h)`` (rectangle dimensions), a
         3-tuple ``(dx, dy, dz)`` (delta), or ``None`` on parse error. Each tool's
         ``on_value`` accepts the arity it understands and ignores the rest.
@@ -11535,7 +11616,20 @@ class Viewport(QOpenGLWidget):
         ``in`` or ``"``, ``ft`` or ``'``, feet-and-inches ``1'6"``, fractions
         ``3/4"`` (SketchUp's forms, so a 2×4 is typed ``2";4"`` while the
         span stays ``3.2``). Bare numbers are metres, and a leading minus is
-        kept (direction tools flip on it)."""
+        kept (direction tools flip on it).
+
+        **The comma (#152).** ``;`` and whitespace always separate fields.
+        A comma is a decimal separator (``2,5`` is 2.5, ``2,5;1,2`` is
+        2.5 × 1.2 -- Spanish and Portuguese write decimals that way) --
+        EXCEPT when ``comma_lists`` is set and the entry has no ``;`` and no
+        space: then commas separate fields, so ``200,100`` is 200 × 100 as
+        in SketchUp. ``comma_lists`` is the caller's word that the tool takes
+        only several values (the Rectangle), where a lone decimal could never
+        be meant; a user who wants decimals there separates with ``;``
+        (``1,5;2,5``), which is SketchUp's own rule in comma-decimal locales."""
+        if (comma_lists and ";" not in buffer
+                and not any(ch.isspace() for ch in buffer.strip())):
+            buffer = buffer.replace(",", " ")
         normalized = buffer.replace(",", ".").replace(";", " ")
         stripped = normalized.strip()
         # SketchUp's arrays after a copy: "3x" / "3*" / "*3" (external) and
@@ -11693,6 +11787,7 @@ class Viewport(QOpenGLWidget):
             shift_lock_color=self._shift_lock[1] if self._shift_lock else None,
             linear_mode=self.linear_inference_mode,
             work_plane_normal=self._work_plane_normal(),
+            radial_arm=bool(getattr(self.active_tool, "radial_arm", False)),
         )
         snap = self._axis_source_cue(snap, px_x, px_y)
         snap = self._extension_snap(snap, px_x, px_y)

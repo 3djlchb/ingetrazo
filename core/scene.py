@@ -36,6 +36,11 @@ class Scene:
     mesh: Mesh = field(default_factory=Mesh)
     selection: set = field(default_factory=set)
     version: int = 0
+    #: How many of ``version``'s bumps changed only what is SHOWN -- the
+    #: selection -- and not the document. The GL caches key on ``version``
+    #: and need every bump; "unsaved changes" must not: a click on empty
+    #: space after Ctrl+S asked to save again (issue #159).
+    view_version: int = 0
     # Encapsulated chunks (own meshes), isolated from the main mesh's welding.
     groups: list = field(default_factory=list)
     # Annotation entities (static dimensions) — not geometry, drawn as overlays.
@@ -485,12 +490,24 @@ class Scene:
             self.selection.difference_update(edges)
         else:
             self.selection.update(edges)
-        self.version += 1
+        self.bump_view()
 
     def clear_selection(self) -> None:
         if self.selection:
             self.selection.clear()
-            self.version += 1
+            self.bump_view()
+
+    def bump_view(self) -> None:
+        """A change of what is shown, not of the document (the selection):
+        the caches keyed on ``version`` refresh, the document stays clean."""
+        self.version += 1
+        self.view_version += 1
+
+    @property
+    def content_version(self) -> int:
+        """``version`` minus the view-only bumps: what "unsaved changes"
+        compares against the version that was saved."""
+        return self.version - self.view_version
 
     def invert_selection(self) -> int:
         """SketchUp's Edit ▸ Invert Selection (Ctrl+Shift+I): select every
@@ -513,7 +530,7 @@ class Scene:
         new = [ent for ent in universe if ent not in self.selection]
         self.selection.clear()
         self.selection.update(new)
-        self.version += 1            # the GL colour caches are keyed on it
+        self.bump_view()             # the GL colour caches are keyed on it
         return len(new)
 
     def delete_selection(self) -> None:

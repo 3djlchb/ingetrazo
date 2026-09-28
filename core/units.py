@@ -176,6 +176,26 @@ def fmt_len(metres: float) -> str:
     return format_length(float(metres), model_unit(), model_precision())
 
 
+#: The mark a bare typed number gets in each unit: what the number MEANS
+#: (``bare_number_scale``), shown while it is typed.
+_TYPED_MARK = {"m": " m", "cm": " cm", "mm": " mm", "in": '"', "ft": "'",
+               "ft-in": '"', "in-frac": '"', "ft-in-frac": '"'}
+
+
+def typed_value_text(buffer: str) -> str:
+    """What the user is typing in the VCB, as the canvas shows it: a bare
+    number (or a ``a,b`` / ``a;b`` list of them) gets the model's unit, the
+    one it will be read in -- «500» in a millimetre document is 500 mm, and
+    showing «500 m» told the user the opposite (issue #149). Anything that
+    already carries a unit or a mark is shown as typed."""
+    import re
+
+    text = (buffer or "").strip()
+    if text and re.fullmatch(r"[-+]?[\d.]+(\s*[,;]\s*[-+]?[\d.]+)*", text):
+        return text + _TYPED_MARK.get(model_unit(), " m")
+    return text
+
+
 def fmt_num(metres: float) -> str:
     """The number alone, for ``a × b`` pairs; imperial forms keep their
     marks because the mark IS the unit."""

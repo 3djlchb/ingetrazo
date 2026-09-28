@@ -1,13 +1,16 @@
 # IngeTrazo
 
-**A free, SketchUp-inspired 3D modeler for architecture, engineering and 3D design — built natively for Linux.**
+*Pronounced **EEN-heh-TRAH-soh** — from Spanish* inge(niería) *"engineering"
++* trazo *"a drawn stroke": the engineer's stroke.*
+
+**A free 3D modeler for architecture, engineering and 3D design — draw as if by hand, built natively for Linux.**
 
 ![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)
 ![Status: usable](https://img.shields.io/badge/status-usable%20·%200.3.x-brightgreen)
-![Platform: Linux · Windows · macOS (from source)](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS%20(source)-informational)
+![Platform: Linux · Windows · macOS](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-informational)
 ![Made in Peru](https://img.shields.io/badge/made%20in-Peru%20%F0%9F%87%B5%F0%9F%87%AA-red)
 
-IngeTrazo brings SketchUp-style *push/pull* modeling to Linux — where there is
+IngeTrazo brings *push/pull* modeling to Linux — where there is
 almost no native CAD for civil engineers and architects, and for anyone who
 designs in 3D (furniture, objects, scenes, models). It is freeform at the
 core (draw anything, like sketching by hand) with an **optional BIM tagging
@@ -22,8 +25,7 @@ with its sister project [IngePresupuestos](https://ingepresupuestos.com).
 ## Status
 
 **Usable — real work gets done in it today.** Draw, extrude, edit, paint,
-dimension and annotate; open any SketchUp file from 2013 to 2026 and save
-back to `.skp`; tag BIM classes and export IFC quantities; georeference and
+dimension and annotate; open any SketchUp file from 2013 to 2026; tag BIM classes and export IFC quantities; georeference and
 import survey data. IngeTrazo is developed by dogfooding on real engineering
 projects, backed by ~2,000 automated tests, and its geometry engine refuses
 to commit a broken solid (the hermeticity guard) — your quantities stay
@@ -61,27 +63,15 @@ Python, Qt and the pure-Python `.skp` reader travel inside; nothing else to
 install. `--check` prints what the install found and exits non-zero if
 anything is missing.
 
-- **macOS**: no packaged build yet — and, honestly, **no Mac here to test
-  one on**. Nothing in IngeTrazo is platform-specific (Python, Qt, OpenGL
-  3.3 core; every native dependency ships wheels for Intel and Apple
-  Silicon), so it should run from source. If you have a Mac, this is the
-  five-minute test that would let us ship a `.app`: you need Python 3.12+
-  (python.org or Homebrew), then
-
-```bash
-git clone https://github.com/ingelibre/ingetrazo.git
-cd ingetrazo
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-python main.py
-```
-
-  Then please [open an issue](https://github.com/ingelibre/ingetrazo/issues)
-  saying whether it opens, whether the 3D view is smooth, and pasting
-  anything the Terminal prints. Known gaps on macOS: DWG import (`dwg2dxf`
-  is Linux-only for now) and the optional `skp2dae` converter (Wine); the
-  native `.skp` reader and writer work everywhere. The first `.app` will be
-  unsigned — right-click ▸ Open the first time.
+- **macOS** (Apple Silicon, M1 and later): download
+  `IngeTrazo-<version>-macos-arm64.dmg` from the
+  [latest release](https://github.com/ingelibre/ingetrazo/releases/latest),
+  open it and drag IngeTrazo to Applications. The app is not signed yet, so
+  the first time right-click it ▸ Open. Known gap on macOS: DWG import
+  (`dwg2dxf` is Linux-only for now); the native `.skp` reader works
+  everywhere. If something fails, please
+  [open an issue](https://github.com/ingelibre/ingetrazo/issues) and paste
+  anything the Terminal prints.
 
 Something to open right away: [`examples/`](examples/) holds four real
 documents from the Yanque plaza project — the fountain, the bench with its
@@ -91,48 +81,62 @@ welcome arch with all its rebar (also attached to every release as
 
 ## What works today
 
-- **SketchUp-style viewport** — Z-up orbit camera, grid, colored axes,
-  perspective ↔ parallel, standard views, zoom-extents, hidden-line removal.
+- **Viewport** — Z-up camera that orbits around the point under the cursor,
+  grid, colored axes, perspective ↔ parallel and two-point perspective,
+  standard views, zoom-extents, hidden-line removal, real-sun shadows.
+- **Walkthrough** — Position Camera, Walk and Look Around at eye height.
 - **Drawing tools** — Line, Rectangle, Rotated Rectangle, Circle, Polygon,
   Arc (2-point) and 3-Point Arc, with inferencing, snapping, axis locks and a
-  Value Control Box (type exact lengths/coordinates).
+  Value Control Box (type exact lengths/coordinates, `200,100` or `200;100`
+  for two values), plus Freehand, Pie, 3D Text and images. **Repeat the last
+  command** with Shift+R or from the right-click menu.
 - **Push/Pull** — robust, watertight extrude / recess / step / through-hole,
   solid-aware, with a **BIM-grade hermeticity guard** (never commits a broken
   solid — the difference that makes the geometry valid for quantity takeoff).
 - **Offset** — walls with real thickness from a face outline.
-- **Move** — with snap, inference and exact measured input.
+- **Follow Me** and **Fillet** — sweep a profile along a path; round a corner.
+- **Move, Scale, Flip** — with snap, inference and exact measured input.
+- **Tape Measure & guides** — guide points and lines that every tool snaps
+  to, Push/Pull included (stop a face exactly at a guide's height).
+- **Eraser, Hide/Unhide, Invert Selection, Intersect Faces.**
+- **Solid tools** — Outer Shell, Union, Subtract, Trim, Intersect, Split.
+- **Section planes** — live cuts with section fill.
 - **Groups & components** — isolate geometry, move / explode / edit as a
   unit, and **copy/paste** with a solid, textured preview under the cursor;
   pasted component copies share their definition.
-- **Rotate & Protractor** — SketchUp's protractor: plane inference with
+- **Rotate & Protractor** — plane inference with
   axis-coloured disc, 15° tick snapping near it, slope input as rise:run
   (`3:12`), rotate-a-copy (Ctrl), fold-axis by dragging, and angled guide
-  lines that feed the snap engine.
+  lines that feed the snap engine; a click snapped to a point rotates by the
+  exact angle to it.
 - **Display styles** — Default, Architectural (textures on white), Shaded,
   Hidden line, Monochrome, Wireframe and X-ray; scenes remember their
   style and the sheet composer renders each viewport in any of them.
-- **Curved solids** — SketchUp-style soft edges: smooth cylinders, curved-surface
+- **Curved solids** — soft edges: smooth cylinders, curved-surface
   selection, view-dependent profile/silhouette edges.
-- **Materials** — solid color per face and **SketchUp-compatible textures**
+- **Materials** — solid color per face and **textures**
   (planar projection with real-world tile size), applied with a Paint tool —
   with a **named material registry**: paint keeps identity, edit-and-restamp
   updates every use, Model Info reports quantities per material, and exports
   carry the real names.
 - **Dimensions & leader texts** — static annotations with hidden-line
   occlusion and styles; texts select by their glyphs, move with the anchor
-  pinned, and edit on double-click. Both survive the `.skp` round trip.
-- **Side tray** — Materials, Dimension style, Entity info panels.
-- **SketchUp import AND export** — open `.skp` files natively (double-click
-  too), every era from classic 2013–2020 to current 2021+, with materials,
-  textures, per-side face materials, translucency, layers, scenes,
-  dimensions and leader texts — and **save your model back as `.skp`**
-  (groups, shared components, holes, named materials, dimensions and leader
-  texts included). Pure Python, offline, no Wine or proprietary DLL —
-  powered by [OpenSKP](https://github.com/iamahsanmehmood/openskp)
-  (see [Acknowledgements](#acknowledgements)).
+  pinned, and edit on double-click. Both come in from `.skp` files.
+- **Side tray** — Entity info, Layers, Scenes, Materials (213 RAL colours and
+  a textured library at real size), **Components** (scale figures, furniture,
+  trees, vehicles, your own face-me PNGs), Dimension style.
+- **SketchUp import** — open `.skp` files natively (double-click too), every
+  era from classic 2013–2020 to current 2021+, with materials, textures,
+  per-side face materials, translucency, layers, scenes, dimensions and
+  leader texts. Pure Python, offline, nothing of Trimble's — powered by
+  [OpenSKP](https://github.com/iamahsanmehmood/openskp) (see
+  [Acknowledgements](#acknowledgements)). There is no `.skp` export: the
+  writer builds on a blank document made with Trimble's SDK, which
+  IngeTrazo stopped distributing after Trimble's copyright notice
+  (2026-09-28). To take a model to SketchUp, export COLLADA `.dae`.
 - **Files** — native `.igz` save/open (self-contained: textures travel inside
-  the document), **import OBJ and COLLADA `.dae`**, **export STL, OBJ,
-  COLLADA and glTF/GLB** (glTF with PBR materials and geolocation; STL
+  the document), **import OBJ, COLLADA `.dae`, DXF and DWG**, **export STL,
+  OBJ, COLLADA, glTF/GLB and the current view as DXF** (glTF with PBR materials and geolocation; STL
   goes to a slicer as is — dedicated 3D-printing tools are planned for the
   future).
 - **Layers & Scenes** — visibility/lock tags (plans emerge from one model)
@@ -254,7 +258,8 @@ provided derivative works stay under the same license.
 
 ## En español
 
-**IngeTrazo** es un modelador 3D libre estilo SketchUp para arquitectura,
+**IngeTrazo** (se lee *in-je-TRA-so*: *inge*niería + *trazo*) es un
+modelador 3D libre para arquitectura,
 ingeniería y diseño 3D, **hecho nativo para Linux** — donde casi no
 hay CAD para nuestra carrera ni para quien diseña en 3D. Es freeform en el núcleo (trazás lo que quieras,
 como dibujando a mano) con una capa **BIM opcional** planeada encima: taggeás la
@@ -270,3 +275,9 @@ de cualquier época (clásico 2013–2020 y actual 2021+), gracias a
 [OpenSKP](https://github.com/iamahsanmehmood/openskp) — sin Wine ni DLLs. En
 desarrollo temprano, respaldado por ~870 tests. Software libre GPL-3.0, hecho
 en Perú. Más en [docs/](docs/).
+
+---
+
+*SketchUp is a trademark of Trimble Inc. IngeTrazo is an independent project,
+not affiliated with or endorsed by Trimble. SketchUp es una marca registrada de
+Trimble Inc.; IngeTrazo es un proyecto independiente, sin relación con Trimble.*

@@ -4,36 +4,34 @@
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
   <name>IngeTrazo</name>
-  <summary>SketchUp-style 3D modeler for architecture, engineering and design</summary>
-  <summary xml:lang="es">Modelador 3D estilo SketchUp para arquitectura, ingeniería y diseño</summary>
+  <summary>Draw as if by hand: free 3D modeler for architecture and engineering</summary>
+  <summary xml:lang="es">Traza como a mano: modelador 3D libre para arquitectura e ingeniería</summary>
   <developer id="com.ingetrazo">
     <name>Marco Sumari Tellez</name>
   </developer>
   <description>
     <p>
-      Free 3D modeler in the spirit of SketchUp: push/pull modelling that
-      feels like sketching by hand, groups and components, materials with
+      Free 3D modeler that lets you draw as if by hand: push/pull modelling, groups and components, materials with
       textures, dimensions and leader texts, layers, scenes and display
       styles — plus a sheet composer that turns the model into printable,
       to-scale plan sheets (PDF/DXF).
     </p>
     <p xml:lang="es">
-      Modelador 3D libre al estilo SketchUp: empujar/tirar que se siente
-      como trazar a mano, grupos y componentes, materiales con texturas,
+      Modelador 3D libre para trazar como a mano: empujar/tirar, grupos y componentes, materiales con texturas,
       cotas y textos guía, capas, escenas y estilos de visualización — más
       un compositor de láminas que convierte el modelo en planos imprimibles
       a escala (PDF/DXF).
     </p>
     <p>
-      Opens SketchUp .skp files natively (2013–2026, read AND write, through
-      the pure-Python OpenSKP library), imports and exports COLLADA and OBJ,
+      Opens SketchUp .skp files natively (2013–2026, through the
+      pure-Python OpenSKP library), imports and exports COLLADA and OBJ,
       exports STL, glTF/GLB and IFC4 for BIM quantity take-off, and brings
       real terrain in: base-map tiles, 3D elevation, photogrammetry meshes
       and survey points.
     </p>
     <p xml:lang="es">
-      Abre archivos .skp de SketchUp de forma nativa (2013–2026, lee Y
-      escribe, vía la librería puro-Python OpenSKP), importa y exporta
+      Abre archivos .skp de SketchUp de forma nativa (2013–2026, vía la
+      librería puro-Python OpenSKP), importa y exporta
       COLLADA y OBJ, exporta STL, glTF/GLB e IFC4 para metrados BIM, y trae
       el terreno real: mapas base, elevación 3D, mallas de fotogrametría y
       puntos topográficos.
@@ -77,6 +75,26 @@
   <url type="vcs-browser">https://github.com/ingelibre/ingetrazo</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.5.5" date="2026-09-28">
+      <description>
+        <p>Nothing of Trimble's: the skp2dae converter and the .skp export
+        are gone, and .skp files keep opening with the free built-in
+        reader. IngeTrazo's own icons replace those that imitated
+        SketchUp's. Orbit turns about what you are looking at, Push/Pull
+        stops at the Tape's guides, rotating lands exactly on the snapped
+        point, saving no longer leaves a phantom "unsaved changes", lengths
+        show in the document's units, and Shift+R repeats the last
+        command.</p>
+        <p xml:lang="es">Nada de Trimble: el conversor skp2dae y la
+        exportación a .skp se van, y los .skp se siguen abriendo con el
+        lector libre integrado. Íconos propios de IngeTrazo en lugar de los
+        que imitaban a SketchUp. La órbita gira alrededor de lo que miras,
+        Empujar/Tirar se detiene en las guías de la Cinta, rotar cae exacto
+        en el punto enganchado, guardar ya no deja «cambios sin guardar»
+        fantasma, las medidas salen en las unidades del documento, y
+        Mayús+R repite el último comando.</p>
+      </description>
+    </release>
     <release version="0.5.3" date="2026-09-25">
       <description>
         <p>Rotation grips on Move and a Select submenu, as in SketchUp;

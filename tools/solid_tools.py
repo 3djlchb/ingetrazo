@@ -79,7 +79,7 @@ class SolidTool(Tool):
             viewport.flash_status(tr(
                 "Click the solid that cuts, then the one it cuts"), 4000)
         scene.selection.clear()
-        scene.version += 1
+        scene.bump_view()
 
     def on_deactivate(self, viewport) -> None:
         self.first = None
@@ -87,7 +87,7 @@ class SolidTool(Tool):
     def on_cancel(self, viewport) -> None:
         self.first = None
         viewport.scene.selection.clear()
-        viewport.scene.version += 1
+        viewport.scene.bump_view()
         viewport.update()
 
     # ---- Input ----------------------------------------------------------------

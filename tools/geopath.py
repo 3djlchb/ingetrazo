@@ -207,8 +207,9 @@ class GeoPathTool(Tool):
             return (fmt_len(run) + "  ·  " + fmt_len(elevation), mid)
         rise = elevation - start_z
         grade = rise / run * 100.0
-        return (f"{run:.2f} m  ·  {elevation:.2f} m  ·  {rise:+.2f} m ({grade:+.1f}%)",
-                mid)
+        sign = "+" if rise >= 0 else ""
+        return (f"{fmt_len(run)}  ·  {fmt_len(elevation)}  ·  "
+                f"{sign}{fmt_len(rise)} ({grade:+.1f}%)", mid)
 
     # ---- Internals ----------------------------------------------------------
     def _pick_node(self, ctx: ToolContext):
