@@ -25,6 +25,10 @@ from core.paths import app_root
 
 _I18N_DIR = app_root() / "i18n"
 
+#: How each language names itself in the Language menu and Preferences.
+LANGUAGE_NAMES = {"en": "English", "es": "Español",
+                  "pt-BR": "Português (Brasil)", "zh-CN": "简体中文"}
+
 _catalog: dict[str, str] = {}
 _lang = "en"
 
@@ -57,6 +61,21 @@ def set_language(lang: str) -> None:
 
 def current_language() -> str:
     return _lang
+
+
+_reverse: dict[str, str] | None = None
+_reverse_of: dict | None = None
+
+
+def source_of(text: str) -> str:
+    """The English source of a string ``tr`` produced — for a key that
+    must not change with the language (a remembered keyboard shortcut).
+    Text that is not a translation comes back as it is."""
+    global _reverse, _reverse_of
+    if _reverse_of is not _catalog:
+        _reverse = {v: k for k, v in _catalog.items()}
+        _reverse_of = _catalog
+    return _reverse.get(text, text)
 
 
 def tr(text: str, /, **kwargs) -> str:

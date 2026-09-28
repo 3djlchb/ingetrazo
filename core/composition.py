@@ -241,6 +241,12 @@ class MarcoVista:
     z: float = 0.0            # stacking order on the page (higher = on top)
     locked: bool = False         # locked: shown but not movable/resizable
     group_id: str = ""            # sheet group (Ctrl+G); "" = ungrouped
+    #: The name the user gave it in the Items list (issue #93); "" =
+    #: the automatic one (its kind and what it shows).
+    list_name: str = ""
+    #: Hidden from the sheet — not drawn, not printed, not picked;
+    #: shown again from the Items list's eye (QGIS; Marco, 26-09).
+    hidden: bool = False
     #: In-place view edits (LayOut: double-click the viewport, then pan /
     #: orbit / zoom). ``None`` = whatever the view or scene provides.
     cam_target: Optional[list] = None      # world point the camera centres on
@@ -306,6 +312,9 @@ class MarcoVista:
     pen_profile_mm: float = 0.35
     pen_edge_mm: float = 0.18
     profiles: bool = True
+    #: Hidden edges inked thin and dashed (issue #81) — the standard of a
+    #: technical drawing; off by default, as a view shows what is seen.
+    hidden_lines: bool = False
     #: Poché of the vector style where the section plane slices a solid:
     #: "solid" | "hatch" (45° lines every ``cut_hatch_mm``) | "none".
     cut_fill: str = "solid"
@@ -365,6 +374,12 @@ class TextoItem:
     z: float = 0.0            # stacking order on the page (higher = on top)
     locked: bool = False         # locked: shown but not movable/resizable
     group_id: str = ""            # sheet group (Ctrl+G); "" = ungrouped
+    #: The name the user gave it in the Items list (issue #93); "" =
+    #: the automatic one (its kind and what it shows).
+    list_name: str = ""
+    #: Hidden from the sheet — not drawn, not printed, not picked;
+    #: shown again from the Items list's eye (QGIS; Marco, 26-09).
+    hidden: bool = False
 
 
 @dataclass
@@ -393,6 +408,12 @@ class ImagenItem:
     z: float = 0.0            # stacking order on the page (higher = on top)
     locked: bool = False         # locked: shown but not movable/resizable
     group_id: str = ""            # sheet group (Ctrl+G); "" = ungrouped
+    #: The name the user gave it in the Items list (issue #93); "" =
+    #: the automatic one (its kind and what it shows).
+    list_name: str = ""
+    #: Hidden from the sheet — not drawn, not printed, not picked;
+    #: shown again from the Items list's eye (QGIS; Marco, 26-09).
+    hidden: bool = False
 
 
 @dataclass
@@ -412,6 +433,12 @@ class Cajetin:
     z: float = 0.0            # stacking order on the page (higher = on top)
     locked: bool = False         # locked: shown but not movable/resizable
     group_id: str = ""            # sheet group (Ctrl+G); "" = ungrouped
+    #: The name the user gave it in the Items list (issue #93); "" =
+    #: the automatic one (its kind and what it shows).
+    list_name: str = ""
+    #: Hidden from the sheet — not drawn, not printed, not picked;
+    #: shown again from the Items list's eye (QGIS; Marco, 26-09).
+    hidden: bool = False
     #: The EDITABLE rows: [label, value] pairs, in drawing order. Filled
     #: from the legacy fixed attributes on load when absent (old docs);
     #: all edits and painting go through this list.
@@ -527,6 +554,12 @@ class BarraEscala:
     z: float = 0.0            # stacking order on the page (higher = on top)
     locked: bool = False         # locked: shown but not movable/resizable
     group_id: str = ""            # sheet group (Ctrl+G); "" = ungrouped
+    #: The name the user gave it in the Items list (issue #93); "" =
+    #: the automatic one (its kind and what it shows).
+    list_name: str = ""
+    #: Hidden from the sheet — not drawn, not printed, not picked;
+    #: shown again from the Items list's eye (QGIS; Marco, 26-09).
+    hidden: bool = False
 
     def segment_m(self) -> float:
         """A round model length per segment so the whole bar prints close
@@ -574,6 +607,12 @@ class FlechaNorte:
     z: float = 0.0            # stacking order on the page (higher = on top)
     locked: bool = False         # locked: shown but not movable/resizable
     group_id: str = ""            # sheet group (Ctrl+G); "" = ungrouped
+    #: The name the user gave it in the Items list (issue #93); "" =
+    #: the automatic one (its kind and what it shows).
+    list_name: str = ""
+    #: Hidden from the sheet — not drawn, not printed, not picked;
+    #: shown again from the Items list's eye (QGIS; Marco, 26-09).
+    hidden: bool = False
 
     @property
     def w_mm(self) -> float:
@@ -610,6 +649,12 @@ class PerfilTerreno:
     z: float = 0.0            # stacking order on the page (higher = on top)
     locked: bool = False         # locked: shown but not movable/resizable
     group_id: str = ""            # sheet group (Ctrl+G); "" = ungrouped
+    #: The name the user gave it in the Items list (issue #93); "" =
+    #: the automatic one (its kind and what it shows).
+    list_name: str = ""
+    #: Hidden from the sheet — not drawn, not printed, not picked;
+    #: shown again from the Items list's eye (QGIS; Marco, 26-09).
+    hidden: bool = False
 
 
 @dataclass
@@ -625,6 +670,12 @@ class Leyenda:
     z: float = 0.0            # stacking order on the page (higher = on top)
     locked: bool = False         # locked: shown but not movable/resizable
     group_id: str = ""            # sheet group (Ctrl+G); "" = ungrouped
+    #: The name the user gave it in the Items list (issue #93); "" =
+    #: the automatic one (its kind and what it shows).
+    list_name: str = ""
+    #: Hidden from the sheet — not drawn, not printed, not picked;
+    #: shown again from the Items list's eye (QGIS; Marco, 26-09).
+    hidden: bool = False
 
     @property
     def h_mm(self) -> float:
@@ -647,6 +698,12 @@ class FormaItem:
     z: float = 0.0            # stacking order on the page (higher = on top)
     locked: bool = False         # locked: shown but not movable/resizable
     group_id: str = ""            # sheet group (Ctrl+G); "" = ungrouped
+    #: The name the user gave it in the Items list (issue #93); "" =
+    #: the automatic one (its kind and what it shows).
+    list_name: str = ""
+    #: Hidden from the sheet — not drawn, not printed, not picked;
+    #: shown again from the Items list's eye (QGIS; Marco, 26-09).
+    hidden: bool = False
     radius_mm: float = 0.0       # rect: corner rounding radius
     sides: int = 6               # poligono: number of sides (3..24)
     color: str = "#1e242c"       # stroke colour
@@ -700,6 +757,12 @@ class EtiquetaItem:
     z: float = 0.0
     locked: bool = False
     group_id: str = ""            # sheet group (Ctrl+G); "" = ungrouped
+    #: The name the user gave it in the Items list (issue #93); "" =
+    #: the automatic one (its kind and what it shows).
+    list_name: str = ""
+    #: Hidden from the sheet — not drawn, not printed, not picked;
+    #: shown again from the Items list's eye (QGIS; Marco, 26-09).
+    hidden: bool = False
 
     @property
     def anchored(self) -> bool:
@@ -756,6 +819,12 @@ class NivelItem:
     z: float = 0.0
     locked: bool = False
     group_id: str = ""           # sheet group (Ctrl+G); "" = ungrouped
+    #: The name the user gave it in the Items list (issue #93); "" =
+    #: the automatic one (its kind and what it shows).
+    list_name: str = ""
+    #: Hidden from the sheet — not drawn, not printed, not picked;
+    #: shown again from the Items list's eye (QGIS; Marco, 26-09).
+    hidden: bool = False
 
     @property
     def anchored(self) -> bool:
@@ -812,6 +881,12 @@ class LlamadaItem:
     z: float = 0.0
     locked: bool = False
     group_id: str = ""           # sheet group (Ctrl+G); "" = ungrouped
+    #: The name the user gave it in the Items list (issue #93); "" =
+    #: the automatic one (its kind and what it shows).
+    list_name: str = ""
+    #: Hidden from the sheet — not drawn, not printed, not picked;
+    #: shown again from the Items list's eye (QGIS; Marco, 26-09).
+    hidden: bool = False
 
     @property
     def bubble_mm(self) -> float:
@@ -845,6 +920,12 @@ class CotaAngularItem:
     z: float = 0.0
     locked: bool = False
     group_id: str = ""            # sheet group (Ctrl+G); "" = ungrouped
+    #: The name the user gave it in the Items list (issue #93); "" =
+    #: the automatic one (its kind and what it shows).
+    list_name: str = ""
+    #: Hidden from the sheet — not drawn, not printed, not picked;
+    #: shown again from the Items list's eye (QGIS; Marco, 26-09).
+    hidden: bool = False
 
     def angles(self) -> tuple[float, float]:
         """``(start, sweep)`` in radians, page coordinates (y down): the
@@ -977,6 +1058,12 @@ class CotaItem:
     z: float = 0.0            # stacking order on the page (higher = on top)
     locked: bool = False         # locked: shown but not movable/resizable
     group_id: str = ""            # sheet group (Ctrl+G); "" = ungrouped
+    #: The name the user gave it in the Items list (issue #93); "" =
+    #: the automatic one (its kind and what it shows).
+    list_name: str = ""
+    #: Hidden from the sheet — not drawn, not printed, not picked;
+    #: shown again from the Items list's eye (QGIS; Marco, 26-09).
+    hidden: bool = False
 
     @property
     def anchored(self) -> bool:
@@ -1128,6 +1215,12 @@ class CotaRadialItem:
     z: float = 0.0
     locked: bool = False
     group_id: str = ""
+    #: The name the user gave it in the Items list (issue #93); "" =
+    #: the automatic one (its kind and what it shows).
+    list_name: str = ""
+    #: Hidden from the sheet — not drawn, not printed, not picked;
+    #: shown again from the Items list's eye (QGIS; Marco, 26-09).
+    hidden: bool = False
 
     @property
     def w_mm(self) -> float:

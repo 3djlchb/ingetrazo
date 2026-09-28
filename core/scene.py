@@ -36,6 +36,11 @@ class Scene:
     mesh: Mesh = field(default_factory=Mesh)
     selection: set = field(default_factory=set)
     version: int = 0
+    #: How many of ``version``'s bumps changed only what is SHOWN -- the
+    #: selection -- and not the document. The GL caches key on ``version``
+    #: and need every bump; "unsaved changes" must not: a click on empty
+    #: space after Ctrl+S asked to save again (issue #159).
+    view_version: int = 0
     # Encapsulated chunks (own meshes), isolated from the main mesh's welding.
     groups: list = field(default_factory=list)
     # Annotation entities (static dimensions) — not geometry, drawn as overlays.
@@ -100,6 +105,10 @@ class Scene:
     #: every length is shown in, plus the decimals. Travels in the .igz;
     #: read through ``core.units`` (``fmt_len`` & co.).
     units: dict = field(default_factory=lambda: {"length": "m", "precision": 2})
+    #: Extensions' own document data, one JSON-safe value per extension key
+    #: (``views.extension_api.ExtensionApp.document_data``). Travels in the
+    #: .igz; the core never reads it.
+    plugin_data: dict = field(default_factory=dict)
     dimension_style: dict = field(default_factory=lambda: {
         "decimals": 2, "units": "m", "font_size": 9, "color": [45, 55, 75],
         "norma": "iso", "base_step_mm": 8.0, "ends": "arrow"})
@@ -326,6 +335,10 @@ class Scene:
         for child in group.children:
             child.xform = xform * (child.xform if child.xform is not None
                                    else QMatrix4x4())
+        # An exploded view's offsets live in the container's frame, which
+        # has just become the world's.
+        from core.explode import rotate_offsets
+        rotate_offsets(group, xform)
         if group.mesh.vertices:
             from core.group import transformed_mesh
             group.mesh = transformed_mesh(group.mesh, xform)
@@ -477,12 +490,48 @@ class Scene:
             self.selection.difference_update(edges)
         else:
             self.selection.update(edges)
-        self.version += 1
+        self.bump_view()
 
     def clear_selection(self) -> None:
         if self.selection:
             self.selection.clear()
-            self.version += 1
+            self.bump_view()
+
+    def bump_view(self) -> None:
+        """A change of what is shown, not of the document (the selection):
+        the caches keyed on ``version`` refresh, the document stays clean."""
+        self.version += 1
+        self.view_version += 1
+
+    @property
+    def content_version(self) -> int:
+        """``version`` minus the view-only bumps: what "unsaved changes"
+        compares against the version that was saved."""
+        return self.version - self.view_version
+
+    def invert_selection(self) -> int:
+        """SketchUp's Edit ▸ Invert Selection (Ctrl+Shift+I): select every
+        entity of the open context that is NOT selected now, and drop what
+        is. The universe is Select All's — the loose edges and faces, the
+        context's groups (the model's, or the open group's children) and the
+        dimensions — minus what a click or a box could not pick either:
+        hidden objects and faces, hidden or locked layers, and hidden edges
+        (a smoothed surface's inner edges) while the hidden-geometry view is
+        off. Returns the size of the new selection."""
+        ctx = self.edit_group
+        groups = self.groups if ctx is None else (getattr(ctx, "children", None) or [])
+        show_hidden = bool(self.show_hidden_geometry)
+        universe = [e for e in self.edges
+                    if self.entity_selectable(e)
+                    and (show_hidden or not getattr(e, "hidden", False))]
+        universe += [f for f in self.faces if self.entity_selectable(f)]
+        universe += [g for g in groups if self.entity_selectable(g)]
+        universe += [d for d in self.dimensions if self.entity_selectable(d)]
+        new = [ent for ent in universe if ent not in self.selection]
+        self.selection.clear()
+        self.selection.update(new)
+        self.bump_view()             # the GL colour caches are keyed on it
+        return len(new)
 
     def delete_selection(self) -> None:
         if not self.selection:
@@ -533,6 +582,7 @@ class Scene:
         # Outside the guard: an empty document has a camera to forget too.
         self.camera_home = None
         self.units = {"length": "m", "precision": 2}
+        self.plugin_data = {}
 
     # ---- Queries ------------------------------------------------------------
     def iter_world_faces(self):

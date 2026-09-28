@@ -9,15 +9,19 @@ pip install -r requirements.txt
 python main.py
 ```
 
-Requires Python 3.11+.
+Requires Python 3.12+.
 
 ## Running tests
 
 ```bash
-python -m pytest tests/
+python -m pytest -m "not slow"     # the fast suite (~3,100 tests, ~5 min; what CI runs)
+python -m pytest                   # everything (~3,900), including the slow fuzz sweeps
 ```
 
-(No tests yet — contributions welcome.)
+Every pull request runs the fast suite. A fix or a feature comes with its
+test — ideally one that fails without the change. A test that paints
+needs a real OpenGL context: guard it with a skip when there is none, or the
+CI runner (no GPU) fails it.
 
 ## Style
 

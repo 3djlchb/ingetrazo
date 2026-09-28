@@ -11,23 +11,23 @@ name: ingetrazo
 base: core22
 version: "@VERSION@"
 title: IngeTrazo
-summary: Alternativa libre a SketchUp — modelado 3D con .skp nativo
+summary: Traza como a mano — modelador 3D libre para arquitectura e ingeniería
 description: |
-  IngeTrazo es una alternativa libre (GPL-3.0) a SketchUp para
-  arquitectura, ingeniería civil e impresión 3D, en español, que abre y
-  guarda archivos .skp DE FORMA NATIVA gracias a openskp — tus modelos y
-  los de tu equipo siguen viviendo en su formato, sin conversiones ni
-  peajes.
+  IngeTrazo (se lee in-je-TRA-so: ingeniería + trazo) es un modelador 3D
+  libre (GPL-3.0) para arquitectura, ingeniería civil e impresión 3D, en
+  español, para trazar como a mano. Abre archivos .skp con su propio lector
+  libre (openskp), así que los modelos de tu equipo se importan sin
+  conversiones ni peajes.
 
   Lo que trae:
 
-  - Modelado estilo SketchUp: empujar/tirar, sígueme, grupos y componentes,
+  - Modelado que se siente a mano: empujar/tirar, sígueme, grupos y componentes,
     inferencias y medidas exactas por teclado.
   - Sombras con la posición real del sol por geolocalización, fecha y hora:
     estudios de asoleamiento como entregable de obra.
   - Secciones con relleno, láminas listas para imprimir y estilos de
     presentación.
-  - Importa y exporta SKP, DXF, DWG, DAE, OBJ, GLB y STL.
+  - Importa SKP, DXF, DWG, DAE, OBJ, GLB y STL; exporta DXF, DAE, OBJ, GLB, STL e IFC.
   - Terreno georreferenciado con mapa base, curvas y perfiles.
   - Etiquetado BIM (IFC) con metrados en vivo, rumbo al presupuesto.
   - Biblioteca de componentes y materiales, incluida la malla cocada para
@@ -36,8 +36,9 @@ description: |
   Parte del ecosistema IngePresupuestos: terreno → trazo → BIM →
   presupuesto.
 
-  IngeTrazo is a free, open-source SketchUp alternative with NATIVE .skp
-  reading and writing (powered by openskp): push/pull modeling, real-sun
+  IngeTrazo (pronounced EEN-heh-TRAH-soh, "the engineer's stroke") is a free,
+  open-source 3D modeler to draw as if by hand. It opens SketchUp .skp files
+  with its own free reader (openskp), and brings push/pull modeling, real-sun
   shadow studies, sections, print sheets, DXF/DWG import and BIM (IFC)
   tagging. Spanish-first UI, English available.
 
@@ -76,6 +77,8 @@ parts:
     override-build: |
       mkdir -p "$CRAFT_PART_INSTALL/opt/ingetrazo"
       cp -a "$CRAFT_PART_SRC/." "$CRAFT_PART_INSTALL/opt/ingetrazo/"
+      # never ship openskp's SDK-written blank template (see ingetrazo.spec)
+      find "$CRAFT_PART_INSTALL" -type d -name _scaffold -path '*openskp*' -prune -exec rm -rf {} +
     stage-packages:
       - libgl1
       - libegl1

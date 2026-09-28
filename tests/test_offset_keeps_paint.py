@@ -143,9 +143,17 @@ def test_the_message_names_the_room_that_is_left():
     room = max_offset_distance([QVector3D(v) for v in face.vertices],
                                face.normal(), 1.0)
     assert 0.2 < room < 0.26, room          # half of 0.5, minus the tolerance
-    vp = _LoudVP(scene)
-    _offset(vp, face, 0.40)
-    assert vp.said and "0.2" in vp.said[0], vp.said
+    # the readouts format with the units of the BOUND scene (core.units):
+    # bind this one (metres), or a millimetre scene an earlier test left
+    # bound turns 0.24 m into "240 mm"
+    from core import units
+    units.bind_scene(scene)
+    try:
+        vp = _LoudVP(scene)
+        _offset(vp, face, 0.40)
+        assert vp.said and "0.2" in vp.said[0], vp.said
+    finally:
+        units.bind_scene(None)
 
 
 def test_a_feasible_offset_stays_quiet_and_builds():

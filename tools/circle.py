@@ -151,7 +151,9 @@ class _RadialTool(AxisMagnet, PlaneLock, Tool):
         if self.start_point is None or self.hover_point is None:
             return None
         r = (self.hover_point - self.start_point).length()
-        return (f"R {r:.2f} m  ({self.sides} lados)", self.hover_point)
+        from core.units import fmt_len
+        return ("R " + fmt_len(r) + "  (" + tr("{n} sides", n=self.sides) + ")",
+                self.hover_point)
 
     # ---- Internals ----------------------------------------------------------
     def _cursor_preview(self):

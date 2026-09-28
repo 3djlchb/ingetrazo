@@ -23,9 +23,13 @@ Pedro Caeiro <pacaeiro2@sapo.pt>  (github.com/pacaeiro)
     colliding with Alt+Tab. Much of IngeTrazo's parity with SketchUp's
     everyday gestures comes from him using the program as a draftsman does
     and writing down every one that did not answer the same.
-    He kept going through 0.4 and 0.5 (#27–#79): axis locks and their
+    He kept going through 0.4 and 0.5 (#27–#106): axis locks and their
     snaps, local axes in groups and components (#44), the sheet composer,
-    Fillet 3D, Orient Faces, copy/paste between documents, and many more.
+    Fillet 3D, Orient Faces, copy/paste between documents, and many more —
+    and a pull request of his own for the composer (#116): a resized view
+    keeps its drawing undistorted and renders again off the release.
+    Two more for 0.5.4: a moved view catches vertices where it is (#124)
+    and a centred rectangle's square cue is a real square (#126).
 
 Rafael García Rodríguez — "Rafael 3D" (youtube.com/@Rafa3D)
     Draftsman and 3D modelling reviewer.
@@ -56,10 +60,47 @@ Félix Riestra  (github.com/felixriestra)
     The macOS package (pull request #64): the IngeTrazo.app bundle and the
     .dmg built by CI for Apple Silicon, with double-click opening of .igz
     and .skp files. IngeTrazo's first Mac version.
+    Components that come apart (pull request #96): OBJ files keep their
+    parts, Split into Pieces, the Parts tray with its cut list, and the
+    exploded view — furniture and joinery taken to pieces.
+
+Gabriel Rodríguez  (github.com/canalsecuario-blip)
+    The Back color in Styles (pull request #99): SketchUp's Front/Back
+    colour pair, the tint of faces seen from behind.
+    Edit ▸ Invert Selection (pull request #113), SketchUp's Ctrl+Shift+I,
+    leaving out what is hidden or locked.
+
+José Castro Basso — FADU–UDELAR, Montevideo  (github.com/castrobasso)
+    Architect and teacher of architectural representation. Two-point
+    perspective with vertical verticals and File ▸ Export ▸ Current view as
+    DXF, from his own modified build; the Levels extension (levels with
+    guides and snapping in elevations), whose branch opened IngeTrazo to
+    extensions that keep data in the document, add a panel and offer the
+    cursor an inference. Building a free-software workflow for teaching:
+    model → represent → edit graphically → deliver.
 
 Sherod Taylor  (github.com/sherodtaylor)
     The First Person tool (pull request #86): walking the model like a
     game with W/A/S/D and mouse look, beside SketchUp's Walk.
+
+liuandy  (github.com/liujvnes)
+    Simplified Chinese translation of the interface (issue #123, some
+    2 080 strings): IngeTrazo's fourth language.
+
+Carlos Martins  (github.com/fafecm)
+    Bug reports with screen recordings that made each one reproducible:
+    diagonal guides crossing a hair off (#110), a group's paint missing
+    from the materials in the model (#133), groups drawn out of place
+    after exploding (#134).
+
+mnavarromugas  (github.com/mnavarromugas)
+    The first to try the 3D mouse on a real 3Dconnexion SpaceMouse (#108)
+    and to suggest inverting each axis on its own.
+
+xyont  (github.com/xyont)
+    Reports from mechanical modelling in millimetres: pulling a face up
+    against a wall (#94), units kept for new documents (#121), colours by
+    layer (#120).
 
 ---
 

@@ -1,5 +1,14 @@
 # OpenSKP collaboration
 
+> **2026-09-28 — Trimble's copyright notice.** IngeTrazo no longer runs,
+> downloads or links to anything of Trimble's: the skp2dae converter (which
+> loaded Trimble's `SketchUpAPI.dll` under Wine) and its automatic download
+> are gone, the SDK-based validation tests are gone, and the `.skp` export is
+> off because OpenSKP's writer builds on a blank document written by
+> Trimble's SDK, which IngeTrazo no longer distributes. `.skp` files are read
+> with OpenSKP only. The sections below that mention skp2dae or the SDK
+> oracle are the record of how the reader was validated at the time.
+
 **Status:** introduction issue **posted** upstream
 ([iamahsanmehmood/openskp#2](https://github.com/iamahsanmehmood/openskp/issues/2),
 2026-07-21). This doc keeps the rationale for how IngeTrazo supports

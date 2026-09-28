@@ -74,6 +74,9 @@ class SnapResult:
     # ``"group"`` / ``"component"`` when the point belongs to one — the
     # ScreenTip adds "in group" / "in component" (SketchUp).
     context: Optional[str] = None
+    #: The ScreenTip's own words, already translated — what an extension's
+    #: inference says («Level PA»); wins over the kind's built-in label.
+    label: Optional[str] = None
 
 
 # ---- Helpers ---------------------------------------------------------------
@@ -759,6 +762,13 @@ def _extension_snap(
     sdl = math.hypot(sdx, sdy)
     best_ext = None  # (dist, proj, from_end, edge, dir)
     for edge in scene.edges:
+        # One chord of a circle, arc or smoothed surface has no line worth
+        # extending — a sphere's soft edges and the next circle's segments
+        # threw dashed guides across the model (issue #140) — and a hidden
+        # edge is not there to be followed.
+        if (getattr(edge, "soft", False) or getattr(edge, "hidden", False)
+                or getattr(edge, "curve", None) is not None):
+            continue
         ab = edge.b - edge.a
         if ab.length() < 1e-9:
             continue
@@ -1162,12 +1172,20 @@ def compute_snap(
     shift_lock_color=None,
     linear_mode: str = "all",
     work_plane_normal: Optional[QVector3D] = None,
+    radial_arm: bool = False,
 ) -> SnapResult:
     # Linear-inference toggle (SketchUp's Alt): "all" = every inference, "off" =
     # point snaps only, "parallel_perp" = keep only parallel/perpendicular. The
     # explicit locks (arrow keys, Down-arrow reference) always work regardless.
     allow_axis = linear_mode == "all"          # axis / from-point / extension
     allow_parperp = linear_mode != "off"       # parallel / perpendicular
+    # A protractor ARM (Rotate, Protractor) is a direction from the centre,
+    # not a line being drawn: 'through point', 'extension' and 'from point'
+    # are line-drawing inferences. On an arm they only fought the axis
+    # magnet — a diameter 1.7° off X held the arm on its own direction
+    # through the reference just clicked, and a chord of the next circle
+    # turned the angle with the cursor's distance (issue #140, @pacaeiro).
+    line_inferences = allow_axis and not radial_arm
 
     # 1. Explicit axis lock (arrow keys). Use the viewport's camera-aware
     #    projection so locks to Z (vertical) actually move along Z. Existing
@@ -1426,7 +1444,7 @@ def compute_snap(
                 # projection win: landing where this perpendicular lines up with
                 # a corner is the exact point the user is after, and the generic
                 # lock would otherwise shadow it.
-                if allow_axis:
+                if line_inferences:
                     fp = _from_point_snap(
                         scene, start_point, candidate_world - start_point,
                         cx, cy, world_to_pixel, threshold_px, is_occluded,
@@ -1456,7 +1474,7 @@ def compute_snap(
     #     what gave it away. Same shape as the from-point fix an hour
     #     earlier: an inference DERIVED from a point must not beat the
     #     point it came from.
-    if allow_axis and start_point is not None:
+    if line_inferences and start_point is not None:
         sobre_el_punto = False
         if acquired_point is not None:
             ap = world_to_pixel(acquired_point)
@@ -1476,7 +1494,7 @@ def compute_snap(
     #     a perpendicular one. Gated on the draw direction being collinear with
     #     the edge, so it only fires when you mean to extend (no line noise).
     #     Runs before 'from point' so extending a line wins over a corner line-up.
-    if allow_axis:
+    if line_inferences:
         ext = _extension_snap(
             candidate_world, cx, cy, scene, world_to_pixel, et, start_point,
             is_occluded, project_onto_line=project_onto_line,
@@ -1488,7 +1506,7 @@ def compute_snap(
     #     corner (green) or midpoint (cyan) — the fixed foot of that point on the
     #     axis-aligned draw line. Only fires on-axis, so free-angle draws stay
     #     quiet and the point never scatters or slides.
-    if allow_axis and start_point is not None:
+    if line_inferences and start_point is not None:
         fp = _from_point_snap(
             scene, start_point, candidate_world - start_point,
             cx, cy, world_to_pixel, threshold_px, is_occluded,
@@ -1547,7 +1565,7 @@ def compute_snap(
             best_edge = (d, on_pt, edge)
     if best_edge is not None:
         _d, on_pt, edge = best_edge
-        if allow_axis and acquired_point is not None:
+        if line_inferences and acquired_point is not None:
             # On an edge AND lined up with the acquired point: the one point
             # of the edge that is both. The edge used to win outright, the
             # dotted «from point» line vanished as the cursor reached the
@@ -1640,7 +1658,7 @@ def compute_snap(
     #     have let an alignment line outrank a midpoint or the origin, and
     #     that precedence is not ours to spend. Down here it competes only
     #     with the soft axis cue below — the weakest rule there is.
-    if allow_axis:
+    if line_inferences:
         if acquired_points:
             tp = _two_point_snap(
                 acquired_points, candidate_world, cx, cy, world_to_pixel,

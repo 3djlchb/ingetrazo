@@ -60,12 +60,15 @@ from core.mesh import (PAINT_KEYS, Edge, Face, Mesh, Vertex, edge_flags,
 from core.topology import (
     _key,
     _loop_edges,
+    carve_loop_by_chords,
     find_containing_face,
     fold_nonplanar_faces,
     heal_overlapping_faces,
     loop_inside_face,
+    orient_coplanar_faces,
     orphaned_edges_at,
     subtract_loop_from_face,
+    winding_footprint,
 )
 
 
@@ -89,6 +92,39 @@ class Command(ABC):
     @abstractmethod
     def undo(self, scene) -> None:
         """Reverse the operation."""
+
+
+class SetPluginDataCommand(Command):
+    """Replace one extension's document data (``scene.plugin_data[key]``),
+    undoably. ``value`` None removes the key. Values are copied through JSON
+    both ways, so neither the caller nor the history can alias them."""
+
+    def __init__(self, key: str, value) -> None:
+        import json
+        self.key = str(key)
+        self.value = None if value is None else json.loads(json.dumps(value))
+        self._had = False
+        self._before = None
+
+    def do(self, scene) -> None:
+        import json
+        data = scene.plugin_data
+        self._had = self.key in data
+        self._before = (json.loads(json.dumps(data[self.key]))
+                        if self._had else None)
+        if self.value is None:
+            data.pop(self.key, None)
+        else:
+            data[self.key] = json.loads(json.dumps(self.value))
+        scene.version += 1
+
+    def undo(self, scene) -> None:
+        import json
+        if self._had:
+            scene.plugin_data[self.key] = json.loads(json.dumps(self._before))
+        else:
+            scene.plugin_data.pop(self.key, None)
+        scene.version += 1
 
 
 class History:
@@ -344,6 +380,7 @@ class EraseSelectionCommand(Command):
     def do(self, scene) -> None:
         m = scene.mesh
         self.snapshot = m.capture_state()
+        footprint = winding_footprint(m)
         # Loop->face lookups through ONE index: _find_face_by_loop scans the
         # whole mesh per call, and deleting thousands of box-selected faces
         # froze for ~26 s on a 28k-face mesh (piscina.igz report, round 2).
@@ -432,7 +469,7 @@ class EraseSelectionCommand(Command):
                 m.remove_edge(e)
         # A merge can leave the big enclosing face overlapping its subdivisions;
         # drop any such redundant mother (covered by the snapshot undo above).
-        for f in heal_overlapping_faces(m):
+        for f in heal_overlapping_faces(m, footprint=footprint):
             scene.selection.discard(f)
         # And the endpoints go with them. remove_edge only detaches, so an
         # erase used to leave its vertices in the mesh: invisible, ignored by
@@ -516,7 +553,7 @@ class AddFaceCommand(Command):
         # (face_that_gained_a_hole, the vertex loop punched) for undo.
         self._punches: list[tuple[Face, list]] = []
         self._subdiv_mother: Optional[Face] = None
-        self._subdiv_remainder: Optional[Face] = None
+        self._subdiv_remainder: Optional[list] = None
 
     def do(self, scene) -> None:
         m = scene.mesh
@@ -559,24 +596,32 @@ class AddFaceCommand(Command):
                 if other is self.face:
                     continue
                 remainder = subtract_loop_from_face(other, self.face.vertices)
-                if remainder is None:
+                pieces = ([remainder] if remainder is not None
+                          else carve_loop_by_chords(other, self.face.vertices))
+                if not pieces:
                     continue
-                rem_holes: list[list[QVector3D]] = []
+                # Each hole of the mother goes to the piece that holds it; a
+                # hole straddling a cut leaves the mother alone.
+                piece_holes: list[list[list[QVector3D]]] = [[] for _ in pieces]
                 straddle = False
                 for hole in other.holes:
-                    if loop_inside_face(Face([Vertex(v) for v in remainder]), hole):
-                        rem_holes.append([QVector3D(v) for v in hole])
+                    for k, piece in enumerate(pieces):
+                        if loop_inside_face(Face([Vertex(v) for v in piece]), hole):
+                            piece_holes[k].append([QVector3D(v) for v in hole])
+                            break
                     else:
                         straddle = True
                         break
                 if straddle:
                     continue
                 m.remove_face(other)
-                rem_face = m.add_face(remainder, rem_holes)
-                rem_face.attrs = dict(other.attrs)  # carved mother continues
+                self._subdiv_remainder = []
+                for piece, holes in zip(pieces, piece_holes):
+                    rem_face = m.add_face(piece, holes or None)
+                    rem_face.attrs = dict(other.attrs)  # carved mother continues
+                    self._subdiv_remainder.append(rem_face)
                 _inherit_paint(self.face, other)    # ...and so does the cut-out
                 self._subdiv_mother = other
-                self._subdiv_remainder = rem_face
                 break
 
         scene.version += 1
@@ -584,8 +629,8 @@ class AddFaceCommand(Command):
     def undo(self, scene) -> None:
         m = scene.mesh
         if self._subdiv_mother is not None:
-            if self._subdiv_remainder is not None:
-                m.remove_face(self._subdiv_remainder)
+            for rem in self._subdiv_remainder or ():
+                m.remove_face(rem)
             m.relink_face(self._subdiv_mother)
             self._subdiv_mother = None
             self._subdiv_remainder = None
@@ -2628,9 +2673,13 @@ class SnapshotCompound(Command):
             # overlap it created (redundant nested holes / spurious mother), then
             # snapshot the result so undo/redo restore exactly.
             self.before = scene.mesh.capture_state()
+            # Which way every face looked before the draw: the heal may
+            # align the faces the draw MADE, never the ones already there
+            # (a Reverse Faces undone by the next rectangle).
+            footprint = winding_footprint(scene.mesh)
             for cmd in self.inner:
                 cmd.do(scene)
-            for f in heal_overlapping_faces(scene.mesh):
+            for f in heal_overlapping_faces(scene.mesh, footprint=footprint):
                 scene.selection.discard(f)
             # A draw that split a curve leaves it in separate contours — break
             # the curve ids there (SketchUp), before the snapshot so redo keeps it.
@@ -3201,7 +3250,7 @@ class ExplodeGroupCommand(Command):
         self.group = group
         self.snapshot: Optional[dict] = None
         self.index: Optional[int] = None
-        self._lifted: list = []          # (child, xform, mesh, material)
+        self._lifted: list = []   # (child, xform, mesh, material, axes, offset)
         self._selection = None
 
     def do(self, scene) -> None:
@@ -3249,9 +3298,12 @@ class ExplodeGroupCommand(Command):
         # and an unpainted child takes the parent's paint, as its default
         # faces were already drawn with it.
         kids = list(getattr(g, "children", None) or [])
-        self._lifted = [(c, c.xform, c.mesh, c.material, c.axes)
-                        for c in kids]
+        self._lifted = [(c, c.xform, c.mesh, c.material, c.axes,
+                         c.explode_offset) for c in kids]
         for c in kids:
+            # Free of its component, a part keeps where an exploded view put
+            # it; there is no longer anything to reassemble it into.
+            c.explode_offset = None
             if P is not None:
                 if c.xform is not None:
                     c.xform = P * c.xform
@@ -3270,14 +3322,86 @@ class ExplodeGroupCommand(Command):
         scene.version += 1
 
     def undo(self, scene) -> None:
-        for c, xform, mesh, material, axes in self._lifted:
+        for c, xform, mesh, material, axes, offset in self._lifted:
             if c in scene.groups:
                 scene.groups.remove(c)
             c.xform, c.mesh, c.material, c.axes = xform, mesh, material, axes
+            c.explode_offset = offset
         scene.mesh.restore_state(self.snapshot)
         scene.groups.insert(self.index, self.group)
         if self._selection is not None:
             scene.selection = set(self._selection)
+        scene.version += 1
+
+
+class RenameGroupCommand(Command):
+    """Give a group, component or part a new name (the Parts tray's edit)."""
+
+    def __init__(self, group: Group, name: str) -> None:
+        self.group = group
+        self.name = name
+        self.old: Optional[str] = None
+
+    def do(self, scene) -> None:
+        self.old = self.group.name
+        self.group.name = self.name
+        scene.version += 1
+
+    def undo(self, scene) -> None:
+        self.group.name = self.old
+        scene.version += 1
+
+
+class ExplodeViewCommand(Command):
+    """Pull a component's parts apart to ``factor`` along ``mode`` — or put
+    them back with ``factor=0`` (see :mod:`core.explode`)."""
+
+    def __init__(self, container: Group, factor: float,
+                 mode: str = "outward") -> None:
+        self.container = container
+        self.factor = factor
+        self.mode = mode
+        self.before = None
+
+    def do(self, scene) -> None:
+        from core import explode
+        self.before = explode.snapshot(self.container)
+        explode.apply_explode(self.container, self.factor, self.mode)
+        scene.version += 1
+
+    def undo(self, scene) -> None:
+        from core import explode
+        explode.restore(self.container, self.before)
+        scene.version += 1
+
+
+class SplitIntoPiecesCommand(Command):
+    """Replace what ``group`` holds with ``pieces`` (from
+    :func:`core.pieces.split_into_pieces`): the same geometry, now one child
+    group per physical piece. The group stays the object the user placed —
+    same matrix, name, layer and paint — so it moves, copies and exports as
+    before, and Explode sets the pieces free. Undo puts the old contents
+    back untouched (the split only ever built new meshes)."""
+
+    def __init__(self, group: Group, pieces: list) -> None:
+        self.group = group
+        self.pieces = list(pieces)
+        self.before: Optional[tuple] = None
+
+    def do(self, scene) -> None:
+        g = self.group
+        self.before = (g.mesh, list(g.children), g.xform, g.exploded)
+        from core.mesh import Mesh
+        g.mesh = Mesh()
+        g.adopt(self.pieces)
+        # The pieces are cut from the geometry as it stands, so they ARE
+        # assembled in their new arrangement: nothing left to take back.
+        g.exploded = None
+        scene.version += 1
+
+    def undo(self, scene) -> None:
+        g = self.group
+        g.mesh, g.children, g.xform, g.exploded = self.before
         scene.version += 1
 
 
@@ -3536,7 +3660,9 @@ class HealOverlapsCommand(Command):
     def do(self, scene) -> None:
         self.snapshot = scene.mesh.capture_state()
         # partial defaults to auto: the aggressive pass runs only on a flat plan.
-        removed = heal_overlapping_faces(scene.mesh)
+        # Orientation is not this command's business (Orient Faces is).
+        removed = heal_overlapping_faces(
+            scene.mesh, footprint=winding_footprint(scene.mesh))
         self.healed = len(removed)
         for f in removed:
             scene.selection.discard(f)
@@ -3579,6 +3705,7 @@ class RebuildPlanarFacesCommand(Command):
 
         self.snapshot = scene.mesh.capture_state()
         mesh = scene.mesh
+        footprint = winding_footprint(mesh)
         if not mesh.edges:
             self.flat = False
             return
@@ -3623,6 +3750,11 @@ class RebuildPlanarFacesCommand(Command):
                        for t0, t1, t2 in old_tris):
                     f.attrs.update(attrs)
                     break
+        # Every region comes out facing ``normal`` (the first face's); each
+        # takes back the way the face it lies in was facing — a lone arc
+        # drawn on the plane turned every reversed face back otherwise.
+        if footprint is not None:
+            orient_coplanar_faces(mesh, footprint)
         mesh.resplit_curves()
         self.rebuilt = len(faces)
         scene.version += 1

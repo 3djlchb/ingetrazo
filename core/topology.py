@@ -871,6 +871,67 @@ def subtract_loop_from_face(
     return None  # neither half is the drawn loop → ambiguous, leave it alone
 
 
+def carve_loop_by_chords(
+    face: Face, loop: list[QVector3D]
+) -> Optional[list[list[QVector3D]]]:
+    """The pieces of ``face`` left around ``loop`` when EVERY corner of the
+    loop sits on the face's boundary — a band drawn across a face from one
+    side to the other (a rectangle across a stair tread, from its nosing to
+    the riser). ``find_subdividing_chain`` needs a corner inside the face,
+    so the Rectangle tool left the face whole with the band lying on top:
+    two overlapping faces, edges with one and three faces, and a Push/Pull
+    that built a broken solid (found testing #94). Lines drawn one by one
+    never hit it: each chord splits the face as it lands.
+
+    The loop's sides that cross the face (chords: midpoint strictly inside)
+    split it one by one; the piece that IS the loop is dropped (it stays a
+    face of its own). Returns the remaining outer loops, or ``None`` when
+    this is not that case."""
+    if len(face.vertices) < 3 or len(loop) < 3:
+        return None
+    if any(_locate_on_loop(face.vertices, v) is None for v in loop):
+        return None
+    proj, poly2 = _face_plane_proj(face)
+    chords = []
+    n = len(loop)
+    for i in range(n):
+        a, b = loop[i], loop[(i + 1) % n]
+        mid = (a + b) * 0.5
+        if _locate_on_loop(face.vertices, mid) is not None:
+            continue                          # runs along the boundary
+        if not _strictly_inside_2d(proj(mid), poly2):
+            return None                       # leaves the face
+        chords.append([QVector3D(a), QVector3D(b)])
+    if not chords:
+        return None
+
+    class _Piece:
+        __slots__ = ("vertices",)
+
+        def __init__(self, vertices):
+            self.vertices = vertices
+
+    pieces = [[QVector3D(v) for v in face.vertices]]
+    for chord in chords:
+        for idx, piece in enumerate(pieces):
+            mid = (chord[0] + chord[1]) * 0.5
+            p2 = [proj(v) for v in piece]
+            if not _strictly_inside_2d(proj(mid), p2):
+                continue
+            split = split_face_by_chain(_Piece(piece), chord)
+            if split is None:
+                return None
+            pieces[idx:idx + 1] = [list(split[0]), list(split[1])]
+            break
+        else:
+            return None
+    loop_keys = frozenset(_key(v) for v in loop)
+    rest = [p for p in pieces if frozenset(_key(v) for v in p) != loop_keys]
+    if len(rest) != len(pieces) - 1:
+        return None                           # the loop is not one of them
+    return rest
+
+
 # ---- Multiple-cycle detection ----------------------------------------------
 
 def _same_cycle(c1: list[QVector3D], c2: list[QVector3D]) -> bool:
@@ -1115,7 +1176,66 @@ def _point_in_face_solid(face: Face, point: QVector3D) -> bool:
     return not any(_point_inside_2d(pt, [proj(v) for v in h]) for h in face.holes)
 
 
-def orient_coplanar_faces(mesh) -> list:
+def winding_footprint(mesh):
+    """How the faces of a flat drawing face BEFORE an edit, for
+    :func:`orient_coplanar_faces` to respect afterwards: ``(face, normal,
+    outer, holes)`` per face, positions copied (a face the edit removes may
+    not keep its loop), plus its bounding box for a cheap first test.
+    ``None`` where the orientation pass never runs — a 3D model, or one
+    past the heal cap."""
+    if len(mesh.faces) > _HEAL_FACE_CAP or not _mesh_is_flat(mesh):
+        return None
+    out = []
+    for f in mesh.faces:
+        outer = [QVector3D(v) for v in f.vertices]
+        if not outer:
+            continue
+        xs = [v.x() for v in outer]
+        ys = [v.y() for v in outer]
+        zs = [v.z() for v in outer]
+        box = (min(xs), min(ys), min(zs), max(xs), max(ys), max(zs))
+        out.append((f, f.normal(), outer,
+                    [[QVector3D(v) for v in h] for h in f.holes], box))
+    return out
+
+
+def _footprint_normal(footprint, face: Face):
+    """The normal of the pre-edit face that covered ``face``'s interior, or
+    ``None`` when it lies where no face was (a region drawn anew)."""
+    from core.triangulate import plane_axes
+    n = face.normal()
+    point = _interior_point(face.vertices, n)
+    if point is None:
+        return None
+    t = _PLANAR_TOLERANCE
+    px, py, pz = point.x(), point.y(), point.z()
+    for _old, old_n, outer, holes, box in footprint:
+        # After a curve the planar rebuild re-makes EVERY face, and each is
+        # looked up here: the box keeps that from costing a polygon test
+        # per pair.
+        if not (box[0] - t <= px <= box[3] + t and box[1] - t <= py <= box[4] + t
+                and box[2] - t <= pz <= box[5] + t):
+            continue
+        if abs(QVector3D.dotProduct(old_n, n)) < 0.999:
+            continue
+        u, w = plane_axes(old_n)
+        origin = outer[0]
+        if abs(QVector3D.dotProduct(point - origin, old_n)) > _PLANAR_TOLERANCE:
+            continue
+
+        def proj(p):
+            rel = p - origin
+            return (QVector3D.dotProduct(rel, u), QVector3D.dotProduct(rel, w))
+
+        pt = proj(point)
+        if (_point_inside_2d(pt, [proj(v) for v in outer])
+                and not any(_point_inside_2d(pt, [proj(v) for v in h])
+                            for h in holes)):
+            return old_n
+    return None
+
+
+def orient_coplanar_faces(mesh, footprint=None) -> list:
     """Flip faces whose winding came out reversed, so coplanar faces face the
     same way.
 
@@ -1125,6 +1245,14 @@ def orient_coplanar_faces(mesh) -> list:
     has two anti-parallel faces on the same plane, so flipping any face whose
     normal opposes the area-weighted majority of its plane only ever fixes that
     anomaly. Returns the flipped faces.
+
+    With ``footprint`` (:func:`winding_footprint`, taken before the edit) the
+    orientation is the USER's: a face that was already there is never turned,
+    and a face the edit made — a split half, a rebuilt region — faces the way
+    the face it was cut from did. Only a region drawn where no face was
+    follows the majority. Without it, a face reversed on purpose (Reverse
+    Faces) came back the other way at the next draw on the plane — a loose
+    rectangle anywhere was enough.
     """
     groups: dict = {}
     for f in mesh.faces:
@@ -1133,6 +1261,7 @@ def orient_coplanar_faces(mesh) -> list:
         dist = round(abs(QVector3D.dotProduct(n, f.centroid())), 2)
         groups.setdefault((axis, dist), []).append(f)
 
+    owned = {id(f) for f, *_ in footprint} if footprint is not None else set()
     flipped: list = []
     for fs in groups.values():
         if len(fs) < 2:
@@ -1141,7 +1270,13 @@ def orient_coplanar_faces(mesh) -> list:
         for f in fs:
             dominant += f.normal() * f.area()
         for f in fs:
-            if QVector3D.dotProduct(f.normal(), dominant) < 0:
+            target = dominant
+            if footprint is not None:
+                if id(f) in owned:
+                    continue                      # the user's, as it stands
+                old_n = _footprint_normal(footprint, f)
+                target = dominant if old_n is None else old_n
+            if QVector3D.dotProduct(f.normal(), target) < 0:
                 outer = [QVector3D(v) for v in f.vertices][::-1]
                 holes = [[QVector3D(v) for v in h] for h in f.holes]
                 mesh.remove_face(f)
@@ -1420,7 +1555,8 @@ def _mesh_is_flat(mesh) -> bool:
 _HEAL_FACE_CAP = 3000
 
 
-def heal_overlapping_faces(mesh, coverage: float = 0.5, partial=None) -> list:
+def heal_overlapping_faces(mesh, coverage: float = 0.5, partial=None,
+                           footprint=None) -> list:
     """Clean up coplanar face overlaps that draw/delete sequences can leave:
 
     1. **Redundant nested holes** — incrementally subdividing a face can punch
@@ -1432,7 +1568,9 @@ def heal_overlapping_faces(mesh, coverage: float = 0.5, partial=None) -> list:
        inside faces only *fill its holes* is legitimate and kept.
 
     3. **Reversed faces** — a face auto-faced with the wrong winding (so it would
-       push the wrong way) is flipped to match its plane.
+       push the wrong way) is flipped to match its plane. Given the edit's
+       ``footprint`` (:func:`winding_footprint`), faces that were already
+       there keep the way the user left them.
 
     The partial-overlap pass also removes a small face whose body lies in
     another's solid region — a partial overlap the auto-divide missed (e.g. a
@@ -1468,7 +1606,7 @@ def heal_overlapping_faces(mesh, coverage: float = 0.5, partial=None) -> list:
     #     opposite outwards (two solids back to back share it), so winding is
     #     the volumetric pass's job (``orient_outward`` below).
     if flat:
-        orient_coplanar_faces(mesh)
+        orient_coplanar_faces(mesh, footprint)
 
     # 1. Dedupe nested holes by rebuilding the face with the outermost holes.
     for face in list(mesh.faces):

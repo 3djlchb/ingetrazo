@@ -56,6 +56,10 @@ datas = [
     ('i18n/*.json',                'i18n'),
     # Bundled plugins (Extensions menu) — discovered by file path at runtime.
     ('plugins/*.py',               'plugins'),
+    # Example extensions: shipped but NOT loaded — Extensions ▸ Example
+    # extensions copies one into the user's plugins folder on request.
+    # Whole folder: an example extension can be a package (CAM, PR #132).
+    ('examples/extensions',        'examples/extensions'),
     # The MCP server (stdlib-only): `ingetrazo --mcp` runs it by path, and
     # the console build below makes it a program of its own on Windows.
     ('scripts/ingetrazo_mcp.py',   'scripts'),
@@ -144,7 +148,13 @@ hiddenimports += [
 # 0.4.1). The Flatpak was fine because it ships the whole site-packages.
 from PyInstaller.utils.hooks import collect_data_files
 hiddenimports += collect_submodules('openskp')
-datas += collect_data_files('openskp')
+# ...except _scaffold/blank_v17.skp: a blank document written by Trimble's
+# SketchUp SDK (openskp's writer builds its files on top of it). IngeTrazo
+# does not distribute it since Trimble's copyright notice of 2026-09-28,
+# and has no SketchUp export without it; main.py --check fails a frozen
+# bundle that still carries it.
+datas += [(src, dst) for src, dst in collect_data_files('openskp')
+          if '_scaffold' not in src.replace('\\', '/')]
 # openskp 1.3.0 triangulates with mapbox_earcut instead of Shapely, so the
 # reader now pulls a NATIVE extension (_core*.so) that did not exist in the
 # dependency tree before. ``import openskp`` fails outright without it, so

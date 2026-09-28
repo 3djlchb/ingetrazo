@@ -34,9 +34,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core.i18n import LANGUAGE_NAMES as _LANGUAGE_NAMES
 from core.i18n import available_languages, current_language, tr
 
-_LANGUAGE_NAMES = {"en": "English", "es": "Español"}
 
 #: The import dialogs' unit vocabularies (must match the dialogs in
 #: main_window — the setting is their preselected answer).
@@ -171,7 +171,7 @@ class PreferencesDialog(QDialog):
 
         from core.platform_choice import AUTO, WAYLAND, XCB
         self._platform = QComboBox()
-        for key, label in ((AUTO, tr("Automatic (X11 when the display scale is fractional)")),
+        for key, label in ((AUTO, tr("Automatic (X11 on KDE Plasma or with a fractional display scale)")),
                            (WAYLAND, tr("Wayland")), (XCB, tr("X11 (XWayland)"))):
             self._platform.addItem(label, key)
         self._platform.setCurrentIndex(max(0, self._platform.findData(
@@ -183,6 +183,52 @@ class PreferencesDialog(QDialog):
             "next start."))
         form.addRow(tr("Graphics server:"), self._platform)
         tabs.addTab(general, tr("General"))
+
+        # ---- 3D mouse (issue #108) -------------------------------------------
+        from views.ndof_input import load_settings, shared_input
+        nd = load_settings()
+        mouse3d = QWidget()
+        form = QFormLayout(mouse3d)
+        self._ndof_on = QCheckBox(tr("Navigate with a 3D mouse (SpaceMouse)"))
+        self._ndof_on.setChecked(nd.enabled)
+        form.addRow("", self._ndof_on)
+        self._ndof_speed = QSpinBox()
+        self._ndof_speed.setRange(25, 400)
+        self._ndof_speed.setSingleStep(25)
+        self._ndof_speed.setSuffix(" %")
+        self._ndof_speed.setValue(int(round(nd.sensitivity * 100)))
+        form.addRow(tr("Speed:"), self._ndof_speed)
+        # One box per movement (issue #108, a SpaceMouse user: «a
+        # checkbox for each axis»); each shows what that axis does now,
+        # the old pair switches included.
+        self._ndof_inv = {}
+        for key, label, on in (
+                ("pan_x", tr("Invert pan left / right"),
+                 nd.invert_pan != nd.invert_pan_x),
+                ("pan_y", tr("Invert pan up / down"),
+                 nd.invert_pan != nd.invert_pan_y),
+                ("zoom", tr("Invert zoom"), nd.invert_zoom),
+                ("tilt", tr("Invert orbit up / down (tilt)"),
+                 nd.invert_rotate != nd.invert_tilt),
+                ("spin", tr("Invert orbit around (spin)"),
+                 nd.invert_rotate != nd.invert_spin)):
+            box = QCheckBox(label)
+            box.setChecked(on)
+            form.addRow("", box)
+            self._ndof_inv[key] = box
+        self._ndof_lock = QCheckBox(tr(
+            "Pan and zoom only (no rotation — for drawing in plan)"))
+        self._ndof_lock.setChecked(nd.lock_rotation)
+        form.addRow("", self._ndof_lock)
+        name = shared_input().backend_name
+        status = QLabel(
+            tr("Device driver found: {name}", name=name) if name else tr(
+                "No 3D mouse driver found. On Linux install and start "
+                "«spacenavd»; on Windows the 3Dconnexion driver is enough. "
+                "macOS is not supported yet."))
+        status.setWordWrap(True)
+        form.addRow("", status)
+        tabs.addTab(mouse3d, tr("3D Mouse"))
 
         # ---- Import ---------------------------------------------------------
         imp = QWidget()
@@ -226,7 +272,7 @@ class PreferencesDialog(QDialog):
 
         self._api_key = QLineEdit(str(st.value("ia/api_key", "") or ""))
         self._api_key.setEchoMode(QLineEdit.Password)
-        self._api_key.setPlaceholderText(tr("empty = local Ollama"))
+        self._api_key.setPlaceholderText(tr("empty = local AI (Ollama, LM Studio)"))
         form.addRow(tr("API key:"), self._api_key)
 
         self._model = QLineEdit(str(st.value("ia/modelo", "") or ""))
@@ -235,7 +281,7 @@ class PreferencesDialog(QDialog):
 
         self._ollama = QLineEdit(str(st.value("ia/ollama_url",
                                               "http://localhost:11434") or ""))
-        form.addRow(tr("Ollama URL:"), self._ollama)
+        form.addRow(tr("Local AI URL:"), self._ollama)
 
         self._shots = QCheckBox(tr("Send viewport screenshots to the model"))
         self._shots.setChecked(str(st.value("ia/capturas", "1")) != "0")
@@ -263,6 +309,12 @@ class PreferencesDialog(QDialog):
         self._decimals.setRange(0, 6)
         self._decimals.setValue(int(current.get("precision", 2)))
         form.addRow(tr("Decimals"), self._decimals)
+        # Issue #121: the choice used to live only in the open document, so
+        # every new file went back to metres.
+        self._units_for_new = QCheckBox(tr("Also use for new documents"))
+        self._units_for_new.setChecked(
+            _units.new_document_units() == current)
+        form.addRow("", self._units_for_new)
         note = QLabel(tr(
             "These are the units of the document you have open — they are "
             "saved with it. A number typed without a unit is in this unit "
@@ -272,6 +324,11 @@ class PreferencesDialog(QDialog):
         note.setWordWrap(True)
         form.addRow("", note)
         tabs.addTab(un, tr("Units"))
+
+        # ---- Keyboard shortcuts (issue #138) -------------------------------
+        from views.shortcuts import ShortcutsPanel
+        self._shortcuts = ShortcutsPanel(self._window)
+        tabs.addTab(self._shortcuts, tr("Keyboard shortcuts"))
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok
                                    | QDialogButtonBox.Cancel)
@@ -289,13 +346,11 @@ class PreferencesDialog(QDialog):
         chosen = {"length": str(self._unit.currentData()),
                   "precision": int(self._decimals.value())}
         if scene is not None and chosen != _units.model_units_of(scene):
-            scene.units = chosen
-            style = getattr(scene, "dimension_style", None)
-            if isinstance(style, dict):
-                style["units"] = chosen["length"]
-                style["decimals"] = chosen["precision"]
+            _units.apply_units(scene, chosen)
             scene.version += 1
             self._window.viewport.update()
+        if self._units_for_new.isChecked():
+            _units.remember_new_document_units(chosen)
 
         # Language: same contract as the menu (persists; applies on restart).
         # Reverting a still-pending change back to the running language just
@@ -342,6 +397,22 @@ class PreferencesDialog(QDialog):
         setup = getattr(self._window, "_setup_autosave", None)
         if callable(setup):
             setup()                     # re-arm the timer with the new pace
+
+        from core.ndof import NdofSettings
+        from views.ndof_input import save_settings
+        inv = {k: b.isChecked() for k, b in self._ndof_inv.items()}
+        # Saved per axis; the old pair switches go back to off.
+        nd = NdofSettings(enabled=self._ndof_on.isChecked(),
+                          sensitivity=self._ndof_speed.value() / 100.0,
+                          invert_pan=False,
+                          invert_zoom=inv["zoom"],
+                          invert_rotate=False,
+                          invert_pan_x=inv["pan_x"],
+                          invert_pan_y=inv["pan_y"],
+                          invert_tilt=inv["tilt"],
+                          invert_spin=inv["spin"],
+                          lock_rotation=self._ndof_lock.isChecked())
+        save_settings(nd)                # every window reads it live
 
         st.setValue("nav/invert_wheel",
                     "1" if self._invert.isChecked() else "0")

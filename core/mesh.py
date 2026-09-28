@@ -1037,6 +1037,22 @@ class Mesh:
             del self._registry[old]
         self._registry.setdefault(new, v)
 
+    def place_vertex(self, v: Vertex, position: QVector3D) -> None:
+        """Put a vertex AT ``position`` -- :meth:`move_vertex` with an
+        absolute target. ``p + (q - p)`` is not ``q`` in single precision,
+        so a preview that restores saved positions through deltas left
+        nanometres of drift behind (issue #163); this assigns them."""
+        self._chunk_dirty = True
+        self._mut_serial += 1
+        old = _key(v.position)
+        v.position = QVector3D(position)
+        new = _key(v.position)
+        if old == new:
+            return
+        if self._registry.get(old) is v:
+            del self._registry[old]
+        self._registry.setdefault(new, v)
+
     def split_edge(self, edge: Edge, position: QVector3D) -> tuple[Edge, Edge]:
         """Split ``edge`` at ``position``, inserting a shared vertex, and return
         the two sub-edges.

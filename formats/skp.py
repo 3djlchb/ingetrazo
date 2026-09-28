@@ -1,25 +1,21 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Marco Sumari Tellez and IngeTrazo contributors.
-"""SKP import seam — pluggable parser backends with a skp2dae fallback.
+"""SKP import seam — IngeTrazo's own reader, behind one seam.
 
 IngeTrazo aims to open **any** ``.skp`` (old → recent). This module is the
 single seam between IngeTrazo and *how* an ``.skp`` is read, so the parser can
-evolve independently of the app:
-
-  1. **A pure-Python backend** — OpenSKP (https://github.com/iamahsanmehmood/
-     openskp) or a maintained fork. Offline, Linux-native, no Wine, no
-     proprietary DLL. Preferred; its version coverage grows over time.
-  2. **The skp2dae converter** (Trimble's ``SketchUpAPI.dll`` via Wine). The
-     full-coverage fallback for files the pure backend can't read. It is a
-     SEPARATE program (the proprietary DLL never enters GPL IngeTrazo), so its
-     dialog/subprocess flow lives in ``views.main_window``, not here.
+evolve independently of the app. The backend is **OpenSKP**
+(https://github.com/iamahsanmehmood/openskp, MIT) or a maintained fork: pure
+Python, offline, no Wine, nothing of Trimble's. (Until 2026-09-28 a second
+path ran Trimble's SketchUpAPI.dll through an external converter for files
+the reader could not open; it was removed after Trimble's copyright notice.)
 
 **Parse then apply.** A backend *parses* a file into a plain **payload** (world-
 space face loops, no ``Scene`` touched). The heavy parse runs outside the undo
 history; :func:`apply_payload` then adds the geometry cheaply inside a command.
-When no pure backend can produce geometry, :func:`parse_skp` raises
-:class:`NeedsConverter` before any mutation, and the UI runs skp2dae — so a
-failed pure parse never leaves a half-applied edit.
+When no backend can produce geometry, :func:`parse_skp` raises
+:class:`NeedsConverter` before any mutation and the UI says the file could
+not be read -- so a failed parse never leaves a half-applied edit.
 
 Nothing here imports a parser at module load — a missing OpenSKP is just an
 unavailable backend.
@@ -30,8 +26,9 @@ from pathlib import Path
 
 
 class NeedsConverter(Exception):
-    """No pure backend can read this ``.skp`` — the caller should fall back to
-    the external skp2dae converter. Carries the path and detected format."""
+    """No backend can read this ``.skp``; the caller reports it. (The name is
+    historical: it once meant "use the external converter".) Carries the
+    path and detected format."""
 
     def __init__(self, path, fmt: str) -> None:
         super().__init__(f"No pure SKP backend for {path} (format={fmt})")
@@ -114,7 +111,7 @@ def parse_skp(path, progress=None) -> dict:
     """Parse ``path`` with the first pure backend that produces geometry, and
     return its payload. Raises :class:`NeedsConverter` when no pure backend can
     read the file (unrecognised format, parser error, or an empty parse) — the
-    caller then runs the external skp2dae converter. Touches no ``Scene``."""
+    caller reports the file as unreadable. Touches no ``Scene``."""
     path = Path(path)
     fmt = detect_format(path)
     for backend in _BACKENDS:
@@ -126,8 +123,9 @@ def parse_skp(path, progress=None) -> dict:
             payload = None
         # Protos count as geometry: a file whose whole content is
         # components placed once yields no plain groups at all, and
-        # reading that as "empty parse" sent it to skp2dae.
-        if payload and (payload.get("groups") or payload.get("protos")):
+        # reading that as "empty parse" reported it as unreadable.
+        if payload and (payload.get("groups") or payload.get("protos")
+                        or payload.get("empty")):
             return payload
     raise NeedsConverter(path, fmt)
 

@@ -69,6 +69,7 @@ class RotateTool(ProtractorBase):
         self._sel_edges: list = []
         self._base_segments: list = []      # wireframe for the copy preview
         self._preview_deg = 0.0
+        self._orig = None                   # the preview's snapshot
         self._copy = False                  # Ctrl: rotate a COPY
         self._last: dict | None = None      # hot retype of the last rotation
 
@@ -150,7 +151,8 @@ class RotateTool(ProtractorBase):
                 return
             self.ref_point = ctx.world
             return
-        deg = self._display_deg(ctx.world)
+        self._note_snap(ctx)
+        deg = self._commit_deg(ctx.world)
         if deg is not None:
             self._commit(viewport, deg)
 
@@ -159,8 +161,9 @@ class RotateTool(ProtractorBase):
         self._track_axis_drag(ctx.viewport)   # live tilt preview (issue #25)
         self._infer_plane(ctx)
         self._update_screen_metrics(ctx)
+        self._note_snap(ctx)
         if self.ref_point is not None and not self._copy:
-            deg = self._display_deg(ctx.world)
+            deg = self._commit_deg(ctx.world)
             if deg is not None:
                 self._apply_preview(ctx.viewport, deg)
         ctx.viewport.update()
@@ -277,7 +280,7 @@ class RotateTool(ProtractorBase):
         segments.append((self.start_point, self.hover_point))
         if self.ref_point is not None:
             segments.append((self.start_point, self.ref_point))
-            deg = self._display_deg(self.hover_point)
+            deg = self._commit_deg(self.hover_point)
             if deg is not None:
                 segments.extend(self._arc_segments(deg))
                 if self._copy and self._base_segments:
@@ -351,55 +354,70 @@ class RotateTool(ProtractorBase):
         for e in self._sel_edges:
             self._base_segments.append((QVector3D(e.a), QVector3D(e.b)))
 
-    def _rotate_live(self, viewport, step_deg: float) -> None:
-        if abs(step_deg) < 1e-12:
-            return
-        m = rotation_matrix(self.start_point, self._axis(), step_deg)
-        if getattr(self, "_vp_preview", False):
-            # Viewport-side preview: only section planes deform live; the
-            # groups draw through the preview matrix, untouched.
-            for sp in self._splanes:
-                sp.point = m.map(sp.point)
-                n2 = m.mapVector(sp.normal)
-                if n2.length() > 1e-12:
-                    sp.normal = n2.normalized()
-            for im in self._images:
-                im.origin = m.map(im.origin)
-                im.u = m.mapVector(im.u)
-                im.v = m.mapVector(im.v)
-            return
-        for group in self._groups:
-            if getattr(group, "xform", None) is not None:
-                group.xform = m * group.xform   # instance: O(1)
-            else:
-                gmesh = group.mesh
-                for vx in list(gmesh.vertices):
-                    gmesh.move_vertex(vx, m.map(vx.position) - vx.position)
-        for vx in self._verts:
-            viewport.scene.mesh.move_vertex(
-                vx, m.map(vx.position) - vx.position)
-        for sp in self._splanes:
-            sp.point = m.map(sp.point)
-            n2 = m.mapVector(sp.normal)
-            if n2.length() > 1e-12:
-                sp.normal = n2.normalized()
-        for im in self._images:
-            im.origin = m.map(im.origin)
-            im.u = m.mapVector(im.u)
-            im.v = m.mapVector(im.v)
-        viewport.scene.version += 1
+    def _snapshot(self) -> dict:
+        """The rotating set exactly as it was before the preview touched it.
+
+        The live preview used to turn everything by the DELTA of each mouse
+        move and, to cancel or commit, turn it back by the total: hundreds
+        of single-precision rotations that do not cancel, so the geometry
+        the commit started from had already drifted (issue #163). Every
+        preview frame is now computed from this copy, and reverting puts
+        these exact values back."""
+        snap = getattr(self, "_orig", None)
+        if snap is not None:
+            return snap
+        from PySide6.QtGui import QMatrix4x4
+        snap = {"xf": [], "gv": [], "v": [], "sp": [], "im": []}
+        vp_only = getattr(self, "_vp_preview", False)
+        if not vp_only:
+            for group in self._groups:
+                if getattr(group, "xform", None) is not None:
+                    snap["xf"].append((group, QMatrix4x4(group.xform)))
+                else:
+                    snap["gv"].extend((group.mesh, vx, QVector3D(vx.position))
+                                      for vx in list(group.mesh.vertices))
+            snap["v"] = [(vx, QVector3D(vx.position)) for vx in self._verts]
+        snap["sp"] = [(sp, QVector3D(sp.point), QVector3D(sp.normal))
+                      for sp in self._splanes]
+        snap["im"] = [(im, QVector3D(im.origin), QVector3D(im.u),
+                       QVector3D(im.v)) for im in self._images]
+        self._orig = snap
+        return snap
+
+    def _pose(self, viewport, m) -> None:
+        """Place the rotating set at ``m`` applied to its snapshot
+        (``None`` puts the snapshot back as it was)."""
+        snap = self._snapshot()
+        for group, xf in snap["xf"]:
+            group.xform = (m * xf) if m is not None else xf
+        for gmesh, vx, pos in snap["gv"]:
+            gmesh.place_vertex(vx, m.map(pos) if m is not None else pos)
+        for vx, pos in snap["v"]:
+            viewport.scene.mesh.place_vertex(
+                vx, m.map(pos) if m is not None else pos)
+        for sp, point, normal in snap["sp"]:
+            sp.point = m.map(point) if m is not None else QVector3D(point)
+            n2 = m.mapVector(normal) if m is not None else QVector3D(normal)
+            sp.normal = n2.normalized() if n2.length() > 1e-12 else normal
+        for im, origin, u, v in snap["im"]:
+            im.origin = m.map(origin) if m is not None else QVector3D(origin)
+            im.u = m.mapVector(u) if m is not None else QVector3D(u)
+            im.v = m.mapVector(v) if m is not None else QVector3D(v)
+        if snap["xf"] or snap["gv"] or snap["v"]:
+            viewport.scene.version += 1
 
     def _apply_preview(self, viewport, target_deg: float) -> None:
-        self._rotate_live(viewport, target_deg - self._preview_deg)
+        m = rotation_matrix(self.start_point, self._axis(), target_deg)
+        self._pose(viewport, m)
         self._preview_deg = target_deg
         if getattr(self, "_vp_preview", False):
-            viewport.set_groups_preview_matrix(rotation_matrix(
-                self.start_point, self._axis(), target_deg))
+            viewport.set_groups_preview_matrix(m)
 
     def _revert_preview(self, viewport) -> None:
-        if abs(self._preview_deg) > 1e-12:
-            self._rotate_live(viewport, -self._preview_deg)
-            self._preview_deg = 0.0
+        if getattr(self, "_orig", None) is not None:
+            self._pose(viewport, None)       # the exact values from before
+            self._orig = None
+        self._preview_deg = 0.0
         if getattr(self, "_vp_preview", False):
             from PySide6.QtGui import QMatrix4x4
             viewport.set_groups_preview_matrix(QMatrix4x4())  # park, keep freeze
@@ -508,4 +526,5 @@ class RotateTool(ProtractorBase):
         self._sel_edges = []
         self._base_segments = []
         self._preview_deg = 0.0
+        self._orig = None       # the preview's snapshot (see _snapshot)
         self._copy = False      # the Ctrl modifier arms ONE operation

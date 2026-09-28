@@ -43,11 +43,33 @@ CONTRIBUTORS = [
      "Brazilian Portuguese translation of the interface.",
      "https://github.com/dafrobozao"),
     ("Félix Riestra",
-     "The macOS package: IngeTrazo for Mac.",
+     "The macOS package: IngeTrazo for Mac. Components that come apart: "
+     "parts, cut list and exploded view.",
      "https://github.com/felixriestra"),
+    ("Gabriel Rodríguez",
+     "The Back color in Styles and Edit ▸ Invert Selection.",
+     "https://github.com/canalsecuario-blip"),
+    ("José Castro Basso (FADU–UDELAR)",
+     "Architect and teacher of architectural representation. Two-point "
+     "perspective, the current view as DXF, and the Levels extension.",
+     "https://github.com/castrobasso"),
     ("Sherod Taylor",
      "The First Person tool: walk the model like a game.",
      "https://github.com/sherodtaylor"),
+    ("liuandy",
+     "Simplified Chinese translation of the interface.",
+     "https://github.com/liujvnes"),
+    ("Carlos Martins",
+     "Bug reports with videos that pinned down guides, group paint and "
+     "exploded groups.",
+     "https://github.com/fafecm"),
+    ("mnavarromugas",
+     "First to test the 3D mouse on a real SpaceMouse; per-axis inversion.",
+     "https://github.com/mnavarromugas"),
+    ("xyont",
+     "Reports from mechanical modelling: pulling against a wall, units "
+     "for new files.",
+     "https://github.com/xyont"),
 ]
 
 #: Roll speed: pixels per tick, and the tick.

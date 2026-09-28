@@ -633,8 +633,11 @@ class TestReleaseReviewRegressions:
         _mouse(view, QEvent.MouseMove, 150, 130)             # preview born
         assert view._preview is not None
         composer._rebuild_canvas()                           # undo etc.
-        assert view._drag_start is None                      # cancelled
+        # The first click survives the rebuild (#95: a render landing
+        # between the two clicks lost it); the dead preview does not.
+        assert view._drag_start is not None
         _mouse(view, QEvent.MouseMove, 160, 140)             # must not raise
+        assert view._preview is not None                     # drawn anew
         self._host = host
 
     def test_second_click_threshold_is_scene_space(self):
@@ -854,6 +857,24 @@ class TestShiftOrtho:
         _mouse(view, QEvent.MouseButtonPress, 150, 130, mods=Qt.ShiftModifier)
         assert comp.placed and abs(comp.placed[0][4]) > 5
         assert comp.axes[0] == "h"
+
+    def test_the_cursor_takes_a_forced_cota_from_horizontal_to_vertical(self):
+        """#104 (pacaeiro): once Shift had made the cota horizontal it could
+        never become vertical — the direction was judged from the two
+        points, which do not move. Now the cursor chooses, as in AutoCAD:
+        out above/below → horizontal, out to a side → vertical."""
+        view, comp = _view("cota")
+        _click(view, 50, 100)
+        _click(view, 150, 160)                        # 100 across, 60 down
+        _mouse(view, QEvent.MouseMove, 100, 60, mods=Qt.ShiftModifier)
+        assert view._cota_axis == "h"                 # above the two points
+        _mouse(view, QEvent.MouseMove, 200, 130, mods=Qt.ShiftModifier)
+        assert view._cota_axis == "v"                 # out to the right
+        _mouse(view, QEvent.MouseMove, 100, 200, mods=Qt.ShiftModifier)
+        assert view._cota_axis == "h"                 # and back, below
+        _mouse(view, QEvent.MouseMove, 20, 130, mods=Qt.ShiftModifier)
+        _mouse(view, QEvent.MouseButtonPress, 20, 130, mods=Qt.ShiftModifier)
+        assert comp.axes[0] == "v"                    # placed where it showed
 
     def test_letting_shift_go_a_moment_early_does_not_lose_the_cota(self):
         """«Me lo hizo inclinado porque seguramente solté yo el shift antes

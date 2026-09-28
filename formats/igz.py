@@ -319,6 +319,14 @@ def save_scene(scene, path: Path) -> dict:
                 entry["uid"] = g.uid
             if getattr(g, "hidden", False):
                 entry["hidden"] = True
+            if getattr(g, "exploded", None):
+                # An exploded view and each part's share of it, so the
+                # document reopens able to reassemble (core/explode.py).
+                # Older readers ignore both and see the parts where they
+                # stand.
+                entry["exploded"] = dict(g.exploded)
+            if getattr(g, "explode_offset", None):
+                entry["explode_offset"] = list(g.explode_offset)
             kids = getattr(g, "children", None)
             if kids:
                 entry["children"] = [_entry(c) for c in kids]
@@ -360,6 +368,19 @@ def save_scene(scene, path: Path) -> dict:
     units = getattr(scene, "units", None)
     if isinstance(units, dict) and units != {"length": "m", "precision": 2}:
         payload["units"] = dict(units)     # only when not the metre default
+    pdata = getattr(scene, "plugin_data", None)
+    if pdata:
+        # Extensions' data: JSON-safe by contract; a value that is not is
+        # dropped with its key rather than breaking the save.
+        import json as _json
+        keep = {}
+        for key, value in pdata.items():
+            try:
+                keep[str(key)] = _json.loads(_json.dumps(value))
+            except (TypeError, ValueError):
+                continue
+        if keep:
+            payload["plugin_data"] = keep
     scales = getattr(scene, "custom_scales", None)
     if scales:
         payload["custom_scales"] = [float(n) for n in scales]
@@ -643,6 +664,11 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
             group.hidden = True
         if isinstance(raw.get("material"), dict):
             group.material = dict(raw["material"])
+        if isinstance(raw.get("exploded"), dict):
+            group.exploded = dict(raw["exploded"])
+        off = raw.get("explode_offset")
+        if isinstance(off, list) and len(off) == 3:
+            group.explode_offset = tuple(float(v) for v in off)
         if depth < 32:              # a corrupt document must not spin
             group.adopt(_group_from(c, depth + 1)
                         for c in raw.get("children", []) or [])
@@ -683,6 +709,8 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
     scene.camera_home = dict(cam) if isinstance(cam, dict) else None
     from core.units import model_units_of
     scene.units = model_units_of(payload)   # validated; absent = metres
+    pdata = payload.get("plugin_data")
+    scene.plugin_data = dict(pdata) if isinstance(pdata, dict) else {}
     scales = payload.get("custom_scales")
     if isinstance(scales, list):
         scene.custom_scales = [float(n) for n in scales
