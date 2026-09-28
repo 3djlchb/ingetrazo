@@ -862,28 +862,27 @@ def _pan(p, ink):
 
 
 def _eraser(p, ink):
-    # Eraser: a line being rubbed out — solid where it stays, faint dashes
-    # where the eraser has passed — and the eraser itself, an upright block
-    # with a band across it, standing on the boundary.
-    keep = QPen(ink, 3.0)
-    keep.setCapStyle(Qt.RoundCap)
-    p.setPen(keep)
-    p.drawLine(QPointF(8, 38), QPointF(20, 38))
-    faint = QColor(ink)
-    faint.setAlpha(110)
-    gone = QPen(faint, 2.2, Qt.DashLine)
-    gone.setCapStyle(Qt.FlatCap)
-    p.setPen(gone)
-    p.drawLine(QPointF(28, 38), QPointF(41, 38))
-    body = QRectF(19, 10, 12, 24)
-    p.setPen(QPen(ink, 3.0))
-    p.setBrush(Qt.NoBrush)
-    p.drawRoundedRect(body, 2.5, 2.5)
+    # Eraser: a rubber block tilted as it is held, its working end in the
+    # accent, and a few crumbs it has rubbed off.
+    w, h, tip = 30.0, 15.0, 0.38
     p.save()
+    p.translate(26, 21)
+    p.rotate(-40)
     p.setPen(Qt.NoPen)
     p.setBrush(_accent())
-    p.drawRect(QRectF(20.5, 17.5, 9, 5))                 # the band
+    p.drawRoundedRect(QRectF(-w / 2, -h / 2, w * tip, h), 3, 3)
+    p.drawRect(QRectF(-w / 2 + 3, -h / 2, w * tip - 3, h))
+    p.setPen(_rpen(ink, 2.8))
+    p.setBrush(Qt.NoBrush)
+    body = QPainterPath()
+    body.addRoundedRect(QRectF(-w / 2, -h / 2, w, h), 3, 3)
+    p.drawPath(body)
+    p.drawLine(QPointF(-w / 2 + w * tip, -h / 2),
+               QPointF(-w / 2 + w * tip, h / 2))
     p.restore()
+    crumbs = QColor(ink.red(), ink.green(), ink.blue(), 170)
+    for x, y in ((9, 40), (15, 42), (12, 36)):
+        _dot(p, x, y, 1.6, crumbs)
 
 
 def _tape(p, ink):
@@ -1828,7 +1827,7 @@ _CURSOR_HOTSPOTS = {
     "text": (24, 24), "text3d": (24, 24),
     "paint": (13, 35),              # the spout / falling drop
     "eyedropper": (9.5, 38.5),      # the pipette's tip (drawn at 85 %)
-    "eraser": (13, 28),             # the rubber's working corner
+    "eraser": (15, 31),             # the middle of the rubber's accent end
     "tape": (10, 28),               # the tape's end hook (now at the left)
     "protractor": (24, 24),         # the protractor's vertex
     "orbit": (24, 24),              # camera navigation (wheel-drag / modes)
