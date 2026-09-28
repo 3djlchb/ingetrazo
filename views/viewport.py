@@ -784,6 +784,7 @@ class Viewport(QOpenGLWidget):
         "through_point": "Through point",
         "perp_face": "Perpendicular to face",
         "center": "Center",
+        "guide_point": "Guide point",
     }
 
     def __init__(self, parent=None) -> None:
@@ -6735,6 +6736,8 @@ class Viewport(QOpenGLWidget):
         rgb, label = {
             "edge": (COLOR_ON_EDGE, "on_edge"),
             "face": (COLOR_ON_FACE, "on_face"),
+            "guide_line": (COLOR_ON_EDGE, "on_line"),
+            "guide_point": (COLOR_ENDPOINT, "guide_point"),
         }.get(kind, (COLOR_ENDPOINT, "endpoint"))
         color = QColor.fromRgbF(*rgb, 1.0)
         painter.setPen(QPen(QColor(255, 255, 255, 230), 4.0))
