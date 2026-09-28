@@ -34,7 +34,7 @@ from core.guide import Guide
 from core.history import AddGuideCommand
 from core.i18n import tr
 from tools.base import Tool, ToolContext
-from core.units import fmt_len
+from core.units import fmt_len, fmt_len_fine
 
 # The drawing axes (core.axes): the open group's own inside it (#44).
 from core.axes import AXES as _AXES  # noqa: E402
@@ -209,7 +209,7 @@ class TapeMeasureTool(Tool):
             dist = (ctx.world - self.start_point).length()
             self._measured = dist
             viewport.flash_status(
-                tr("Distance: {d} m").format(d=f"{dist:.3f}"), 4000)
+                tr("Distance: {d}").format(d=fmt_len_fine(dist)), 4000)
         self._reset()
         viewport.update()
 
@@ -308,14 +308,14 @@ class TapeMeasureTool(Tool):
             Guide(QVector3D(where), None, origin)))
         d = (where - self.start_point).length()
         viewport.flash_status(
-            (tr("Guide point at {d} m, with its segment") if origin is not None
-             else tr("Guide point at {d} m")).format(d=f"{d:.3f}"), 3000)
+            (tr("Guide point at {d}, with its segment") if origin is not None
+             else tr("Guide point at {d}")).format(d=fmt_len_fine(d)), 3000)
 
     def _place_guide(self, viewport, offset: QVector3D) -> None:
         guide = Guide(self.start_point + offset, self._edge_dir())
         viewport.history.execute(AddGuideCommand(guide))
         viewport.flash_status(
-            tr("Guide at {d} m").format(d=f"{offset.length():.3f}"), 3000)
+            tr("Guide at {d}").format(d=fmt_len_fine(offset.length())), 3000)
 
     def _reset(self) -> None:
         self.start_point = None

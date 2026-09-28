@@ -848,8 +848,8 @@ class PushPullTool(Tool):
                 # (Marco, 2026-09-10: «quiero hacer push para abajo y no me
                 # deja»; the limit was 2 cm of material under one corner).
                 viewport.flash_status(
-                    tr("Push limited to {value} m — deeper would leave the "
-                       "solid", value=f"{self._limit_in:.2f}"), 5000)
+                    tr("Push limited to {value} — deeper would leave the "
+                       "solid", value=fmt_len(self._limit_in)), 5000)
 
     def _infer_reference_distance(self, ctx: ToolContext):
         """Distance making the moved face level with the model geometry under the
@@ -1089,8 +1089,8 @@ class PushPullTool(Tool):
             mesh=self._group.mesh if self._group is not None else None))
         if self._topped_out:
             viewport.flash_status(tr(
-                "Push stopped at {d:.2f} m: going further would break the "
-                "solid", d=abs(self.extrusion)), 4000)
+                "Push stopped at {d}: going further would break the "
+                "solid", d=fmt_len(abs(self.extrusion))), 4000)
             PushPullTool.last_distance = self.extrusion
         elif self._refused:
             # The guard rolled the push back to keep the solid watertight; tell
