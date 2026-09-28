@@ -591,8 +591,14 @@ class SelectTool(Tool):
         viewport.update()
 
     def on_key(self, viewport, key: int, modifiers: Qt.KeyboardModifiers) -> bool:
-        if key in (Qt.Key_Delete, Qt.Key_Backspace):
+        if key == Qt.Key_Delete:
             delete_selection_or_hover(viewport)
+            return True
+        if key == Qt.Key_Backspace:
+            # The selection only, never the hover: with the typed value
+            # emptied, one Backspace too many lands here and must not erase
+            # the face under the cursor.
+            erase_entities(viewport, list(viewport.scene.selection))
             return True
         return False
 

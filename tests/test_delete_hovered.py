@@ -74,6 +74,25 @@ def test_nothing_hovered_nothing_selected_is_a_no_op():
     assert SelectTool().on_key(vp, Qt.Key_Delete, Qt.NoModifier) is True
 
 
+def test_backspace_never_erases_the_hover():
+    # Correcting a typed value, one Backspace too many falls through to
+    # the Select tool: it must not take the face under the cursor.
+    scene, vp = _square()
+    face = scene.mesh.faces[0]
+    vp._hover_entity = face
+    assert SelectTool().on_key(vp, Qt.Key_Backspace, Qt.NoModifier) is True
+    assert face in scene.mesh.faces
+    assert vp._hover_entity is face
+
+
+def test_backspace_still_erases_the_selection():
+    scene, vp = _square()
+    face = scene.mesh.faces[0]
+    scene.selection.add(face)
+    assert SelectTool().on_key(vp, Qt.Key_Backspace, Qt.NoModifier) is True
+    assert face not in scene.mesh.faces
+
+
 def test_other_tools_wait_while_an_operation_holds_geometry():
     from views.viewport import Viewport
 
