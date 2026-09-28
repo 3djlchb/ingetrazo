@@ -11,16 +11,17 @@ name: ingetrazo
 base: core22
 version: "@VERSION@"
 title: IngeTrazo
-summary: Alternativa libre a SketchUp — modelado 3D con .skp nativo
+summary: Traza como a mano — modelador 3D libre para arquitectura e ingeniería
 description: |
-  IngeTrazo es una alternativa libre (GPL-3.0) a SketchUp para
-  arquitectura, ingeniería civil e impresión 3D, en español, que abre
-  archivos .skp con su propio lector libre (openskp) — los modelos de tu
-  equipo se importan sin conversiones ni peajes.
+  IngeTrazo (se lee in-je-TRA-zo: ingeniería + trazo) es un modelador 3D
+  libre (GPL-3.0) para arquitectura, ingeniería civil e impresión 3D, en
+  español, para trazar como a mano. Abre archivos .skp con su propio lector
+  libre (openskp), así que los modelos de tu equipo se importan sin
+  conversiones ni peajes.
 
   Lo que trae:
 
-  - Modelado estilo SketchUp: empujar/tirar, sígueme, grupos y componentes,
+  - Modelado que se siente a mano: empujar/tirar, sígueme, grupos y componentes,
     inferencias y medidas exactas por teclado.
   - Sombras con la posición real del sol por geolocalización, fecha y hora:
     estudios de asoleamiento como entregable de obra.
@@ -35,8 +36,9 @@ description: |
   Parte del ecosistema IngePresupuestos: terreno → trazo → BIM →
   presupuesto.
 
-  IngeTrazo is a free, open-source SketchUp alternative that opens .skp
-  files with its own free reader (openskp): push/pull modeling, real-sun
+  IngeTrazo (pronounced EEN-heh-TRAH-soh, "the engineer's stroke") is a free,
+  open-source 3D modeler to draw as if by hand. It opens SketchUp .skp files
+  with its own free reader (openskp), and brings push/pull modeling, real-sun
   shadow studies, sections, print sheets, DXF/DWG import and BIM (IFC)
   tagging. Spanish-first UI, English available.
 

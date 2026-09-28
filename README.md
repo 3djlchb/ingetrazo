@@ -1,13 +1,16 @@
 # IngeTrazo
 
-**A free, SketchUp-inspired 3D modeler for architecture, engineering and 3D design — built natively for Linux.**
+*Pronounced **EEN-heh-TRAH-soh** — from Spanish* inge(niería) *"engineering"
++* trazo *"a drawn stroke": the engineer's stroke.*
+
+**A free 3D modeler for architecture, engineering and 3D design — draw as if by hand, built natively for Linux.**
 
 ![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)
 ![Status: usable](https://img.shields.io/badge/status-usable%20·%200.3.x-brightgreen)
 ![Platform: Linux · Windows · macOS (from source)](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS%20(source)-informational)
 ![Made in Peru](https://img.shields.io/badge/made%20in-Peru%20%F0%9F%87%B5%F0%9F%87%AA-red)
 
-IngeTrazo brings SketchUp-style *push/pull* modeling to Linux — where there is
+IngeTrazo brings *push/pull* modeling to Linux — where there is
 almost no native CAD for civil engineers and architects, and for anyone who
 designs in 3D (furniture, objects, scenes, models). It is freeform at the
 core (draw anything, like sketching by hand) with an **optional BIM tagging
@@ -89,7 +92,7 @@ welcome arch with all its rebar (also attached to every release as
 
 ## What works today
 
-- **SketchUp-style viewport** — Z-up orbit camera, grid, colored axes,
+- **Viewport** — Z-up orbit camera, grid, colored axes,
   perspective ↔ parallel, standard views, zoom-extents, hidden-line removal.
 - **Drawing tools** — Line, Rectangle, Rotated Rectangle, Circle, Polygon,
   Arc (2-point) and 3-Point Arc, with inferencing, snapping, axis locks and a
@@ -109,9 +112,9 @@ welcome arch with all its rebar (also attached to every release as
 - **Display styles** — Default, Architectural (textures on white), Shaded,
   Hidden line, Monochrome, Wireframe and X-ray; scenes remember their
   style and the sheet composer renders each viewport in any of them.
-- **Curved solids** — SketchUp-style soft edges: smooth cylinders, curved-surface
+- **Curved solids** — soft edges: smooth cylinders, curved-surface
   selection, view-dependent profile/silhouette edges.
-- **Materials** — solid color per face and **SketchUp-compatible textures**
+- **Materials** — solid color per face and **textures**
   (planar projection with real-world tile size), applied with a Paint tool —
   with a **named material registry**: paint keeps identity, edit-and-restamp
   updates every use, Model Info reports quantities per material, and exports
@@ -253,7 +256,8 @@ provided derivative works stay under the same license.
 
 ## En español
 
-**IngeTrazo** es un modelador 3D libre estilo SketchUp para arquitectura,
+**IngeTrazo** (se lee *in-je-TRA-zo*: *inge*niería + *trazo*) es un
+modelador 3D libre para arquitectura,
 ingeniería y diseño 3D, **hecho nativo para Linux** — donde casi no
 hay CAD para nuestra carrera ni para quien diseña en 3D. Es freeform en el núcleo (trazás lo que quieras,
 como dibujando a mano) con una capa **BIM opcional** planeada encima: taggeás la
@@ -269,3 +273,9 @@ de cualquier época (clásico 2013–2020 y actual 2021+), gracias a
 [OpenSKP](https://github.com/iamahsanmehmood/openskp) — sin Wine ni DLLs. En
 desarrollo temprano, respaldado por ~870 tests. Software libre GPL-3.0, hecho
 en Perú. Más en [docs/](docs/).
+
+---
+
+*SketchUp is a trademark of Trimble Inc. IngeTrazo is an independent project,
+not affiliated with or endorsed by Trimble. SketchUp es una marca registrada de
+Trimble Inc.; IngeTrazo es un proyecto independiente, sin relación con Trimble.*

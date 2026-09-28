@@ -4,22 +4,20 @@
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
   <name>IngeTrazo</name>
-  <summary>SketchUp-style 3D modeler for architecture, engineering and design</summary>
-  <summary xml:lang="es">Modelador 3D estilo SketchUp para arquitectura, ingeniería y diseño</summary>
+  <summary>Draw as if by hand: free 3D modeler for architecture and engineering</summary>
+  <summary xml:lang="es">Traza como a mano: modelador 3D libre para arquitectura e ingeniería</summary>
   <developer id="com.ingetrazo">
     <name>Marco Sumari Tellez</name>
   </developer>
   <description>
     <p>
-      Free 3D modeler in the spirit of SketchUp: push/pull modelling that
-      feels like sketching by hand, groups and components, materials with
+      Free 3D modeler that lets you draw as if by hand: push/pull modelling, groups and components, materials with
       textures, dimensions and leader texts, layers, scenes and display
       styles — plus a sheet composer that turns the model into printable,
       to-scale plan sheets (PDF/DXF).
     </p>
     <p xml:lang="es">
-      Modelador 3D libre al estilo SketchUp: empujar/tirar que se siente
-      como trazar a mano, grupos y componentes, materiales con texturas,
+      Modelador 3D libre para trazar como a mano: empujar/tirar, grupos y componentes, materiales con texturas,
       cotas y textos guía, capas, escenas y estilos de visualización — más
       un compositor de láminas que convierte el modelo en planos imprimibles
       a escala (PDF/DXF).
