@@ -13,7 +13,7 @@ layout(location = 5) in vec4 a_inst2;
 layout(location = 6) in vec4 a_inst3;
 
 uniform mat4 u_mvp;
-// Active section cut (SketchUp): world-space plane as (n, d) with the KEPT
+// Active section cut: world-space plane as (n, d) with the KEPT
 // side where dot(n, p) + d >= 0. Enabled only around the model-geometry
 // passes (sky, axes, terrain, previews stay uncut). All vertex buffers are
 // WORLD coordinates (group chunks bake their transform), so one plane

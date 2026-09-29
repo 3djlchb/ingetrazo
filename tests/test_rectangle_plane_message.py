@@ -18,7 +18,7 @@ the ground cannot be drawn from there at all. Rotated Rectangle works
 because it takes its plane from the edge you draw, not the face under the
 cursor.
 
-The behaviour is SketchUp's and stays; the message was the bug.
+The behaviour is the classic one and stays; the message was the bug.
 """
 from __future__ import annotations
 

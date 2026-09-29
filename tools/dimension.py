@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Marco Sumari Tellez and IngeTrazo contributors.
 """Dimension tool (D): place a static linear dimension.
 
-Three clicks, SketchUp-style:
+Three clicks, the classic way:
 1. first endpoint (snapped to geometry),
 2. second endpoint (snapped),
 3. move to slide the dimension line off the measured segment, click to place.

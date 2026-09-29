@@ -7,8 +7,8 @@ actions over the deterministic engine, never raw meshes. The «AI» tab of
 the side tray (section "AI bridge (MCP)", or Extensions ▸ AI Bridge (MCP))
 starts a localhost-only TCP server; the companion
 ``scripts/ingetrazo_mcp.py`` bridges it to Claude Code / Claude Desktop as
-an MCP server. The same pattern as sketchup-mcp (a TCP server inside the
-app + an MCP process outside), with three legs up on SketchUp's:
+an MCP server. The usual pattern for app MCP bridges (a TCP server inside
+the app + an MCP process outside), with three legs up:
 
 - ``run_python`` executes through the Python Console's transactional
   machinery: every AI action is ONE undo step, and a script that raises is

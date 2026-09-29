@@ -25,8 +25,8 @@ from PySide6.QtGui import QVector3D
 from core.snap import SnapResult
 
 
-#: Arrow keys → the axis a locked drawing plane is NORMAL to (SketchUp:
-#: Right = red, Left = green, Up = blue), and the plane's everyday name.
+#: Arrow keys → the axis a locked drawing plane is NORMAL to (Right =
+#: red, Left = green, Up = blue), and the plane's everyday name.
 PLANE_LOCK_KEYS = {int(Qt.Key_Right): "x", int(Qt.Key_Left): "y",
                    int(Qt.Key_Up): "z"}
 # The drawing axes (core.axes): the world's at the top level, the open
@@ -76,14 +76,14 @@ class PlaneLock:
     """Arrow keys BEFORE the first click lock a planar tool (circle,
     polygon, rectangle, the arcs) to a drawing plane: Right = the plane
     normal to X (YZ), Left = normal to Y (XZ), Up = normal to Z (XY); the
-    same key again frees it. SketchUp's plane lock (Marco, 2026-09-08:
-    «quiero dibujar un círculo en el plano ZX… en SketchUp me restringe
-    a qué plano quiero dibujar apretando las teclas de desplazamiento»).
+    same key again frees it. The classic plane lock (Marco, 2026-09-08:
+    «quiero dibujar un círculo en el plano ZX… apretando las teclas de
+    desplazamiento»).
     Once the first point is down the arrows are the viewport's linear
     axis lock again, as always. The lock is spent by the shape (or Esc),
-    like SketchUp's.
+    the classic way.
 
-    The DOWN arrow is SketchUp's magenta reference lock (2016+): over an
+    The DOWN arrow is the classic magenta reference lock: over an
     edge the plane goes PERPENDICULAR to that edge, over a face PARALLEL
     to it; Down again frees it. It is the native way to start a pipe's
     circle on an inclined axis line, then Follow Me it (issue #10,
@@ -101,7 +101,7 @@ class PlaneLock:
     #: ``work_plane``; its geometry is laid out on THIS plane instead, which
     #: the viewport picks from the camera — horizontal at working tilts,
     #: vertical facing the camera near the horizon — so the shape follows
-    #: the view like SketchUp's (Rafael's review, 2026-09-10: a rectangle
+    #: the view the classic way (Rafael's review, 2026-09-10: a rectangle
     #: at eye level read «5.74 × 0.00 m», its second point on a vertical
     #: plane while the sides were measured along X/Y).
     hover_plane: tuple | None = None
@@ -130,7 +130,7 @@ class PlaneLock:
         """The plane the shape WOULD take at ``point`` before the first
         click: the arrow-key lock, else the face under the cursor, else
         the view's — vertical facing the camera near the horizon, flat
-        otherwise. SketchUp shows this plane on the cursor (a coloured
+        otherwise. The classic tool shows this plane on the cursor (a coloured
         square / ring) so a lock is visible before you commit to it."""
         locked = self.locked_work_plane(point)
         if locked is not None:
@@ -164,7 +164,7 @@ class PlaneLock:
 
     def lock_color(self):
         """The rubber band's colour while an arrow-key lock is on: the axis
-        colour, or SketchUp's magenta for the Down-arrow reference."""
+        colour, or the magenta for the Down-arrow reference."""
         if self.plane_ref is not None:
             from core.snap import COLOR_REFERENCE
             return (*COLOR_REFERENCE, 1.0)
@@ -214,8 +214,8 @@ class PlaneLock:
     def _reference_lock_key(self, viewport) -> bool:
         """Down before the first click: lock the plane perpendicular to the
         edge under the cursor (or parallel to the face under it); Down
-        again frees it. With nothing under the cursor SketchUp does
-        nothing, and neither do we — but the key stays ours, so the
+        again frees it. With nothing under the cursor the classic
+        lock does nothing, and neither do we — but the key stays ours, so the
         viewport's linear reference (which is for the SECOND point) does
         not swallow it."""
         from core.i18n import tr
@@ -243,7 +243,7 @@ class PlaneLock:
     def hovered_reference(viewport):
         """``(normal, kind)`` of the reference under the cursor: the edge
         (loose or a group's, as the viewport's hover pick returns it in
-        world space) beats the face, as in SketchUp; ``None`` over
+        world space) beats the face, the usual convention; ``None`` over
         nothing."""
         edge = getattr(viewport, "_hover_edge", None)
         if edge is not None:
@@ -327,7 +327,7 @@ class Tool(ABC):
     icon: str | None = None
     shortcut: str | None = None
     #: A second key for the same tool, when a key changes hands and the old
-    #: one is worth keeping. Push/Pull answers to SketchUp's P and to the U
+    #: one is worth keeping. Push/Pull answers to the usual P and to the U
     #: it had here for a year. It is the SAME action with two shortcuts —
     #: never a second action, which is what Qt kills (tests/test_shortcuts.py).
     shortcut_alt: str | None = None
@@ -348,7 +348,7 @@ class Tool(ABC):
     # back edges behind its faces, like real geometry; loose drawing tools keep
     # the default (preview always visible on top).
     wireframe_depth_tested: bool = False
-    # Caption for the SketchUp-style Measurements box (VCB) while this tool is
+    # Caption for the Measurements box (VCB) while this tool is
     # active — "Length", "Dimensions", "Distance". ``None`` hides the box.
     vcb_label: str | None = None
 
@@ -375,7 +375,7 @@ class Tool(ABC):
         self.on_click(ctx)
 
     def on_triple_click(self, ctx: "ToolContext") -> None:
-        """Third click in place (SketchUp: select all connected). Defaults to
+        """Third click in place (select all connected). Defaults to
         a plain click so unaware tools keep their rhythm."""
         self.on_click(ctx)
 
@@ -433,7 +433,7 @@ class Tool(ABC):
     def status_clause(self) -> str:
         """A short clause this tool adds to the status bar, or "".
 
-        SketchUp keeps its modifiers ON SCREEN the whole time the tool is
+        The classic tool keeps modifiers ON SCREEN the whole time the tool is
         active — «Ctrl = Líneas guía del ciclo/Puntos guía/Medida» sits
         there next to the instruction — instead of flashing them once when
         you press the key. A flash tells you what just happened; this tells
@@ -461,7 +461,7 @@ class Tool(ABC):
         """Return ``Face`` objects to render shaded as a live solid preview.
 
         Push/Pull uses this so the extruded box appears filled while you drag,
-        the way SketchUp shows the solid forming — not just its wireframe. The
+        the way users expect the solid forming — not just its wireframe. The
         viewport triangulates and draws them depth-tested every frame; tools
         that have no solid preview default to an empty list.
         """

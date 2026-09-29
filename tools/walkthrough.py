@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Marco Sumari Tellez and IngeTrazo contributors.
-"""Walking through a model — SketchUp's Position Camera, Look Around and
-Walk (help.sketchup.com, «Walking through a Model»), the way Rafael asked
+"""Walking through a model — Position Camera, Look Around and
+Walk, the way Rafael asked
 for it («pasitos» to look at interiors, 2026-09-16, 13:00).
 
 Three tools, as there:
 
 * **Position Camera** — click a point and the eye goes ``EYE_HEIGHT``
-  above it (SketchUp's 5' 6" = 1,68 m), looking level the way the camera
+  above it (the classic 5' 6" = 1,68 m), looking level the way the camera
   was already heading; the Measurements box («Height offset») takes
   another height. Click-DRAG from where you want to stand to what you
   want to look at. Either way the tool hands over to Look Around.
@@ -17,8 +17,8 @@ Three tools, as there:
   the cursor gets from it the faster you go; up/down walks forward and
   back, left/right turns. The eye keeps its height above whatever it is
   standing on (stairs, ramps), and walls stop you. Ctrl = run, Shift =
-  move vertically or sideways, Alt = walk through walls — SketchUp's own
-  modifiers, read off Marco's recording of its status bar (2026-09-18).
+  move vertically or sideways, Alt = walk through walls — the classic
+  modifiers, read off Marco's recording of a status bar (2026-09-18).
 
 None of it touches the camera model: a walkthrough only ever says "the
 eye is here, looking there" (``OrbitCamera.look_from``), and the floor
@@ -36,7 +36,7 @@ from core.i18n import tr
 from tools.base import Tool, ToolContext
 from core.units import fmt_len
 
-#: SketchUp's default eye height, 5' 6".
+#: The classic default eye height, 5' 6".
 DEFAULT_EYE_HEIGHT = 1.68
 _SETTINGS_KEY = "walk/eye_height"
 
@@ -180,7 +180,7 @@ class _EyeTool(Tool):
 
     def on_value(self, viewport, value) -> bool:
         """«Eye height»: the eye's height above the ground — the model's
-        z = 0 — as SketchUp's box reads it while you look around or walk."""
+        z = 0 — as the usual box reads it while you look around or walk."""
         if not isinstance(value, (int, float)):
             return False
         cam = viewport.camera
@@ -459,7 +459,7 @@ class WalkTool(_EyeTool):
 
     # ---- Overlay ----------------------------------------------------------------
     def draw_overlay(self, viewport, painter) -> None:
-        """SketchUp's crosshair where the walk began."""
+        """The classic crosshair where the walk began."""
         if self._anchor_px is None:
             return
         from PySide6.QtGui import QColor, QPen
@@ -473,7 +473,7 @@ class WalkTool(_EyeTool):
 
 class FirstPersonTool(_EyeTool):
     """Walking as a game plays it — a mode of its own next to Walk, which
-    stays SketchUp's. W/A/S/D walk and strafe, Q/E go down and up, Shift
+    stays classic. W/A/S/D walk and strafe, Q/E go down and up, Shift
     runs, Alt goes through walls; a drag of either mouse button turns the
     head at a fixed rate per pixel, set in Preferences (``look_deg_per_px``;
     the viewport hides the pointer and,

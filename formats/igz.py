@@ -214,7 +214,7 @@ def _face_json(f) -> dict:
     if opacity is not None:
         entry["opacity"] = float(opacity)
     if getattr(f, "attrs", {}).get("hidden"):
-        entry["hidden"] = True          # SketchUp's Hide on a face
+        entry["hidden"] = True          # Hide on a face
     # Material identity (core.materials): the registry name this face was
     # painted with. Written only when present; older readers ignore it.
     mat = getattr(f, "attrs", {}).get("mat")
@@ -228,7 +228,7 @@ def _face_json(f) -> dict:
                          for k, v in back.items()}
     elif back is True:
         # A two-sided face: the back mirrors the front (what the mesh
-        # formats describe, and what a SketchUp face painted the same on
+        # formats describe, and what a .skp face painted the same on
         # both sides becomes). Absent = the style's default back.
         entry["back"] = True
     return entry
@@ -714,7 +714,7 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
         elif any(isinstance(c, dict) and "xform" not in c
                  for c in raw.get("children", []) or []):
             # Saved before the key existed (issue #90): a container holding
-            # a CLASSIC group can only be Make Group's — a SketchUp import
+            # a CLASSIC group can only be Make Group's — a .skp import
             # places every child with a matrix. A group, then.
             group.component = False
         return group
@@ -775,7 +775,7 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
         from core.section import SectionPlane
         scene.section_planes = [SectionPlane.from_dict(r)
                                 for r in raw_planes]
-        # One active cut max (SketchUp): keep the FIRST marked active.
+        # One active cut max: keep the FIRST marked active.
         seen_active = False
         for sp in scene.section_planes:
             if sp.active and seen_active:

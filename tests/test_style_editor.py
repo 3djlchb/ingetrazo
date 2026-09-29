@@ -227,7 +227,7 @@ def test_panel_combo_lists_saved_styles_and_arms_delete(settings_file):
     assert not panel._del_btn.isEnabled()              # a built-in: not
 
 
-# ---- Back color (SketchUp's Front/Back color pair) ----------------------------
+# ---- Back color (the usual Front/Back color pair) ----------------------------
 
 def test_back_color_is_style_data_and_round_trips(settings_file):
     """The back-face tint lives in the Style next to the front colour:
