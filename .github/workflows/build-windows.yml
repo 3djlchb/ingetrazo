@@ -39,7 +39,20 @@ jobs:
           # programas (y malware), y los antivirus lo tienen fichado — la
           # causa habitual de falsos positivos como el de la #162. No lo
           # garantiza (Wacatac.B!ml es heurístico), pero lo reduce.
-          PYINSTALLER_COMPILE_BOOTLOADER=1 pip install --no-binary pyinstaller pyinstaller
+          # OJO: `pip install --no-binary` NO basta — el sdist también trae
+          # los bootloaders precompilados y los instala tal cual (medido en
+          # el run 36505183570: «wheel» en 0,06 s). Hay que compilarlo con
+          # waf dentro del sdist y luego instalar ESE árbol.
+          pip download --no-binary pyinstaller --no-deps pyinstaller -d "$RUNNER_TEMP/pyi"
+          tar -xzf "$RUNNER_TEMP"/pyi/pyinstaller-*.tar.gz -C "$RUNNER_TEMP/pyi"
+          PYI_SRC="$(ls -d "$RUNNER_TEMP"/pyi/pyinstaller-*/)"
+          rm -f "$PYI_SRC"/PyInstaller/bootloader/Windows-64bit-intel/*.exe
+          (cd "$PYI_SRC/bootloader" && python ./waf all --target-arch=64bit)
+          # Sin los .exe recién compilados, fallar: nunca publicar con el viejo.
+          test -f "$PYI_SRC/PyInstaller/bootloader/Windows-64bit-intel/run.exe"
+          test -f "$PYI_SRC/PyInstaller/bootloader/Windows-64bit-intel/runw.exe"
+          sha256sum "$PYI_SRC"/PyInstaller/bootloader/Windows-64bit-intel/*.exe
+          pip install "$PYI_SRC"
           python -c "import PyInstaller; print('PyInstaller', PyInstaller.__version__)"
           # openskp NATIVO: UPSTREAM main — todos nuestros parches están
           # mergeados allá (corpus legacy 186/186 PRs #194/#199, cotas y
