@@ -2241,5 +2241,21 @@
  "In sync — stop moving to update": "Sincronizado — pare para atualizar",
  "Blender stopped; it will start again": "O Blender parou; vai iniciar de novo",
  "In sync": "Sincronizado",
- "Enter sends · Shift+Enter: new line": "Enter envia · Shift+Enter: nova linha"
+ "Enter sends · Shift+Enter: new line": "Enter envia · Shift+Enter: nova linha",
+ "Search commands…": "Buscar comandos…",
+ "Search a command…": "Buscar um comando…",
+ "No results found": "Nenhum resultado encontrado",
+ "Backspace in the empty box searches everywhere": "Backspace com a caixa vazia busca em tudo",
+ "Change shortcut…": "Alterar atalho…",
+ "Shortcut: {keys}": "Atalho: {keys}",
+ "Toolbars": "Barras de ferramentas",
+ "Zoom": "Zoom",
+ "Format painter": "Pincel de formatação",
+ "Model view": "Vista do modelo",
+ "Level mark": "Cota de nível",
+ "Layer legend": "Legenda de camadas",
+ "Chain dimension": "Cota em cadeia",
+ "Baseline dimension": "Cota por linha de base",
+ "Angular dimension": "Cota angular",
+ "Radius dimension": "Cota de raio"
 }

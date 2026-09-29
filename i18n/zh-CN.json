@@ -2244,5 +2244,21 @@
  "In sync — stop moving to update": "已同步 — 停下即可更新",
  "Blender stopped; it will start again": "Blender 已停止，将重新启动",
  "In sync": "已同步",
- "Enter sends · Shift+Enter: new line": "回车发送 · Shift+回车：换行"
+ "Enter sends · Shift+Enter: new line": "回车发送 · Shift+回车：换行",
+ "Search commands…": "搜索命令…",
+ "Search a command…": "输入命令名称…",
+ "No results found": "未找到结果",
+ "Backspace in the empty box searches everywhere": "在空白框中按退格键可搜索全部",
+ "Change shortcut…": "更改快捷键…",
+ "Shortcut: {keys}": "快捷键：{keys}",
+ "Toolbars": "工具栏",
+ "Zoom": "缩放",
+ "Format painter": "格式刷",
+ "Model view": "模型视图",
+ "Level mark": "高程标记",
+ "Layer legend": "图层图例",
+ "Chain dimension": "连锁尺寸",
+ "Baseline dimension": "基线尺寸",
+ "Angular dimension": "角度尺寸",
+ "Radius dimension": "半径尺寸"
 }

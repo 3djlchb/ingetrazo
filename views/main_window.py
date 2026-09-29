@@ -1126,10 +1126,22 @@ class MainWindow(QMainWindow):
         window_menu.addAction(prefs_action)
         self._build_language_menu(window_menu)
 
+        # Blender's F3 / SketchUp's Search: one box that runs any command
+        # by name (views/command_search.py). Made BEFORE the plugins load,
+        # so a plugin asking for F3 finds it taken; on the window too, so
+        # it answers with the menu bar hidden (clean screen).
+        search_action = QAction(tr("Search commands…"), self)
+        search_action.setObjectName("command_search")
+        search_action.setShortcut(QKeySequence("F3"))
+        search_action.triggered.connect(self._on_command_search)
+        self.addAction(search_action)
+
         # Extensions — third-party plugin tools (core.extensions engine).
         self._build_extensions_menu(menubar)
 
         help_menu = menubar.addMenu(tr("Help"))
+        help_menu.addAction(search_action)
+        help_menu.addSeparator()
         get_models_action = QAction(tr("Get more models and textures…"), self)
         get_models_action.triggered.connect(self._on_get_models)
         help_menu.addAction(get_models_action)
@@ -1146,6 +1158,9 @@ class MainWindow(QMainWindow):
         about_action = QAction(tr("About IngeTrazo"), self)
         about_action.triggered.connect(self._on_about)
         help_menu.addAction(about_action)
+        # A letter typed in an open menu searches that menu (Blender 4).
+        from views.command_search import install_menu_typing
+        install_menu_typing(self)
 
     # ---- Language -----------------------------------------------------------
     _LANGUAGE_NAMES = LANGUAGE_NAMES
@@ -1428,8 +1443,15 @@ class MainWindow(QMainWindow):
 
     def _on_preferences(self) -> None:
         """Window ▸ Preferences: the scattered QSettings in one dialog."""
+        self.open_preferences()
+
+    def open_preferences(self, shortcut_of=None) -> None:
+        """Preferences; on the Keyboard shortcuts page with that action
+        picked when ``shortcut_of`` is given (right click in F3)."""
         from views.preferences_dialog import PreferencesDialog
         dlg = PreferencesDialog(self)
+        if shortcut_of is not None:
+            dlg.show_shortcut_of(shortcut_of)
         dlg.exec()
         # Freed now, not when the window goes: each opening used to leave
         # a hidden dialog hanging from the window until the app closed.
@@ -1646,6 +1668,10 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(tr(
                 "IngeTrazo asked Windows for the high-performance GPU; it "
                 "applies the next time you open the program."), 20000)
+
+    def _on_command_search(self) -> None:
+        from views.command_search import open_search
+        open_search(self)
 
     def _on_about(self) -> None:
         from core.glinfo import describe

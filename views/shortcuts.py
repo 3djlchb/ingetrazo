@@ -261,6 +261,17 @@ class ShortcutsPanel(QWidget):
             if first is None:
                 self._edit.setKeySequence(QKeySequence())
 
+    def pick(self, act: QAction) -> None:
+        """Select ``act``'s row, ready for its new keys."""
+        self._filter.clear()
+        for i in range(self._tree.topLevelItemCount()):
+            row = self._tree.topLevelItem(i)
+            if row.data(0, Qt.UserRole) is act:
+                self._tree.setCurrentItem(row)
+                self._tree.scrollToItem(row)
+                self._edit.setFocus()
+                return
+
     def _current(self):
         row = self._tree.currentItem()
         return (row, row.data(0, Qt.UserRole)) if row is not None \

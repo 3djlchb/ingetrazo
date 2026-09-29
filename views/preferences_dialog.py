@@ -329,12 +329,18 @@ class PreferencesDialog(QDialog):
         from views.shortcuts import ShortcutsPanel
         self._shortcuts = ShortcutsPanel(self._window)
         tabs.addTab(self._shortcuts, tr("Keyboard shortcuts"))
+        self._tabs = tabs
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok
                                    | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def show_shortcut_of(self, action) -> None:
+        """Open on the Keyboard shortcuts page with ``action`` picked."""
+        self._tabs.setCurrentWidget(self._shortcuts)
+        self._shortcuts.pick(action)
 
     # ---- Apply --------------------------------------------------------------
     def accept(self) -> None:  # noqa: D102 — QDialog override

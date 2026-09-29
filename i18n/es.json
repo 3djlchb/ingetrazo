@@ -2243,5 +2243,21 @@
  "In sync — stop moving to update": "Sincronizado — detente para actualizar",
  "Blender stopped; it will start again": "Blender se detuvo; volverá a arrancar",
  "In sync": "Sincronizado",
- "Enter sends · Shift+Enter: new line": "Enter envía · Mayús+Enter: nueva línea"
+ "Enter sends · Shift+Enter: new line": "Enter envía · Mayús+Enter: nueva línea",
+ "Search commands…": "Buscar comandos…",
+ "Search a command…": "Buscar un comando…",
+ "No results found": "No se encontraron resultados",
+ "Backspace in the empty box searches everywhere": "Retroceso con la casilla vacía busca en todo",
+ "Change shortcut…": "Cambiar atajo…",
+ "Shortcut: {keys}": "Atajo: {keys}",
+ "Toolbars": "Barras de herramientas",
+ "Zoom": "Zoom",
+ "Format painter": "Pincel de formato",
+ "Model view": "Vista del modelo",
+ "Level mark": "Cota de nivel",
+ "Layer legend": "Leyenda de capas",
+ "Chain dimension": "Cota en cadena",
+ "Baseline dimension": "Cota desde línea base",
+ "Angular dimension": "Cota angular",
+ "Radius dimension": "Cota de radio"
 }
