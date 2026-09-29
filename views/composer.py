@@ -4716,6 +4716,10 @@ class ComposerCanvasView(QGraphicsView):
         one a row further out (baseline). A click on the last point, Esc,
         or switching tools ends the run; a chain stacks its total."""
         pts = self._chain_pts
+        if not pts:
+            # The sheet this run belongs to: a rebuild keeps the run, a
+            # change of sheet ends it (forget_scene_items, #187).
+            self._chain_comp = getattr(self.composer, "comp", None)
         if not pts and self._seed_run_from(self._selected_cota()):
             pts = self._chain_pts           # carrying on from a cota: this
             # click is already the next point, so fall through to the tail
@@ -5074,11 +5078,31 @@ class ComposerCanvasView(QGraphicsView):
         just drawn finishes its render, a field refreshes… so the first
         click of «two clicks» was lost and nothing was placed (#95,
         @pacaeiro: still in 0.5.2 for views and arrows). The next mouse
-        move draws the rubber band again. A chain of dimensions keeps its
-        old behaviour (it is finished): it holds placed items."""
+        move draws the rubber band again.
+
+        A chain (or baseline) run survives too (#187, tonfdd). It used to be
+        finished here «because it holds placed items» — but placing each of
+        its cotas goes through the history, which rebuilds the canvas, so a
+        chain never lived past its first segment and its total was never
+        stacked. What it holds are the DOCUMENT's cotas and frames, which
+        outlive the canvas: it only ends when the sheet itself changes, and
+        a cota undone meanwhile drops out of it."""
         if self._chain_pts or self._chain_cotas:
-            self.cancel_placement()
-            return
+            comp = getattr(self.composer, "comp", None)
+            if comp is None or comp is not getattr(self, "_chain_comp", comp):
+                self.cancel_placement()          # another sheet / document
+                return
+            live = {id(c) for c in comp.cotas}
+            kept = [c for c in self._chain_cotas if id(c) in live]
+            if len(kept) != len(self._chain_cotas):
+                # An undo took a segment back: the points after it go too,
+                # so the next click continues from where the chain now ends.
+                self._chain_cotas = kept
+                n = len(kept) + 1 if kept else 0
+                self._chain_pts = self._chain_pts[:max(n, 0)]
+                if not kept:
+                    self._chain_sep = None
+                    self._chain_pts = []
         self._preview = None
         self._snap_marker = None
         self._band_item = None
