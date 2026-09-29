@@ -109,6 +109,11 @@ class _RadialTool(AxisMagnet, PlaneLock, Tool):
         viewport.update()
         return True
 
+    def value_is_unitless(self) -> bool:
+        """Before the centre the typed number is a side COUNT (#176);
+        after it, the radius, a length in the document's unit."""
+        return self.start_point is None
+
     def on_value(self, viewport, value) -> bool:
         """Before the centre is placed, a typed number sets the **side count**
         (SketchUp: type sides + Enter); after it, the number is the **radius**."""

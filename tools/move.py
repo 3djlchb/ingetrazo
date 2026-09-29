@@ -364,6 +364,12 @@ class MoveTool(Tool):
             self._apply_preview(ctx.viewport, ctx.world - self.grab)
         ctx.viewport.update()
 
+    def value_is_unitless(self) -> bool:
+        """A rotation grip held (or just used) takes an ANGLE (#176);
+        otherwise the value is a distance."""
+        rot = self._grip_rot or self._grip_rot_done
+        return rot is not None and self.start_point is None
+
     def on_value(self, viewport, value) -> bool:
         rot = self._grip_rot or self._grip_rot_done
         if rot is not None and self.start_point is None:

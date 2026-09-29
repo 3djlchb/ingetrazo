@@ -6809,7 +6809,11 @@ class Viewport(QOpenGLWidget):
         if pixel is None:
             return
         if self._value_buffer:
-            text = _typed_value_text(self._value_buffer)
+            unitless = getattr(tool, "value_is_unitless", None)
+            if callable(unitless) and unitless():
+                text = self._value_buffer   # an angle or a count: no unit mark
+            else:
+                text = _typed_value_text(self._value_buffer)
             fg = QColor("#0F141B")
             shadow = QColor(255, 220, 130, 235)  # warm tint while typing
         else:
@@ -11520,9 +11524,21 @@ class Viewport(QOpenGLWidget):
         if key in (Qt.Key_Return, Qt.Key_Enter):
             if not self._value_buffer:
                 return False
-            value = self._parse_value_buffer(
-                self._value_buffer,
-                comma_lists=getattr(self.active_tool, "vcb_comma_lists", False))
+            # An angle, a factor or a count is not a length: the tool says
+            # so and the document's unit stays out of it (#176).
+            unitless = getattr(self.active_tool, "value_is_unitless", None)
+            if callable(unitless) and unitless():
+                from core.units import unitless_numbers
+                with unitless_numbers():
+                    value = self._parse_value_buffer(
+                        self._value_buffer,
+                        comma_lists=getattr(self.active_tool,
+                                            "vcb_comma_lists", False))
+            else:
+                value = self._parse_value_buffer(
+                    self._value_buffer,
+                    comma_lists=getattr(self.active_tool, "vcb_comma_lists",
+                                        False))
             if value is None:
                 self._set_value_buffer("")
                 return True

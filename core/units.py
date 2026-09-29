@@ -11,6 +11,7 @@ fractional forms the precision field picks the finest denominator:
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 from fractions import Fraction
 
 IN_M = 0.0254
@@ -164,10 +165,31 @@ def unit_label(code: str) -> str:
     return tr(UNIT_LABELS[code]) if code in UNIT_LABELS else code
 
 
+#: Set while the value being read is not a length (see ``unitless_numbers``).
+_UNITLESS = False
+
+
 def bare_number_scale() -> float:
     """Metres per unit for a number typed without a unit: ``2`` is 2 m in
-    a metric document and 2 mm in a millimetre one."""
+    a metric document and 2 mm in a millimetre one -- and 1 while
+    ``unitless_numbers`` holds, when the number is not a length."""
+    if _UNITLESS:
+        return 1.0
     return _BARE_SCALE.get(model_unit(), 1.0)
+
+
+@contextmanager
+def unitless_numbers():
+    """Read typed numbers as they are: an angle, a scale factor or a side
+    count has no unit, so the document's must not touch it -- «45» in a
+    millimetre model was a turn of 0.045° (#176). A field that does carry
+    a unit («2m») still converts."""
+    global _UNITLESS
+    before, _UNITLESS = _UNITLESS, True
+    try:
+        yield
+    finally:
+        _UNITLESS = before
 
 
 def fmt_len(metres: float) -> str:

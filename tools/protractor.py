@@ -58,6 +58,11 @@ _OFF_AXIS_RGBA = (0.24, 0.27, 0.32, 1.0)
 class ProtractorBase(Tool):
     """Shared protractor state + behaviour (see module docstring)."""
 
+    def value_is_unitless(self) -> bool:
+        """The typed value is an ANGLE: the document's length unit must
+        not scale it («45» was 0.045° in a millimetre model, #176)."""
+        return True
+
     #: The Line tool's axis magnet for the arms (@pacaeiro, issue #41): a
     #: base arm within 3° of an axis that lies in the disc's plane lands
     #: on it. Only the world half — the screen detector would hand back a

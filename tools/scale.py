@@ -466,6 +466,11 @@ class ScaleTool(Tool):
         self._apply_preview(viewport, current)
         viewport.update()
 
+    def value_is_unitless(self) -> bool:
+        """A bare number is a FACTOR, never a length (#176); one typed
+        with a unit is the new size and still converts."""
+        return True
+
     def on_value(self, viewport, value) -> bool:
         absolute = False
         if isinstance(value, tuple) and value and value[0] == "abs_len":
