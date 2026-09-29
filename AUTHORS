@@ -64,11 +64,13 @@ Félix Riestra  (github.com/felixriestra)
     parts, Split into Pieces, the Parts tray with its cut list, and the
     exploded view — furniture and joinery taken to pieces.
 
-Gabriel Rodríguez  (github.com/canalsecuario-blip)
+Gabriel Rodríguez Arregin  (github.com/canalsecuario-blip)
     The Back color in Styles (pull request #99): SketchUp's Front/Back
     colour pair, the tint of faces seen from behind.
     Edit ▸ Invert Selection (pull request #113), SketchUp's Ctrl+Shift+I,
     leaving out what is hidden or locked.
+    Edit ▸ Repeat Last Command (Shift+R): the last tool or one-shot
+    command comes back on the current selection.
 
 José Castro Basso — FADU–UDELAR, Montevideo  (github.com/castrobasso)
     Architect and teacher of architectural representation. Two-point
