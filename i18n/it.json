@@ -2111,5 +2111,6 @@
  "Cancel": "Annulla",
  "Don't Save": "Non salvare",
  "Italian translation of the interface.": "Traduzione dell'interfaccia in italiano.",
- "Show or hide the sidebar": "Mostra o nascondi la barra laterale"
+ "Show or hide the sidebar": "Mostra o nascondi la barra laterale",
+ "The model has a point with invalid coordinates (not a number), so it was not saved and the file on disk keeps its last good version. Undo the last step and save again. Where: {where}": "Il modello ha un punto con coordinate non valide (non è un numero), quindi non è stato salvato e il file sul disco mantiene l'ultima versione buona. Annulla l'ultimo passo e salva di nuovo. Dove: {where}"
 }

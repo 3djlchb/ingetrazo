@@ -602,7 +602,9 @@ def _parse_number(tok: str):
         return None                      # "1-2" without a fraction: not ours
     if m.group(1):
         v += float(m.group(1))
-    return v
+    # A number too long for a float comes back as inf, and inf − inf is
+    # NaN a few steps later: a coordinate no tool can recover from (#185).
+    return v if math.isfinite(v) else None
 
 
 def _merge_mixed_numbers(fields: list) -> list:
@@ -11739,7 +11741,7 @@ class Viewport(QOpenGLWidget):
             if m is None:
                 return None
             rise, run = float(m.group(1)), float(m.group(2))
-            if run <= 0:
+            if run <= 0 or not (math.isfinite(rise) and math.isfinite(run)):
                 return None
             return ("ratio", math.degrees(math.atan2(rise, run)))
         nums = []

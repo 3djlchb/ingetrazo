@@ -2112,5 +2112,6 @@
  "«{keys}» cannot be a shortcut: {why}.": "「{keys}」不能作为快捷键：{why}。",
  "Click here and press the keys": "点击此处并按下按键",
  "Italian translation of the interface.": "界面意大利语翻译。",
- "Show or hide the sidebar": "显示或隐藏侧边栏"
+ "Show or hide the sidebar": "显示或隐藏侧边栏",
+ "The model has a point with invalid coordinates (not a number), so it was not saved and the file on disk keeps its last good version. Undo the last step and save again. Where: {where}": "模型中有一个坐标无效(不是数字)的点,因此未保存,磁盘上的文件保留其上一个正常版本。请撤销上一步后重新保存。位置:{where}"
 }

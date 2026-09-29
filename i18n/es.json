@@ -2111,5 +2111,6 @@
  "«{keys}» cannot be a shortcut: {why}.": "«{keys}» no puede ser un atajo: {why}.",
  "Click here and press the keys": "Haz clic aquí y pulsa las teclas",
  "Italian translation of the interface.": "Traducción de la interfaz al italiano.",
- "Show or hide the sidebar": "Mostrar u ocultar la barra lateral"
+ "Show or hide the sidebar": "Mostrar u ocultar la barra lateral",
+ "The model has a point with invalid coordinates (not a number), so it was not saved and the file on disk keeps its last good version. Undo the last step and save again. Where: {where}": "El modelo tiene un punto con coordenadas no válidas (no es un número), así que no se guardó y el archivo del disco conserva su última versión buena. Deshaz el último paso y vuelve a guardar. Dónde: {where}"
 }
