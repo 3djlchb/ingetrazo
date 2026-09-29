@@ -583,12 +583,15 @@ def _urlopen(url: str, headers: dict, payload: bytes | None = None,
     total, wait, reason)`` is told each time so a chat panel can say so.
     Marco asked for a house and Gemini's 503 «high demand» cut it short
     at the walls (2026-09-15): one spike must not end the recipe."""
+    from core.tls import https_context
+    context = https_context()            # a packaged Python's CA bundle (#198)
     attempt = 0
     while True:
         req = urllib.request.Request(url, data=payload, headers=headers,
                                      method="POST" if payload else "GET")
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with urllib.request.urlopen(req, timeout=timeout,
+                                        context=context) as resp:
                 return resp.read()
         except urllib.error.HTTPError as exc:
             detail = ""

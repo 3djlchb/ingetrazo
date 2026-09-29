@@ -324,6 +324,10 @@ def _run_mcp_server() -> int:
 
 
 def main() -> int:
+    # HTTPS from Python (the AI assistant) must find a CA bundle: the macOS
+    # package asked for one where only the build machine had it (#198).
+    from core.tls import ensure_once
+    ensure_once()
     if "--check" in sys.argv[1:]:
         return _self_check()
     if "--mcp" in sys.argv[1:]:

@@ -648,7 +648,7 @@ def test_a_busy_provider_is_retried_with_backoff(monkeypatch):
         def __exit__(self, *a):
             return False
 
-    def fake_urlopen(req, timeout=0):
+    def fake_urlopen(req, timeout=0, context=None):
         calls.append(req.full_url)
         if fails:
             code = fails.pop(0)
