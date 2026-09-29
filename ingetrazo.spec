@@ -29,6 +29,8 @@ ROOT = Path(SPECPATH).resolve()
 datas = [
     ('resources/shaders/*.vert',   'resources/shaders'),
     ('resources/shaders/*.frag',   'resources/shaders'),
+    # Render with Blender (#181): the script Blender runs on the job.
+    ('resources/blender/*.py',     'resources/blender'),
     ('resources/icons/*.png',      'resources/icons'),
     ('resources/icons/*.ico',      'resources/icons'),
     ('resources/icons/mimetypes/*.ico', 'resources/icons/mimetypes'),
@@ -126,6 +128,9 @@ hiddenimports += [
     # probing the API, which is the very waste it exists to stop.
     'core.ai_recipes',
     'core.bim',
+    # Render with Blender (#181): the plugin's logic and the GLB it sends.
+    'core.render_blender',
+    'formats.gltf',
     'tools.place_group',
     'tools.paste',
     'georef.points',
