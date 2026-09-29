@@ -69,6 +69,9 @@ Gabriel Rodríguez  (github.com/canalsecuario-blip)
     colour pair, the tint of faces seen from behind.
     Edit ▸ Invert Selection (pull request #113), SketchUp's Ctrl+Shift+I,
     leaving out what is hidden or locked.
+    Command search (pull request #168): F3 runs any command by name, as in
+    Blender — initials, typos and both languages, in the model and the
+    sheet composer.
 
 José Castro Basso — FADU–UDELAR, Montevideo  (github.com/castrobasso)
     Architect and teacher of architectural representation. Two-point
