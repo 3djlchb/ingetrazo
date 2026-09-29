@@ -10657,7 +10657,30 @@ class Viewport(QOpenGLWidget):
                     tr("Operation failed and was undone: {err}",
                        err=self.history.last_error), 8000)
             self._release_axis_lock_after_operation(committed=_drew)
+            if _drew:
+                self._reassert_tool_cursor()
             self.update()
+
+    def _reassert_tool_cursor(self) -> None:
+        """Put the active tool's pointer back after an operation (#191,
+        fafecm on Windows: «after the push/pull cursor is used once, the
+        cursor symbol disappears» — the Line did the same). On Windows the
+        viewport is a native OpenGL window and the system brought the arrow
+        back when an operation ended, while Qt still believed its cursor
+        set, so setting the same one again changed nothing: unset first,
+        then set. Nothing to do while a camera mode or a look drag owns
+        the pointer."""
+        if (self.active_tool is None or self.nav_mode is not None
+                or self._look_drag is not None):
+            return
+        self.unsetCursor()
+        self._apply_tool_cursor()
+
+    def enterEvent(self, ev) -> None:
+        # Coming back from a panel or a dialog is the other moment Windows
+        # shows the arrow over the viewport (#191).
+        self._reassert_tool_cursor()
+        super().enterEvent(ev)
 
     def mouseDoubleClickEvent(self, ev) -> None:
         """Qt replaces the second press of a double-click with this event, so
@@ -10962,8 +10985,11 @@ class Viewport(QOpenGLWidget):
         # stroke can commit as one step. No-op default on other tools.
         if (ev.button() == Qt.LeftButton and self.active_tool is not None
                 and not self._box_active and self.nav_mode is None):
+            _before = len(self.history.undo_stack)
             self.active_tool.on_release(self)
             self._release_axis_lock_after_operation()
+            if len(self.history.undo_stack) > _before:
+                self._reassert_tool_cursor()     # a drag committed (#191)
 
         if ev.button() == Qt.LeftButton and self._box_active:
             self._box_active = False
