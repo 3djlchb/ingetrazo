@@ -43,8 +43,8 @@ CONTRIBUTORS = [
      "Brazilian Portuguese translation of the interface.",
      "https://github.com/dafrobozao"),
     ("Félix Riestra",
-     "The macOS package: IngeTrazo for Mac. Components that come apart: "
-     "parts, cut list and exploded view.",
+     "The macOS package: IngeTrazo for Mac. Components that come apart "
+     "(parts, cut list, exploded view) and the Extension API 2.",
      "https://github.com/felixriestra"),
     ("Gabriel Rodríguez Arregin",
      "Architect. Quick editing tools for everyday drafting.",
@@ -73,6 +73,9 @@ CONTRIBUTORS = [
      "Reports from mechanical modelling: pulling against a wall, units "
      "for new files.",
      "https://github.com/xyont"),
+    ("kagehak",
+     "STL import and Simplify Mesh.",
+     "https://github.com/kagehak"),
 ]
 
 #: Roll speed: pixels per tick, and the tick.
@@ -115,7 +118,10 @@ class _Fade(QWidget):
 class _Credits(QWidget):
     """Every contributor, rolling up slowly and looping, like film credits.
     Two copies of the list sit one above the other; when the first has
-    rolled out of view the roll starts over, seamlessly."""
+    rolled out of view the roll starts over, seamlessly. The pointer over
+    it stops the roll and the wheel scrolls it by hand, both ways (Marco:
+    «me gustaría poder scrollear para saber qué usuarios hay apoyando»);
+    it rolls on again when the pointer leaves."""
 
     LINES = 11
 
@@ -164,6 +170,25 @@ class _Credits(QWidget):
     def tick(self) -> None:
         self._offset = (self._offset + ROLL_PX) % self._span
         self._place()
+
+    def scroll_by(self, pixels: float) -> None:
+        """Move the roll by hand (positive = on down the list), looping."""
+        self._offset = (self._offset + pixels) % self._span
+        self._place()
+
+    def wheelEvent(self, event) -> None:  # noqa: N802
+        self._timer.stop()
+        steps = event.angleDelta().y() / 120.0
+        self.scroll_by(-steps * self.fontMetrics().lineSpacing() * 3)
+        event.accept()
+
+    def enterEvent(self, event) -> None:  # noqa: N802
+        self._timer.stop()                  # read a name without it moving
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        self._timer.start()
+        super().leaveEvent(event)
 
     def _place(self) -> None:
         y = -int(self._offset)
