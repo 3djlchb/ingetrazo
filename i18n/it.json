@@ -2240,5 +2240,6 @@
  "Rendering the view…": "Rendering della vista…",
  "In sync — stop moving to update": "Sincronizzato — fermati per aggiornare",
  "Blender stopped; it will start again": "Blender si è fermato; ripartirà",
- "In sync": "Sincronizzato"
+ "In sync": "Sincronizzato",
+ "Enter sends · Shift+Enter: new line": "Invio invia · Maiusc+Invio: nuova riga"
 }

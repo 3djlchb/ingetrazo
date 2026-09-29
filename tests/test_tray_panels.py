@@ -138,3 +138,24 @@ def test_a_right_click_on_the_tray_tabs_is_recognised(win):
     assert win._tray_tab_bar_at(pos)
     vp_pos = win.viewport.mapTo(win, win.viewport.rect().center())
     assert not win._tray_tab_bar_at(vp_pos)
+
+
+def test_the_prompt_takes_several_lines_and_enter_sends(win):
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QKeyEvent
+    from PySide6.QtCore import QEvent
+    panel = win._ai_assistant
+    box = panel._input
+    sent = []
+    box.submitted.disconnect(panel._on_send)       # no model to talk to
+    box.submitted.connect(lambda: sent.append(box.text()))
+    box.setText("una casa")
+    box.moveCursor(box.textCursor().MoveOperation.End)
+    shift = QKeyEvent(QEvent.KeyPress, Qt.Key_Return, Qt.ShiftModifier)
+    box.keyPressEvent(shift)
+    box.insertPlainText("con techo a dos aguas")
+    assert box.text() == "una casa\ncon techo a dos aguas" and not sent
+    box.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_Return,
+                                Qt.NoModifier))
+    assert sent == ["una casa\ncon techo a dos aguas"]
+    assert box.minimumHeight() >= 2 * box.fontMetrics().lineSpacing()

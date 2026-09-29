@@ -2240,5 +2240,6 @@
  "Rendering the view…": "Renderizando a vista…",
  "In sync — stop moving to update": "Sincronizado — pare para atualizar",
  "Blender stopped; it will start again": "O Blender parou; vai iniciar de novo",
- "In sync": "Sincronizado"
+ "In sync": "Sincronizado",
+ "Enter sends · Shift+Enter: new line": "Enter envia · Shift+Enter: nova linha"
 }

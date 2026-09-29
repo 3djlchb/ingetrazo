@@ -31,7 +31,9 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPlainTextEdit,
     QPushButton,
+    QSplitter,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -92,6 +94,32 @@ def _asks_to_build(prompt: str) -> bool:
     reply without code is a model that did not do its job)."""
     low = (prompt or "").lower()
     return any(w in low for w in _BUILD_WORDS)
+
+
+class PromptEdit(QPlainTextEdit):
+    """The prompt: several lines, Enter sends, Shift+Enter breaks a line.
+    ``text``/``setText`` as the one-line field it replaces had."""
+    submitted = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setTabChangesFocus(True)
+        line = self.fontMetrics().lineSpacing()
+        self.setMinimumHeight(2 * line + 12)
+
+    def keyPressEvent(self, ev) -> None:
+        if (ev.key() in (Qt.Key_Return, Qt.Key_Enter)
+                and not ev.modifiers() & (Qt.ShiftModifier
+                                          | Qt.ControlModifier)):
+            self.submitted.emit()
+            return
+        super().keyPressEvent(ev)
+
+    def text(self) -> str:
+        return self.toPlainText()
+
+    def setText(self, text: str) -> None:
+        self.setPlainText(text)
 
 
 class AsistentePanel(QWidget):
@@ -178,9 +206,13 @@ class AsistentePanel(QWidget):
         self._chat.setReadOnly(True)
         self._chat.setFont(
             QFontDatabase.systemFont(QFontDatabase.FixedFont))
-        self._chat.setMinimumHeight(120)
-        layout.addWidget(self._chat, 1)
+        self._chat.setMinimumHeight(80)
 
+        # The prompt under the chat, with a handle between them to give it
+        # more room (Marco: «ese espacio es muy pequeño para un prompt»).
+        bottom = QWidget()
+        bl = QVBoxLayout(bottom)
+        bl.setContentsMargins(0, 0, 0, 0)
         chip_row = QHBoxLayout()
         self._foto_chip = QLabel("")
         chip_row.addWidget(self._foto_chip, 1)
@@ -190,14 +222,24 @@ class AsistentePanel(QWidget):
         self._foto_quitar.setToolTip(tr("Remove the photo"))
         self._foto_quitar.clicked.connect(self._clear_foto)
         chip_row.addWidget(self._foto_quitar)
-        layout.addLayout(chip_row)
+        bl.addLayout(chip_row)
 
-        self._input = QLineEdit()
+        self._input = PromptEdit()
         self._input.setPlaceholderText(
-            tr("e.g. draw a 6×4 m house with a gable roof"))
-        self._input.returnPressed.connect(self._on_send)
-        narrow(self._input)
-        layout.addWidget(self._input)
+            tr("e.g. draw a 6×4 m house with a gable roof")
+            + "\n" + tr("Enter sends · Shift+Enter: new line"))
+        self._input.submitted.connect(self._on_send)
+        bl.addWidget(self._input, 1)
+
+        split = QSplitter(Qt.Vertical)
+        split.setChildrenCollapsible(False)
+        split.addWidget(self._chat)
+        split.addWidget(bottom)
+        split.setStretchFactor(0, 3)
+        split.setStretchFactor(1, 1)
+        line = self._input.fontMetrics().lineSpacing()
+        split.setSizes([400, 6 * line + 16])
+        layout.addWidget(split, 1)
 
         row3 = QHBoxLayout()
         self._adjuntar = QPushButton(tr("Photo…"))

@@ -2243,5 +2243,6 @@
  "Rendering the view…": "正在渲染视图…",
  "In sync — stop moving to update": "已同步 — 停下即可更新",
  "Blender stopped; it will start again": "Blender 已停止，将重新启动",
- "In sync": "已同步"
+ "In sync": "已同步",
+ "Enter sends · Shift+Enter: new line": "回车发送 · Shift+回车：换行"
 }
