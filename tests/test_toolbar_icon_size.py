@@ -69,18 +69,87 @@ def test_the_main_toolbar_starts_with_save(settings_file, monkeypatch):
         win.close()
 
 
-def test_simplify_mesh_is_a_button_and_edit_menu_action(settings_file):
+def test_simplify_mesh_is_only_in_the_edit_menu(settings_file):
     from views.main_window import MainWindow
 
     win = MainWindow()
     try:
         action = win._act_simplify_mesh
-        assert action in win.toolbars["main"].actions()
-        assert not action.icon().isNull()
+        assert action not in win.toolbars["main"].actions()
         edit_menu = next(
             item.menu() for item in win.menuBar().actions()
             if item.text() == "Edit")
         assert action in edit_menu.actions()
+    finally:
+        win._saved_version = win.viewport.scene.version
+        win.close()
+
+
+def test_stl_simplification_defaults_to_principal_planes(
+        settings_file, monkeypatch, tmp_path):
+    from PySide6.QtWidgets import QDialog, QComboBox
+    from views.main_window import MainWindow
+    import views.main_window as mw
+
+    old_settings = mw.QSettings()
+    old_settings.setValue("import/stl_simplify", "true")
+    old_settings.sync()
+    monkeypatch.setattr(
+        mw.file_dialogs, "getOpenFileName",
+        lambda *args: (str(tmp_path / "sample.stl"), ""))
+    selected = {}
+
+    def reject_dialog(dialog):
+        combo = dialog.findChildren(QComboBox)[1]
+        selected["mode"] = combo.currentData()
+        return QDialog.Rejected
+
+    monkeypatch.setattr(QDialog, "exec", reject_dialog)
+    win = MainWindow()
+    try:
+        win._on_import_stl()
+        assert selected["mode"] == "principal"
+    finally:
+        win._saved_version = win.viewport.scene.version
+        win.close()
+
+
+def test_stl_parse_runs_on_worker_and_reports_progress_on_ui_thread(
+        settings_file, monkeypatch, tmp_path):
+    import struct
+    from PySide6.QtCore import QThread
+    from PySide6.QtWidgets import QApplication
+    from formats import stl as stl_format
+    from views.main_window import MainWindow
+
+    path = tmp_path / "triangle.stl"
+    with path.open("wb") as target:
+        target.write(b"binary STL".ljust(80, b"\0"))
+        target.write(struct.pack("<I", 1))
+        target.write(struct.pack(
+            "<12fH", 0, 0, 1,
+            0, 0, 0, 1, 0, 0, 0, 1, 0, 0))
+
+    parsing_threads = []
+    progress_threads = []
+    parse = stl_format.parse_stl
+
+    def track_parse(*args, **kwargs):
+        parsing_threads.append(
+            QThread.currentThread() != QApplication.instance().thread())
+        return parse(*args, **kwargs)
+
+    monkeypatch.setattr(stl_format, "parse_stl", track_parse)
+    win = MainWindow()
+    try:
+        mesh, error = win._parse_stl_threaded(
+            path, 1.0, "none",
+            lambda *_: progress_threads.append(
+                QThread.currentThread() == QApplication.instance().thread()))
+        assert error is None
+        assert len(mesh.faces) == 1
+        assert parsing_threads == [True]
+        assert progress_threads and all(progress_threads)
     finally:
         win._saved_version = win.viewport.scene.version
         win.close()

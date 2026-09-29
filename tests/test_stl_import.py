@@ -91,6 +91,20 @@ def test_binary_stl_solid_prefixed_header_is_detected_and_scaled(tmp_path):
     assert _bounds(scene) == pytest.approx((0, 4, 0, 4, 0, 0))
 
 
+def test_binary_stl_with_trailing_bytes_is_detected(tmp_path):
+    path = tmp_path / "trailing_bytes.stl"
+    _binary(path, [((0, 0, 0), (1, 0, 0), (0, 1, 0))],
+            header=b"binary STL file")
+    with path.open("ab") as target:
+        target.write(b"exporter metadata")
+    scene = Scene()
+
+    stl_format.load_stl(scene, path)
+
+    assert len(scene.mesh.faces) == 1
+    assert _bounds(scene) == pytest.approx((0, 1, 0, 1, 0, 0))
+
+
 def test_ascii_stl_is_whitespace_tolerant_and_scaled(tmp_path):
     path = tmp_path / "one_facet.stl"
     path.write_text(

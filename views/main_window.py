@@ -628,14 +628,6 @@ class MainWindow(QMainWindow):
         main_tb.addAction(self._act_eyedropper)
         self._icon_actions.append((self._act_eyedropper, "eyedropper"))
 
-        self._act_simplify_mesh = QAction(
-            tool_icon("simplify_mesh"), tr("Simplify Mesh…"), self)
-        self._act_simplify_mesh.setToolTip(tr(
-            "Simplify Mesh — merge coplanar and near-coplanar faces"))
-        self._act_simplify_mesh.triggered.connect(self._on_simplify_mesh)
-        main_tb.addAction(self._act_simplify_mesh)
-        self._icon_actions.append((self._act_simplify_mesh, "simplify_mesh"))
-
         # The Sections toolbar carries SketchUp's three display toggles next
         # to the tool: Display Section Planes / Cuts / Fill. Created here
         # (the menubar builds later and reuses the same actions).
@@ -775,6 +767,10 @@ class MainWindow(QMainWindow):
 
         # Edit menu
         edit_menu = menubar.addMenu(tr("Edit"))
+        self._act_simplify_mesh = QAction(tr("Simplify Mesh…"), self)
+        self._act_simplify_mesh.setToolTip(tr(
+            "Simplify Mesh — merge coplanar and near-coplanar faces"))
+        self._act_simplify_mesh.triggered.connect(self._on_simplify_mesh)
 
         self._undo_action = QAction(tr("Undo"), self)
         self._undo_action.setShortcut(QKeySequence.Undo)
@@ -4511,6 +4507,51 @@ class MainWindow(QMainWindow):
         relay.deleteLater()
         return result.get("payload"), result.get("exc")
 
+    def _parse_stl_threaded(self, path, scale, simplify_mode, cb):
+        """Parse an STL on a worker while delivering progress on the UI thread."""
+        from PySide6.QtCore import QEventLoop, QObject, QThread, Qt, Signal
+        from formats import stl as stl_format
+
+        class _Worker(QObject):
+            progressed = Signal(float, str)
+            finished = Signal(object, object)
+
+            def run(self):
+                try:
+                    mesh = stl_format.parse_stl(
+                        path, progress=lambda f, t: self.progressed.emit(f, t),
+                        scale=scale, simplify_mode=simplify_mode)
+                    self.finished.emit(mesh, None)
+                except Exception as exc:  # noqa: BLE001 — reported to caller
+                    self.finished.emit(None, exc)
+
+        thread = QThread(self)
+        worker = _Worker()
+        worker.moveToThread(thread)
+        result = {}
+        loop = QEventLoop()
+
+        class _Relay(QObject):
+            def on_progress(self, fraction, text):
+                cb(fraction, text)
+
+            def on_finished(self, mesh, exc):
+                result["mesh"] = mesh
+                result["exc"] = exc
+                loop.quit()
+
+        relay = _Relay(self)
+        worker.progressed.connect(relay.on_progress, Qt.QueuedConnection)
+        worker.finished.connect(relay.on_finished, Qt.QueuedConnection)
+        thread.started.connect(worker.run)
+        thread.start()
+        loop.exec()
+        thread.quit()
+        thread.wait()
+        worker.deleteLater()
+        relay.deleteLater()
+        return result.get("mesh"), result.get("exc")
+
     def _prepare_import_display(self, cmd, cb) -> None:
         """Pre-build the render/pick caches of freshly imported groups while
         the progress dialog is still up — otherwise the first orbit after a
@@ -4807,15 +4848,10 @@ class MainWindow(QMainWindow):
             "principal")
         simplify.addItem(
             tr("Advanced: merge all coplanar surfaces"), "all")
-        simplify_setting = settings.value("import/stl_simplify_mode")
-        if simplify_setting is None:
-            old_setting = str(settings.value("import/stl_simplify", "true"))
-            simplify_mode = ("none" if old_setting.lower() in ("0", "false")
-                             else "all")
-        else:
-            simplify_mode = str(simplify_setting)
+        simplify_mode = str(
+            settings.value("import/stl_simplify_mode", "principal"))
         simplify_index = simplify.findData(simplify_mode)
-        simplify.setCurrentIndex(simplify_index if simplify_index >= 0 else 2)
+        simplify.setCurrentIndex(simplify_index if simplify_index >= 0 else 1)
         form.addRow(tr("Mesh simplification"), simplify)
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
@@ -4831,10 +4867,14 @@ class MainWindow(QMainWindow):
         settings.setValue("import/stl_simplify_mode", simplify_mode)
         dlg, cb = self._import_progress(
             tr("Importing {name}…", name=path.name))
+        target, exc = self._parse_stl_threaded(
+            path, scale, simplify_mode, cb)
+        if exc is not None:
+            dlg.close()
+            QMessageBox.critical(self, tr("Import STL failed"), str(exc))
+            return
         cmd = SnapshotImport(
-            lambda scene: stl_format.load_stl(
-                scene, path, progress=cb, scale=scale,
-                simplify_mode=simplify_mode))
+            lambda scene: stl_format.add_stl_mesh(scene, path, target))
         try:
             self.viewport.history.execute(cmd)
         except Exception as exc:  # noqa: BLE001

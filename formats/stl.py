@@ -159,20 +159,32 @@ def load_stl(scene, path, progress=None, scale: float = 1.0,
     Small imports are merged into the editable loose mesh; larger imports are
     kept as a named reference group to avoid costly topology cleanup.
     """
+    target = parse_stl(path, progress=progress, scale=scale,
+                       simplify_mode=simplify_mode)
+    add_stl_mesh(scene, path, target)
+
+
+def parse_stl(path, progress=None, scale: float = 1.0,
+              simplify_mode: str = "none"):
+    """Parse and prepare STL geometry without touching a scene.
+
+    Safe to call from a worker thread; returned mesh insertion belongs on the
+    UI thread via :func:`add_stl_mesh`.
+    """
     import gc
 
     was_enabled = gc.isenabled()
     gc.disable()
     try:
-        _load_stl_inner(scene, Path(path), progress=progress, scale=scale,
-                        simplify_mode=simplify_mode)
+        return _parse_stl_inner(Path(path), progress=progress, scale=scale,
+                                simplify_mode=simplify_mode)
     finally:
         if was_enabled:
             gc.enable()
 
 
-def _load_stl_inner(scene, path: Path, progress=None, scale: float = 1.0,
-                    simplify_mode: str = "none") -> None:
+def _parse_stl_inner(path: Path, progress=None, scale: float = 1.0,
+                     simplify_mode: str = "none"):
     if not math.isfinite(scale) or scale <= 0:
         raise ValueError("STL unit scale must be a positive finite number")
     if simplify_mode not in ("none", "principal", "all"):
@@ -185,7 +197,11 @@ def _load_stl_inner(scene, path: Path, progress=None, scale: float = 1.0,
         header = source.read(_BINARY_HEADER_SIZE)
         if len(header) == _BINARY_HEADER_SIZE:
             (count,) = struct.unpack_from("<I", header, 80)
-            binary = size == _BINARY_HEADER_SIZE + count * _BINARY_TRIANGLE_SIZE
+            expected_size = (_BINARY_HEADER_SIZE
+                             + count * _BINARY_TRIANGLE_SIZE)
+            binary = (size >= expected_size
+                      and (size == expected_size
+                           or header[:5].lower() != b"solid"))
 
     from core.mesh import Mesh
     target = Mesh()
@@ -244,11 +260,8 @@ def _load_stl_inner(scene, path: Path, progress=None, scale: float = 1.0,
             target, principal_planes=simplify_mode == "principal")
 
     if len(target.faces) > _MAX_FUSE_LOOPS:
-        from core.group import Group
-        scene.groups.append(Group(target, name=path.stem))
-        scene.version += 1
         _tick(progress, 1.0, "Done")
-        return
+        return target
 
     from core.history import run_stitch
     from core.orient import orient_outward
@@ -262,10 +275,21 @@ def _load_stl_inner(scene, path: Path, progress=None, scale: float = 1.0,
     else:
         run_stitch(target, seed, new_faces, coplanar_merge=True)
         orient_outward(target, only=new_faces)
-    for face in target.faces:
-        scene.mesh.add_face(face.vertices, face.holes)
-    scene.version += 1
     _tick(progress, 1.0, "Done")
+    return target
+
+
+def add_stl_mesh(scene, path, target) -> None:
+    """Insert a prepared STL mesh into a scene (must run on the UI thread)."""
+    from formats.dae import _MAX_FUSE_LOOPS
+
+    if len(target.faces) > _MAX_FUSE_LOOPS:
+        from core.group import Group
+        scene.groups.append(Group(target, name=Path(path).stem))
+    else:
+        for face in target.faces:
+            scene.mesh.add_face(face.vertices, face.holes)
+    scene.version += 1
 
 
 def save_stl(scene, path) -> None:
