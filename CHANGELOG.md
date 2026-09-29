@@ -89,6 +89,14 @@ ejecuta, descarga ni enlaza nada de Trimble:
   herramientas la coma sigue siendo el decimal.
 - **Una cara invertida sigue invertida al seguir dibujando**
   (#144, @canalsecuario-blip).
+- **Un punto enganchado fuera del plano de dibujo ya no aplasta la forma**
+  (@canalsecuario-blip): al llenar el hueco de una ventana del punto medio
+  de una jamba al de la otra, el Rectángulo quedaba en el plano de la
+  jamba y salía «0.00 × 2.41 m». Ahora Rectángulo, Círculo, Polígono y los
+  tres Arcos toman el plano de los puntos enganchados (el plano de ejes que
+  los contiene, o el de los tres puntos del arco); el cursor libre y el
+  bloqueo con flechas siguen como antes. La etiqueta del radio muestra el
+  radio dibujado.
 - **Todas las pestañas de la bandeja derecha caben en los 240 px mínimos**
   (#139, @felixriestra): los botones de Capas y los combos de Terreno se
   cortaban.
