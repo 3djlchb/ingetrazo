@@ -46,8 +46,8 @@ CONTRIBUTORS = [
      "The macOS package: IngeTrazo for Mac. Components that come apart: "
      "parts, cut list and exploded view.",
      "https://github.com/felixriestra"),
-    ("Gabriel Rodríguez",
-     "The Back color in Styles and Edit ▸ Invert Selection.",
+    ("Gabriel Rodríguez Arregin",
+     "Architect. Quick editing tools for everyday drafting.",
      "https://github.com/canalsecuario-blip"),
     ("José Castro Basso (FADU–UDELAR)",
      "Architect and teacher of architectural representation. Two-point "
@@ -59,6 +59,9 @@ CONTRIBUTORS = [
     ("liuandy",
      "Simplified Chinese translation of the interface.",
      "https://github.com/liujvnes"),
+    ("deedend",
+     "Italian translation of the interface.",
+     "https://github.com/deedend"),
     ("Carlos Martins",
      "Bug reports with videos that pinned down guides, group paint and "
      "exploded groups.",

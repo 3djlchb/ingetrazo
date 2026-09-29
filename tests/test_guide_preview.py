@@ -82,3 +82,17 @@ def test_a_guide_through_the_eye_still_reaches_the_screen():
     assert q is not None
     for x, y in q:
         assert -65 <= x <= 865 and -65 <= y <= 665
+
+
+def test_clipping_a_guide_through_the_eye_keeps_positive_clip_w():
+    from views.viewport import Viewport
+    vp = Viewport()
+    vp.resize(800, 600)
+    cam = vp.camera
+    cam.set_aspect(800, 600)
+    cam.target = QVector3D(0, 0, 0)
+    cam.yaw, cam.pitch, cam.distance = math.radians(-180), math.radians(-80), 10
+    guide = Guide(cam.eye(), cam.forward())
+    q = vp._segment_to_pixels(*guide.segment())
+    assert q is not None
+    assert all(math.isfinite(value) for point in q for value in point)

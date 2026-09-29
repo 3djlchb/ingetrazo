@@ -329,12 +329,18 @@ class PreferencesDialog(QDialog):
         from views.shortcuts import ShortcutsPanel
         self._shortcuts = ShortcutsPanel(self._window)
         tabs.addTab(self._shortcuts, tr("Keyboard shortcuts"))
+        self._tabs = tabs
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok
                                    | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def show_shortcut_of(self, action) -> None:
+        """Open on the Keyboard shortcuts page with ``action`` picked."""
+        self._tabs.setCurrentWidget(self._shortcuts)
+        self._shortcuts.pick(action)
 
     # ---- Apply --------------------------------------------------------------
     def accept(self) -> None:  # noqa: D102 — QDialog override
@@ -457,4 +463,7 @@ class PreferencesDialog(QDialog):
         st.setValue("ia/ollama_url", self._ollama.text().strip())
         st.setValue("ia/capturas", "1" if self._shots.isChecked() else "0")
         st.sync()
+        panel = getattr(self._window, "_ai_assistant", None)
+        if panel is not None:          # the AI tab lives on: show the change
+            panel._load_settings()
         super().accept()

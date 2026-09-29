@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Marco Sumari Tellez and IngeTrazo contributors.
-"""Asistente IA — model with AI from INSIDE IngeTrazo (Ctrl+Shift+A).
+"""Asistente IA — model with AI from INSIDE IngeTrazo, in the side tray's
+«AI» tab (Ctrl+Shift+A brings it forward, even when hidden).
 
 The user types what they want; the model answers in Spanish and acts by
 emitting ONE ```python recipe per turn, which runs through the shared
@@ -26,20 +27,22 @@ from PySide6.QtGui import QFontDatabase, QImageReader, QPalette
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QDialog,
     QFileDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPlainTextEdit,
     QPushButton,
+    QSplitter,
     QTextEdit,
     QVBoxLayout,
+    QWidget,
 )
 
 from core import ai, ai_recipes
 from core.i18n import tr
 from views.filedialogs import file_dialogs
-from tools.base import Tool
+from views.fold_section import FoldSection, narrow, wrapping_form
 
 MAX_ROUNDS = 12
 
@@ -93,11 +96,39 @@ def _asks_to_build(prompt: str) -> bool:
     return any(w in low for w in _BUILD_WORDS)
 
 
-class AsistenteDialog(QDialog):
+class PromptEdit(QPlainTextEdit):
+    """The prompt: several lines, Enter sends, Shift+Enter breaks a line.
+    ``text``/``setText`` as the one-line field it replaces had."""
+    submitted = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setTabChangesFocus(True)
+        line = self.fontMetrics().lineSpacing()
+        self.setMinimumHeight(2 * line + 12)
+
+    def keyPressEvent(self, ev) -> None:
+        if (ev.key() in (Qt.Key_Return, Qt.Key_Enter)
+                and not ev.modifiers() & (Qt.ShiftModifier
+                                          | Qt.ControlModifier)):
+            self.submitted.emit()
+            return
+        super().keyPressEvent(ev)
+
+    def text(self) -> str:
+        return self.toPlainText()
+
+    def setText(self, text: str) -> None:
+        self.setPlainText(text)
+
+
+class AsistentePanel(QWidget):
+    """The assistant as the «AI» tab of the side tray: the connection
+    settings fold away, the chat takes the rest of the height."""
     _reply = Signal(object)     # object, not dict: queued dicts get COPIED
 
     def __init__(self, viewport, parent=None) -> None:
-        super().__init__(parent or viewport.window())
+        super().__init__(parent)
         self._viewport = viewport
         self._scope: dict = {"__name__": "__ai__"}
         self._convo: list[dict] = []
@@ -107,81 +138,108 @@ class AsistenteDialog(QDialog):
         self._last_prompt = ""
         self._foto: tuple[str, str, str] | None = None  # (b64, mime, name)
         self._reply.connect(self._on_reply, Qt.QueuedConnection)
-
-        self.setWindowTitle(tr("AI Assistant") + " — IngeTrazo")
-        self.setMinimumSize(560, 520)
-        self.resize(640, 620)
         self._build_ui()
         self._load_settings()
 
     # ---- UI -----------------------------------------------------------------
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 0)
 
-        row0 = QHBoxLayout()
-        row0.addWidget(QLabel(tr("Provider:")))
+        conn = FoldSection(tr("AI Assistant — connection"),
+                           "ia/open_connection")
+        self._connection = conn
+        form = wrapping_form(conn.body)
         self._provider = QComboBox()
         self._provider.addItem(tr("Auto (by key prefix)"), "auto")
         for prov in ai.PROVIDERS:
             self._provider.addItem(ai.PROVIDER_INFO[prov][0], prov)
         self._provider.currentIndexChanged.connect(self._on_provider_changed)
-        row0.addWidget(self._provider, 1)
+        form.addRow(tr("Provider:"), self._provider)
+
+        self._key = QLineEdit()
+        self._key.setEchoMode(QLineEdit.Password)
+        self._key.setPlaceholderText(tr("empty = local AI (Ollama, LM Studio)"))
+        self._key.textChanged.connect(self._on_key_changed)
+        self._key.editingFinished.connect(self._save_settings)
+        form.addRow(tr("API key:"), self._key)
+
+        self._key_link = QLabel("")
+        self._key_link.setOpenExternalLinks(True)
+        self._key_link.setWordWrap(True)
+        form.addRow(self._key_link)
+
         self._model = QComboBox()
         self._model.setEditable(True)
         self._model.setInsertPolicy(QComboBox.NoInsert)
         self._model.lineEdit().setPlaceholderText(
             tr("model (default per provider)"))
-        row0.addWidget(self._model, 1)
+        self._model.lineEdit().editingFinished.connect(self._save_settings)
+        form.addRow(tr("Model:"), self._model)
+
+        buttons = QHBoxLayout()
         self._modelos = QPushButton(tr("Models"))
         self._modelos.setToolTip(
             tr("List the models your key can use"))
         self._modelos.clicked.connect(self._on_modelos)
-        row0.addWidget(self._modelos)
+        buttons.addWidget(self._modelos)
         self._probar = QPushButton(tr("Test connection"))
         self._probar.clicked.connect(self._on_probar)
-        row0.addWidget(self._probar)
-        layout.addLayout(row0)
+        buttons.addWidget(self._probar)
+        form.addRow(buttons)
 
-        row = QHBoxLayout()
-        row.addWidget(QLabel(tr("API key:")))
-        self._key = QLineEdit()
-        self._key.setEchoMode(QLineEdit.Password)
-        self._key.setPlaceholderText(tr("empty = local AI (Ollama, LM Studio)"))
-        self._key.textChanged.connect(self._on_key_changed)
-        row.addWidget(self._key, 1)
-        layout.addLayout(row)
+        self._ollama = QLineEdit("http://localhost:11434")
+        self._ollama.setToolTip(tr("Local AI server — Ollama: http://localhost:11434, LM Studio: http://localhost:1234 (key left empty)"))
+        self._ollama.editingFinished.connect(self._save_settings)
+        self._ollama_label = QLabel(tr("Server:"))
+        form.addRow(self._ollama_label, self._ollama)
 
-        self._key_link = QLabel("")
-        self._key_link.setOpenExternalLinks(True)
-        layout.addWidget(self._key_link)
-
-        row2 = QHBoxLayout()
         self._shots = QCheckBox(tr("Send viewport screenshots to the model"))
         self._shots.setChecked(True)
-        row2.addWidget(self._shots)
-        row2.addStretch()
-        self._ollama = QLineEdit("http://localhost:11434")
-        self._ollama.setMaximumWidth(220)
-        self._ollama.setToolTip(tr("Local AI server — Ollama: http://localhost:11434, LM Studio: http://localhost:1234 (key left empty)"))
-        row2.addWidget(self._ollama)
-        layout.addLayout(row2)
+        self._shots.toggled.connect(lambda _on: self._save_settings())
+        form.addRow(self._shots)
+        narrow(self._provider, self._model, self._key, self._ollama,
+               self._shots, self._modelos, self._probar)
+        layout.addWidget(conn)
 
         self._chat = QTextEdit()
         self._chat.setReadOnly(True)
         self._chat.setFont(
             QFontDatabase.systemFont(QFontDatabase.FixedFont))
-        layout.addWidget(self._chat, 1)
+        self._chat.setMinimumHeight(80)
 
+        # The prompt under the chat, with a handle between them to give it
+        # more room (Marco: «ese espacio es muy pequeño para un prompt»).
+        bottom = QWidget()
+        bl = QVBoxLayout(bottom)
+        bl.setContentsMargins(0, 0, 0, 0)
         chip_row = QHBoxLayout()
         self._foto_chip = QLabel("")
-        chip_row.addWidget(self._foto_chip)
+        chip_row.addWidget(self._foto_chip, 1)
+        narrow(self._foto_chip)
         self._foto_quitar = QPushButton("✕")
         self._foto_quitar.setFixedWidth(28)
         self._foto_quitar.setToolTip(tr("Remove the photo"))
         self._foto_quitar.clicked.connect(self._clear_foto)
         chip_row.addWidget(self._foto_quitar)
-        chip_row.addStretch()
-        layout.addLayout(chip_row)
+        bl.addLayout(chip_row)
+
+        self._input = PromptEdit()
+        self._input.setPlaceholderText(
+            tr("e.g. draw a 6×4 m house with a gable roof")
+            + "\n" + tr("Enter sends · Shift+Enter: new line"))
+        self._input.submitted.connect(self._on_send)
+        bl.addWidget(self._input, 1)
+
+        split = QSplitter(Qt.Vertical)
+        split.setChildrenCollapsible(False)
+        split.addWidget(self._chat)
+        split.addWidget(bottom)
+        split.setStretchFactor(0, 3)
+        split.setStretchFactor(1, 1)
+        line = self._input.fontMetrics().lineSpacing()
+        split.setSizes([400, 6 * line + 16])
+        layout.addWidget(split, 1)
 
         row3 = QHBoxLayout()
         self._adjuntar = QPushButton(tr("Photo…"))
@@ -190,16 +248,15 @@ class AsistenteDialog(QDialog):
             "(give it the real measurements)"))
         self._adjuntar.clicked.connect(self._on_foto)
         row3.addWidget(self._adjuntar)
-        self._input = QLineEdit()
-        self._input.setPlaceholderText(
-            tr("e.g. draw a 6×4 m house with a gable roof"))
-        self._input.returnPressed.connect(self._on_send)
-        row3.addWidget(self._input, 1)
+        row3.addStretch()
         self._send = QPushButton(tr("Send"))
         self._send.clicked.connect(self._on_send)
         row3.addWidget(self._send)
         layout.addLayout(row3)
         self._clear_foto()
+
+    def focus_input(self) -> None:
+        self._input.setFocus(Qt.ShortcutFocusReason)
 
     def _chat_colors(self) -> dict:
         """Text colors that read on the CURRENT theme — hardcoded
@@ -223,6 +280,13 @@ class AsistenteDialog(QDialog):
         return QSettings()
 
     def _load_settings(self) -> None:
+        self._loading = True
+        try:
+            self._read_settings()
+        finally:
+            self._loading = False
+
+    def _read_settings(self) -> None:
         st = self._settings()
         self._key.setText(str(st.value("ia/api_key", "") or ""))
         self._model.setEditText(str(st.value("ia/modelo", "") or ""))
@@ -236,6 +300,8 @@ class AsistenteDialog(QDialog):
         self._on_key_changed()
 
     def _save_settings(self) -> None:
+        if getattr(self, "_loading", False):
+            return
         st = self._settings()
         st.setValue("ia/api_key", self._key.text())
         st.setValue("ia/modelo", self._model.currentText().strip())
@@ -294,6 +360,7 @@ class AsistenteDialog(QDialog):
         self._model.lineEdit().setPlaceholderText(
             ai.DEFAULT_MODELS[provider])
         self._ollama.setVisible(provider == "ollama")
+        self._ollama_label.setVisible(provider == "ollama")
 
     def _config(self) -> tuple[str, str, str, str]:
         key = self._key.text().strip()
@@ -642,22 +709,20 @@ def _esc(text: str) -> str:
             .replace(">", "&gt;"))
 
 
-class AIAssistantTool(Tool):
-    """Extensions-menu entry that opens (or raises) the assistant."""
-    name = "AI Assistant"
-    shortcut = "Ctrl+Shift+A"
-    uses_snap = False
+#: The tests and older code name it by its dialog-era name.
+AsistenteDialog = AsistentePanel
 
-    def on_activate(self, viewport) -> None:
-        window = viewport.window()
-        dialog = getattr(window, "_ai_assistant", None)
-        if dialog is None or not dialog.isVisible():
-            dialog = AsistenteDialog(viewport, parent=window)
-            window._ai_assistant = dialog
-            dialog.show()
-        else:
-            dialog.raise_()
-            dialog.activateWindow()
 
-    def on_deactivate(self, viewport) -> None:
-        pass
+def setup(app) -> None:
+    """The «AI» tab of the side tray (shared with the MCP bridge) and
+    Extensions ▸ AI Assistant (Ctrl+Shift+A), which brings the tab
+    forward — shown again if it was hidden — with the cursor in the input."""
+    panel = AsistentePanel(app.viewport)
+    dock = app.add_panel(tr("AI"), panel, panel="ai", stretch=1)
+    app.window._ai_assistant = panel
+
+    def summon() -> None:
+        app.show_panel(dock)
+        panel.focus_input()
+
+    app.add_menu_action(tr("AI Assistant"), summon, "Ctrl+Shift+A")

@@ -48,7 +48,6 @@ from formats import obj as obj_format
 from formats import ifc as ifc_format
 from formats import stl as stl_format
 from formats import gltf as gltf_format
-from formats import skp_out as skp_out_format
 from tools.arc import CenterArcTool, ArcTool, ThreePointArcTool
 from tools.circle import CircleTool, PolygonTool
 from tools.dimension import DimensionTool
@@ -84,6 +83,29 @@ from views.viewport import Viewport
 
 IGZ_FILE_FILTER = "IngeTrazo document (*.igz);;All files (*)"
 
+
+def _repeatable(label: str):
+    """Mark a one-shot command as the one Repeat (Shift+R) replays.
+
+    Blender's Shift+R: after Reverse Faces on one face, select the next and
+    repeat. Recorded on the SLOT, not on a
+    QAction, because the right-click menu builds its actions afresh each
+    time — a remembered context-menu QAction would be a dead object by the
+    next repeat. Arguments the command takes (Intersect's mode) are kept;
+    the ``checked`` flag Qt may append to a menu's ``triggered`` is not."""
+    import functools
+    import inspect
+
+    def deco(fn):
+        takes = len(inspect.signature(fn).parameters) - 1    # minus self
+
+        @functools.wraps(fn)
+        def wrapper(self, *args):
+            args = args[:takes]
+            self._remember_command(label, lambda: fn(self, *args))
+            return fn(self, *args)
+        return wrapper
+    return deco
 
 
 def _obj_parts(temp):
@@ -167,6 +189,16 @@ class MainWindow(QMainWindow):
         # model is saved as .igz — opening a SketchUp file natively should
         # read as opening THAT file (user request).
         self._import_name: Optional[str] = None
+        #: An extension's workspace shown instead of the model, and the model
+        #: parked meanwhile; see :meth:`enter_workspace`.
+        self._workspace = None
+        self._parked: Optional[dict] = None
+        #: Tool keys a workspace allows (None = every tool).
+        self._tool_filter: Optional[set] = None
+        #: Suffix (".xyz") → callable(path) -> bool: documents an extension
+        #: opens itself (``ExtensionApp.add_file_opener``), from Open Recent,
+        #: the command line or a double-click.
+        self.file_openers: dict = {}
         self._saved_version: int = 0
 
         self._setup_ui()
@@ -373,6 +405,8 @@ class MainWindow(QMainWindow):
             gc.collect()
         if not self._is_dirty():
             return
+        if self._workspace is not None:
+            return                      # the model is parked; the workspace saves its own
         version = self.viewport.scene.version
         if version == getattr(self, "_autosaved_version", None):
             return
@@ -525,9 +559,8 @@ class MainWindow(QMainWindow):
             if alt:
                 seqs.append(QKeySequence(alt))
             action.setShortcuts(seqs)
-            action.setToolTip(f"{name}  ({tool.shortcut})")
-        else:
-            action.setToolTip(name)
+        from views.shortcuts import set_tooltip
+        set_tooltip(action, name)
         action.triggered.connect(lambda _c, k=key: self._activate_tool(k))
         self._tool_group.addAction(action)
         tb.addAction(action)
@@ -676,10 +709,21 @@ class MainWindow(QMainWindow):
         act_ze = QAction(tool_icon("zoom_extents"), tr("Zoom Extents"), self)
         self._icon_actions.append((act_ze, "zoom_extents"))
         act_ze.setShortcuts([QKeySequence("Shift+Z"), QKeySequence("F2")])
-        act_ze.setToolTip(f"{tr('Zoom Extents')}  (Shift+Z)")
+        from views.shortcuts import set_tooltip
+        set_tooltip(act_ze, tr("Zoom Extents"))
         act_ze.triggered.connect(self._on_zoom_extents)
         view_tb.addAction(act_ze)
         self._act_zoom_extents = act_ze
+
+        # Zoom Selection: the same framing over the selection alone. With
+        # nothing selected it does nothing (Zoom Extents is one key away).
+        act_zs = QAction(tool_icon("zoom_selection"), tr("Zoom Selection"), self)
+        self._icon_actions.append((act_zs, "zoom_selection"))
+        act_zs.setShortcut(QKeySequence("Ctrl+Alt+Z"))
+        set_tooltip(act_zs, tr("Zoom Selection"))
+        act_zs.triggered.connect(self._on_zoom_selection)
+        view_tb.addAction(act_zs)
+        self._act_zoom_selection = act_zs
 
         # Standard-views toolbar: one-shot camera orientations, icon-only.
         views_tb = self._new_toolbar(tr("Standard Views"), "views")
@@ -744,6 +788,19 @@ class MainWindow(QMainWindow):
         )
         self._redo_action.triggered.connect(self._on_redo)
         edit_menu.addAction(self._redo_action)
+
+        # Blender's Shift+R (R alone is the Rectangle), and the first entry
+        # of the right-click menu. Not Enter, not Space: Space is SketchUp's
+        # Select, and a habit-pressed key that repeats could bring back the
+        # Eraser or run Explode on whatever happens to be selected.
+        self._repeat_action = QAction(tr("Repeat last command"), self)
+        # Its text names what it would repeat, so the shortcut editor (#138)
+        # needs a key that does not change with it.
+        self._repeat_action.setObjectName("repeat_last_command")
+        self._repeat_action.setShortcut(QKeySequence("Shift+R"))
+        self._repeat_action.setEnabled(False)
+        self._repeat_action.triggered.connect(self.repeat_last_command)
+        edit_menu.addAction(self._repeat_action)
         # On the Main toolbar right after the pointer, as SketchUp has them
         # (Marco, 23-09). The SAME actions as the Edit menu: a second QAction
         # with Ctrl+Z would make the shortcut ambiguous, and an ambiguous
@@ -754,7 +811,8 @@ class MainWindow(QMainWindow):
             for act, key, tip in ((self._undo_action, "undo", tr("Undo")),
                                   (self._redo_action, "redo", tr("Redo"))):
                 act.setIcon(tool_icon(key))
-                act.setToolTip(f"{tip}  ({act.shortcut().toString(QKeySequence.NativeText)})")
+                from views.shortcuts import set_tooltip
+                set_tooltip(act, tip)
                 self._icon_actions.append((act, key))
             after = self._tool_actions.get("select")
             acts = main_tb.actions()
@@ -783,6 +841,11 @@ class MainWindow(QMainWindow):
         paste_action.setShortcut(QKeySequence.Paste)
         paste_action.triggered.connect(self._on_paste)
         edit_menu.addAction(paste_action)
+
+        paste_in_place_action = QAction(tr("Paste in Place"), self)
+        paste_in_place_action.setShortcut(QKeySequence("Ctrl+Alt+V"))
+        paste_in_place_action.triggered.connect(self._on_paste_in_place)
+        edit_menu.addAction(paste_in_place_action)
 
         edit_menu.addSeparator()
 
@@ -888,6 +951,7 @@ class MainWindow(QMainWindow):
             standard_menu.addAction(action)
 
         camera_menu.addAction(self._act_zoom_extents)   # la MISMA del botón
+        camera_menu.addAction(self._act_zoom_selection)
 
         camera_menu.addSeparator()
 
@@ -1046,24 +1110,16 @@ class MainWindow(QMainWindow):
         # Window menu (SketchUp: panels + app preferences)
         window_menu = menubar.addMenu(tr("Window"))
 
-        toggle_tray = self.tray.toggleViewAction()
-        toggle_tray.setText(tr("Properties panel"))
-        window_menu.addAction(toggle_tray)
-
-        # Every tray has its entry: a closed BIM tray had no way back
-        # (Marco, 0.5.1 Flatpak: «no veo las pestañas de terreno y BIM»).
-        toggle_bim = self.bim_tray.toggleViewAction()
-        toggle_bim.setText(tr("BIM panel"))
-        window_menu.addAction(toggle_bim)
-
-        toggle_georef = self.georef_tray.toggleViewAction()
-        toggle_georef.setText(tr("Terrain panel"))
-        window_menu.addAction(toggle_georef)
-        # Only the menu says a tray is unwanted: that choice is remembered
-        # and every other tray opens at start-up (see _show_default_trays).
-        for dock in self._sidebar_docks():
-            dock.toggleViewAction().triggered.connect(
-                lambda on, d=dock: self._remember_tray_choice(d, on))
+        # Every tray, extension tabs included, has its entry here — and the
+        # same list opens on a right-click over the tabs. Only this list
+        # says a tray is unwanted: that choice is remembered and every other
+        # tray opens at start-up (see _show_default_trays). Built when it
+        # opens: extension tabs are added after the menus.
+        panels_menu = QMenu(tr("Panels"), window_menu)
+        panels_menu.aboutToShow.connect(
+            lambda m=panels_menu: self._fill_panels_menu(m))
+        window_menu.addMenu(panels_menu)
+        self._panels_menu = panels_menu
 
         toggle_profile = self.profile_dock.toggleViewAction()
         toggle_profile.setText(tr("Terrain profile"))
@@ -1092,10 +1148,22 @@ class MainWindow(QMainWindow):
         window_menu.addAction(prefs_action)
         self._build_language_menu(window_menu)
 
+        # Blender's F3 / SketchUp's Search: one box that runs any command
+        # by name (views/command_search.py). Made BEFORE the plugins load,
+        # so a plugin asking for F3 finds it taken; on the window too, so
+        # it answers with the menu bar hidden (clean screen).
+        search_action = QAction(tr("Search commands…"), self)
+        search_action.setObjectName("command_search")
+        search_action.setShortcut(QKeySequence("F3"))
+        search_action.triggered.connect(self._on_command_search)
+        self.addAction(search_action)
+
         # Extensions — third-party plugin tools (core.extensions engine).
         self._build_extensions_menu(menubar)
 
         help_menu = menubar.addMenu(tr("Help"))
+        help_menu.addAction(search_action)
+        help_menu.addSeparator()
         get_models_action = QAction(tr("Get more models and textures…"), self)
         get_models_action.triggered.connect(self._on_get_models)
         help_menu.addAction(get_models_action)
@@ -1112,6 +1180,9 @@ class MainWindow(QMainWindow):
         about_action = QAction(tr("About IngeTrazo"), self)
         about_action.triggered.connect(self._on_about)
         help_menu.addAction(about_action)
+        # A letter typed in an open menu searches that menu (Blender 4).
+        from views.command_search import install_menu_typing
+        install_menu_typing(self)
 
     # ---- Language -----------------------------------------------------------
     _LANGUAGE_NAMES = LANGUAGE_NAMES
@@ -1139,8 +1210,15 @@ class MainWindow(QMainWindow):
         docks = self._sidebar_docks()
         for d in docks:
             d.setVisible(d.objectName() not in hidden)
+            # Qt's own dock list (right-click on a toolbar) hides one too.
+            d.toggleViewAction().triggered.connect(
+                lambda on, dock=d: self._remember_tray_choice(dock, on))
         if not self.tray.isHidden():
             self.tray.raise_()
+        # Filled now too, not only when it opens: F3 finds each tab there.
+        menu = getattr(self, "_panels_menu", None)
+        if menu is not None:
+            self._fill_panels_menu(menu)
 
     @staticmethod
     def _hidden_tray_names(st) -> set:
@@ -1157,6 +1235,61 @@ class MainWindow(QMainWindow):
         else:
             hidden.add(dock.objectName())
         st.setValue("ui/hidden_trays", sorted(hidden))
+
+    def _fill_panels_menu(self, menu) -> None:
+        """One checkable entry per side-tray tab (Marco, 29-09: «cuando
+        tenga demasiadas pestañas… configurar para no mostrar»)."""
+        menu.clear()
+        for dock in self._sidebar_docks():
+            act = menu.addAction(dock.windowTitle())
+            act.setCheckable(True)
+            act.setChecked(not dock.isHidden())
+            act.triggered.connect(
+                lambda on, d=dock: self.set_tray_shown(d, on))
+        menu.addSeparator()
+        every = menu.addAction(tr("Show all panels"))
+        every.triggered.connect(self._show_all_trays)
+
+    def set_tray_shown(self, dock, shown: bool) -> None:
+        """Show (in front) or hide one side-tray tab and remember it. A
+        folded sidebar unfolds first: asking for a tab means seeing it."""
+        if shown:
+            act = getattr(self, "_act_sidebar", None)
+            if act is not None and not act.isChecked():
+                act.setChecked(True)
+            dock.show()
+            dock.raise_()
+        else:
+            dock.hide()
+        self._remember_tray_choice(dock, shown)
+
+    def _show_all_trays(self) -> None:
+        for dock in self._sidebar_docks():
+            self.set_tray_shown(dock, True)
+        if not self.tray.isHidden():
+            self.tray.raise_()
+
+    def _tray_tab_bar_at(self, pos) -> bool:
+        """Whether ``pos`` (window coordinates) is on the tab bar of the
+        side trays — the tabs QMainWindow draws for tabified docks."""
+        from PySide6.QtWidgets import QTabBar
+        child = self.childAt(pos)
+        while child is not None and child is not self:
+            if isinstance(child, QTabBar):
+                return True
+            child = child.parentWidget()
+        return False
+
+    def contextMenuEvent(self, event) -> None:
+        """Right-click on the tray tabs → the Window ▸ Panels list, instead
+        of Qt's toolbar-and-dock menu."""
+        if self._tray_tab_bar_at(event.pos()):
+            menu = QMenu(self)
+            self._fill_panels_menu(menu)
+            menu.exec(event.globalPos())
+            event.accept()
+            return
+        super().contextMenuEvent(event)
 
     def _sidebar_docks(self) -> list:
         return [d for d in (getattr(self, "tray", None),
@@ -1179,7 +1312,8 @@ class MainWindow(QMainWindow):
         act.setCheckable(True)
         act.setChecked(True)
         act.setShortcut(QKeySequence("Ctrl+F5"))
-        act.setToolTip(tr("Show or hide the sidebar (Ctrl+F5)"))
+        from views.shortcuts import set_tooltip
+        set_tooltip(act, tr("Show or hide the sidebar"))
         act.toggled.connect(self._route_window_toggle(
             "_act_sidebar", self._set_sidebar_visible))
         self.addAction(act)
@@ -1335,8 +1469,15 @@ class MainWindow(QMainWindow):
 
     def _on_preferences(self) -> None:
         """Window ▸ Preferences: the scattered QSettings in one dialog."""
+        self.open_preferences()
+
+    def open_preferences(self, shortcut_of=None) -> None:
+        """Preferences; on the Keyboard shortcuts page with that action
+        picked when ``shortcut_of`` is given (right click in F3)."""
         from views.preferences_dialog import PreferencesDialog
         dlg = PreferencesDialog(self)
+        if shortcut_of is not None:
+            dlg.show_shortcut_of(shortcut_of)
         dlg.exec()
         # Freed now, not when the window goes: each opening used to leave
         # a hidden dialog hanging from the window until the app closed.
@@ -1372,6 +1513,8 @@ class MainWindow(QMainWindow):
         # ambiguity that silently disables the built-in key for both.
         taken = {a.shortcut().toString() for a in self.findChildren(QAction)
                  if not a.shortcut().isEmpty()}
+        self._ext_menu = ext_menu           # ExtensionApp.add_menu_action
+        self._ext_taken_keys = taken
 
         count = 0
         from views.extension_api import ExtensionApp
@@ -1398,7 +1541,8 @@ class MainWindow(QMainWindow):
                     seq = QKeySequence(tool.shortcut).toString()
                     if seq and seq not in taken:
                         action.setShortcut(QKeySequence(tool.shortcut))
-                        action.setToolTip(f"{tr(tool.name)}  ({tool.shortcut})")
+                        from views.shortcuts import set_tooltip
+                        set_tooltip(action, tr(tool.name))
                         taken.add(seq)
                     else:
                         log.warning("plugin %r wants shortcut %r, already "
@@ -1525,13 +1669,44 @@ class MainWindow(QMainWindow):
         from PySide6.QtGui import QDesktopServices
         QDesktopServices.openUrl(QUrl(self.PLUGIN_GUIDE_URL))
 
+    # ---- Extension panels (views.extension_api.ExtensionApp.add_panel) -------
+    def _register_extension_dock(self, dock) -> None:
+        """Give an extension's panel what the built-in trays get for free.
+
+        ``setup(app)`` may add a panel after ``restoreState`` laid the window
+        out, and an extension may add one later still (the first time its
+        tool runs), so here a panel gets:
+
+        - **its saved place.** ``restoreDockWidget`` puts it back where the
+          user left it last session (area, size, floating, tabbed) when the
+          window state knows its ``objectName`` — which is why that name
+          must be stable across versions;
+        - **a first place** when there is none: tabbed with the trays;
+        - **a way back** when closed: Window ▸ Panels lists every tab."""
+        if not self.restoreDockWidget(dock):
+            self.addDockWidget(Qt.RightDockWidgetArea, dock)
+            anchor = next((d for d in reversed(self._sidebar_docks())
+                           if d is not dock and d.objectName() != dock.objectName()), None)
+            if anchor is not None:
+                self.tabifyDockWidget(anchor, dock)
+        self._extension_docks.append(dock)
+        menu = getattr(self, "_panels_menu", None)
+        if menu is not None:
+            self._fill_panels_menu(menu)
+
+    def extension_panels(self) -> dict:
+        """``objectName`` → dock for every panel an extension added."""
+        return {d.objectName(): d for d in self._extension_docks}
+
     def _activate_plugin_tool(self, key: str) -> None:
         """Run a plugin tool from the Extensions menu.
 
         Plugin tools are one-shot (they open a dialog and return): the
         viewport's active tool is left untouched, so the status bar keeps
         telling the truth about which drawing tool is current."""
-        self._tools[key].on_activate(self.viewport)
+        tool = self._tools[key]
+        self._remember_command(tool.name, lambda: tool.on_activate(self.viewport))
+        tool.on_activate(self.viewport)
 
     def _on_gl_ready(self, info: dict) -> None:
         """A viewport drawn on the CPU is the usual reason a Windows machine
@@ -1548,6 +1723,10 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(tr(
                 "IngeTrazo asked Windows for the high-performance GPU; it "
                 "applies the next time you open the program."), 20000)
+
+    def _on_command_search(self) -> None:
+        from views.command_search import open_search
+        open_search(self)
 
     def _on_about(self) -> None:
         from core.glinfo import describe
@@ -1640,7 +1819,6 @@ class MainWindow(QMainWindow):
             (tr("COLLADA (.dae)…"), self._on_export_dae),
             (tr("STL (3D printing)…"), self._on_export_stl),
             (tr("Wavefront OBJ (.obj)…"), self._on_export_obj),
-            (tr("SketchUp (.skp)…"), self._on_export_skp),
             (tr("Current view as DXF…"), self._on_export_view_dxf),
             (tr("Image (PNG / JPG)…"), self._on_export_image),
         ):
@@ -1713,6 +1891,15 @@ class MainWindow(QMainWindow):
         self._coord_label = QLabel("")
         theme_style(self._coord_label, "color:{muted}; padding:0 8px;")
         bar.addPermanentWidget(self._coord_label)
+
+        # What Repeat would run, on the right while Select is up — the VCB
+        # box is hidden then, so the corner is free. It cannot ride on the
+        # Select hint: in Spanish that line would pass the 112-character
+        # cap and lose its end (test_status_hints_fit).
+        self._repeat_label = QLabel("")
+        theme_style(self._repeat_label, "color:{muted}; padding:0 8px;")
+        self._repeat_label.hide()
+        bar.addPermanentWidget(self._repeat_label)
 
         # SketchUp-style Measurements box (VCB), pinned bottom-right: a caption
         # ("Length" / "Dimensions" / "Distance") plus a boxed field showing the
@@ -1791,6 +1978,7 @@ class MainWindow(QMainWindow):
             name = tr(tool.name)
         else:
             name = ""
+        self._refresh_repeat_hint()
         if name and text:
             text = f"{name} — {text}"
         elif name:
@@ -1848,6 +2036,10 @@ class MainWindow(QMainWindow):
 
     # ---- Tool routing -------------------------------------------------------
     def _activate_tool(self, key: str) -> None:
+        if self._tool_filter is not None and key not in self._tool_filter:
+            self.statusBar().showMessage(
+                tr("{name} is not available here.", name=tr(self._tools[key].name)), 3000)
+            return
         tool = self._tools[key]
         self.viewport.set_active_tool(tool)
         action = self._tool_actions.get(key)
@@ -1856,6 +2048,54 @@ class MainWindow(QMainWindow):
         self._tool_label.setText(tr("Tool: {name}", name=tr(tool.name)))
         self._refresh_vcb()
         self._update_status_hint()
+        # Select is where Repeat is pressed FROM, and the two tools entered
+        # from a right-click need the face or group that click was on.
+        if key not in ("select", "texture_position", "change_axes"):
+            self._remember_command(tool.name,
+                                   lambda k=key: self._activate_tool(k))
+
+    # ---- Repeat last command (Blender Shift+R, right-click ▸ Repeat) -------
+    def _remember_command(self, label: str, run) -> None:
+        self._last_command = (label, run)
+        act = getattr(self, "_repeat_action", None)
+        if act is not None:
+            act.setText(tr("Repeat {name}", name=tr(label)))
+            act.setEnabled(True)
+        self._refresh_repeat_hint()
+
+    def _refresh_repeat_hint(self) -> None:
+        """Say what Repeat would run, before it runs — with the keys it has
+        NOW: the shortcut editor (#138) may have moved or cleared them."""
+        lab = getattr(self, "_repeat_label", None)
+        if lab is None:
+            return
+        last = getattr(self, "_last_command", None)
+        show = (last is not None
+                and self.viewport.active_tool is self._tools["select"])
+        if show:
+            keys = self._repeat_action.shortcut().toString(
+                QKeySequence.NativeText)
+            text = (tr("{keys}: repeat {name}", keys=keys, name=tr(last[0]))
+                    if keys else tr("Repeat {name}", name=tr(last[0])))
+            if lab.text() != text:
+                lab.setText(text)
+        lab.setVisible(show)
+
+    def repeat_last_command(self) -> bool:
+        """Run again the last tool picked or one-shot command applied.
+
+        A tool comes back as if its key were pressed; a command runs on the
+        CURRENT selection — the point of it: reverse this face, select the
+        next, repeat."""
+        last = getattr(self, "_last_command", None)
+        if last is None:
+            self.viewport.flash_status(tr("Nothing to repeat yet"), 3000)
+            return False
+        label, run = last
+        run()
+        self.viewport.flash_status(tr("Repeat: {name}", name=tr(label)), 2000)
+        self.viewport.update()
+        return True
 
     def _activate_nav(self, key: str) -> None:
         self.viewport.set_nav_mode(key)
@@ -1867,6 +2107,7 @@ class MainWindow(QMainWindow):
         self._refresh_vcb()
         self._update_status_hint()
 
+    @_repeatable("Make Group")
     def _on_make_group(self) -> None:
         """SketchUp's Make Group (G) over the selection.
 
@@ -1917,6 +2158,7 @@ class MainWindow(QMainWindow):
         self.viewport.history.execute(MakeGroupCommand(faces, edges))
         self.viewport.update()
 
+    @_repeatable("Make Component")
     def _on_make_component(self) -> None:
         """SketchUp's Make Component (G): the selection becomes a shared
         DEFINITION placed as an instance — every copy shares it."""
@@ -1988,6 +2230,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(tr(
             "Component created — copies will share its definition"), 4000)
 
+    @_repeatable("Make Unique")
     def _on_make_unique(self) -> None:
         from core.history import MakeUniqueCommand
         for g in [g for g in self.viewport.scene.selection
@@ -1995,6 +2238,7 @@ class MainWindow(QMainWindow):
             self.viewport.history.execute(MakeUniqueCommand(g))
         self.viewport.update()
 
+    @_repeatable("Merge Groups")
     def _on_merge_groups(self) -> None:
         from core.history import MergeGroupsCommand
         groups = [e for e in self.viewport.scene.selection
@@ -2022,6 +2266,7 @@ class MainWindow(QMainWindow):
                             (WITH_CONTEXT, tr("With Context"))):
             menu.addAction(label, lambda m=mode: self._on_intersect_faces(m))
 
+    @_repeatable("Intersect Faces")
     def _on_intersect_faces(self, mode: str) -> None:
         """SketchUp's Intersect Faces: edges wherever the selection's faces
         cross the others (core/intersect.py), added to the context being
@@ -2041,6 +2286,7 @@ class MainWindow(QMainWindow):
         self.viewport.flash_status(
             tr("{n} intersection edges added", n=len(segs)), 3000)
 
+    @_repeatable("Split into Pieces")
     def _on_split_into_pieces(self) -> None:
         """Regroup the selected group's contents by physical piece — the
         solids that do not touch (see :mod:`core.pieces`). The group stays
@@ -2075,6 +2321,7 @@ class MainWindow(QMainWindow):
             n=len(pieces)), 5000)
         self.viewport.update()
 
+    @_repeatable("Explode Group")
     def _on_explode_group(self) -> None:
         if self.viewport.scene.edit_group is not None:
             self.viewport.flash_status(tr(
@@ -2123,6 +2370,7 @@ class MainWindow(QMainWindow):
             self.viewport.flash_status(tr("No faces could be simplified"))
         self.viewport.update()
 
+    @_repeatable("Convert Path to Geometry")
     def _on_convert_geopath(self) -> None:
         """Bake selected georef paths into real mesh geometry (Track G bridge).
 
@@ -2309,6 +2557,7 @@ class MainWindow(QMainWindow):
         if panel is not None:
             panel.refresh()
 
+    @_repeatable("Delete Guides")
     def _on_delete_guides(self) -> None:
         """Remove every construction guide (SketchUp's Edit ▸ Delete Guides)."""
         from core.history import DeleteGuidesCommand
@@ -2416,6 +2665,13 @@ class MainWindow(QMainWindow):
         lone_group = (len(sel) == 1 and has_group)
         sec_planes = [e for e in sel if isinstance(e, SectionPlane)]
         menu = QMenu(self)
+
+        # AutoCAD's first right-click entry: where a mouse-only hand looks.
+        last = getattr(self, "_last_command", None)
+        if last is not None:
+            menu.addAction(tr("Repeat {name}", name=tr(last[0])),
+                           self.repeat_last_command)
+            menu.addSeparator()
 
         if locked_image is not None and locked_image not in sel:
             name = getattr(locked_image, "name", "") or tr("image")
@@ -2561,6 +2817,7 @@ class MainWindow(QMainWindow):
             menu.addAction(tr("Cut"), lambda: self.viewport.cut_selection())
             menu.addAction(tr("Copy"), lambda: self.viewport.copy_selection())
         if sel:
+            menu.addAction(tr("Zoom Selection"), self._on_zoom_selection)
             menu.addAction(tr("Delete"), self._on_delete_selection)
             act_clear = menu.addAction(tr("Clear selection"),
                                        self.viewport.scene.clear_selection)
@@ -2570,6 +2827,7 @@ class MainWindow(QMainWindow):
         from formats import clip as clip_transfer
         if getattr(self.viewport, "clipboard", None) or clip_transfer.available():
             menu.addAction(tr("Paste"), self._on_paste)
+            menu.addAction(tr("Paste in Place"), self._on_paste_in_place)
         menu.addAction(tr("Zoom Extents"), self._on_zoom_extents)
         menu.addSeparator()
         undo = menu.addAction(tr("Undo"), self._on_undo)
@@ -2744,6 +3002,7 @@ class MainWindow(QMainWindow):
         return [e for e in entities
                 if isinstance(e, (Edge, Face, Group)) and not _is_hidden(e)]
 
+    @_repeatable("Hide")
     def _on_hide(self) -> None:
         """SketchUp's Edit ▸ Hide: the selected objects (groups,
         components), faces and edges stop drawing, picking and exporting —
@@ -2840,6 +3099,7 @@ class MainWindow(QMainWindow):
             panel.refresh()
         self.viewport.update()
 
+    @_repeatable("Divide")
     def _on_divide(self) -> None:
         """Divide the selected edges / curves into N equal pieces (#63)."""
         from PySide6.QtWidgets import QInputDialog
@@ -2863,6 +3123,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             tr("Divided into {n} segments", n=n), 3000)
 
+    @_repeatable("Reverse Faces")
     def _on_reverse_faces(self) -> None:
         """SketchUp's Reverse Faces: flip the winding (and thus the front/back
         sides) of the selected faces."""
@@ -2879,6 +3140,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             tr("Reversed {n} face(s).", n=len(faces)), 3000)
 
+    @_repeatable("Orient Faces")
     def _on_orient_faces(self) -> None:
         """SketchUp's Orient Faces (issue #77): every face connected to the
         chosen one turns to wind like it — its front side is the one the
@@ -2900,6 +3162,7 @@ class MainWindow(QMainWindow):
             tr("Oriented {n} face(s) like the selected one.", n=len(flip))
             if flip else tr("The connected faces already match."), 3000)
 
+    @_repeatable("Heal Overlapping Faces")
     def _on_heal_overlaps(self) -> None:
         cmd = HealOverlapsCommand()
         self.viewport.history.execute(cmd)
@@ -2908,6 +3171,7 @@ class MainWindow(QMainWindow):
             tr("Healed {n} overlapping face(s).", n=cmd.healed) if cmd.healed
             else tr("No overlapping faces found."), 3000)
 
+    @_repeatable("Rebuild Faces (Planar)")
     def _on_rebuild_planar(self) -> None:
         # With faces selected, rebuild just THEIR plane — the per-plane
         # rebuild every stroke already runs — so a 3D model keeps the tool
@@ -2957,7 +3221,7 @@ class MainWindow(QMainWindow):
                         return None
         return o, n
 
-    def _on_paste(self) -> None:
+    def _sync_foreign_clipboard(self) -> None:
         # A copy made in ANOTHER IngeTrazo window wins over this window's
         # older one, as a system clipboard does (issue #76).
         from formats import clip as clip_transfer
@@ -2971,6 +3235,17 @@ class MainWindow(QMainWindow):
             if old and callable(drop):
                 drop(old)
             self.viewport.clipboard = other
+
+    def _on_paste_in_place(self) -> None:
+        """Edit ▸ Paste in Place (SketchUp): the copy lands where the
+        original was, in whatever context is open — the way to move things
+        into and out of groups without shifting them."""
+        self._sync_foreign_clipboard()
+        if PasteTool.in_place(self.viewport):
+            self.statusBar().showMessage(tr("Pasted in place."), 3000)
+
+    def _on_paste(self) -> None:
+        self._sync_foreign_clipboard()
         if self.viewport.clipboard is None:
             return
         self.viewport.set_active_tool(PasteTool())
@@ -3016,6 +3291,15 @@ class MainWindow(QMainWindow):
             if bounds[0] is None:
                 return
         self.viewport.camera.fit_box(bounds[0], bounds[1])
+        self.viewport.update()
+
+    def _on_zoom_selection(self) -> None:
+        """Zoom Extents over the selection. Nothing selected: nothing."""
+        lo, hi = self.viewport.scene.selection_bounds()
+        if lo is None:
+            self.statusBar().showMessage(tr("Nothing selected"), 2500)
+            return
+        self.viewport.camera.fit_box(lo, hi)
         self.viewport.update()
 
     def _figure_bounds(self):
@@ -3309,6 +3593,14 @@ class MainWindow(QMainWindow):
 
     # ---- Undo / redo --------------------------------------------------------
     def _on_undo(self) -> None:
+        # A tool in the middle of something answers Ctrl+Z first: the Line
+        # steps its chain back one vertex instead of staying anchored to
+        # the end of the segment just undone (#175).
+        tool = self.viewport.active_tool
+        handler = getattr(tool, "on_undo", None)
+        if callable(handler) and handler(self.viewport):
+            self.viewport.notify_scene_changed()
+            return
         if self.viewport.history.undo():
             self.viewport.notify_scene_changed()
 
@@ -3334,7 +3626,10 @@ class MainWindow(QMainWindow):
     def _apply_camera_home(self) -> None:
         """Look at what the document's author was looking at; a document
         from before the camera was saved keeps the view as it is."""
-        home = getattr(self.viewport.scene, "camera_home", None)
+        self._apply_camera_dict(getattr(self.viewport.scene, "camera_home", None))
+
+    def _apply_camera_dict(self, home) -> None:
+        """Put the camera where :meth:`_camera_dict` found it."""
         if not isinstance(home, dict):
             return
         cam = self.viewport.camera
@@ -3379,6 +3674,83 @@ class MainWindow(QMainWindow):
             return [sys.executable, flag]
         return [sys.executable, str(app_root() / "main.py"), flag]
 
+    # ---- Extension workspaces (ExtensionApp.enter_workspace) ----------------
+    def enter_workspace(self, workspace) -> bool:
+        """Show an extension's own document instead of the model — a CAM
+        job's drawing on its stock, say (docs/plugins.md, «Workspaces»).
+
+        The model is PARKED, not closed: its scene, undo history, camera,
+        file and saved state wait untouched until :meth:`leave_workspace`.
+        Meanwhile File ▸ New / Open / Save / Save As, the title, the
+        unsaved-changes prompts and quitting go to ``workspace``, the
+        model's autosave pauses, and only the tools in
+        ``workspace.allowed_tools`` (None = all) can be picked.
+
+        ``workspace`` provides ``scene``, ``history``, ``title()``,
+        ``is_dirty()``, ``save()``, ``save_as()`` and ``confirm_leave()``
+        (True when it may go: saved, discarded, or nothing to lose);
+        optionally ``new()``, ``open()``, ``allowed_tools``, ``camera``
+        (a :meth:`_camera_dict`) and ``left()``, called once it is gone.
+        Returns False when a workspace is already shown."""
+        if self._workspace is not None:
+            return False
+        self._activate_tool("select")
+        vp = self.viewport
+        vp.end_group_edit()
+        self._parked = {
+            "clean": not self._is_dirty(),
+            "path": self._current_path,
+            "import_name": self._import_name,
+            "camera": self._camera_dict(),
+        }
+        self._parked["scene"], self._parked["history"] = vp.set_document(
+            workspace.scene, workspace.history)
+        self._workspace = workspace
+        self.set_tool_filter(getattr(workspace, "allowed_tools", None))
+        self._apply_camera_dict(getattr(workspace, "camera", None))
+        if getattr(self, "_sheet_tabs", None) is not None:
+            self._sheet_tabs.setVisible(False)   # sheets belong to the model
+        self._update_title()
+        return True
+
+    def leave_workspace(self) -> bool:
+        """Back to the parked model; False when the workspace would not go
+        (its user cancelled the unsaved-changes prompt)."""
+        ws = self._workspace
+        if ws is None:
+            return True
+        if not ws.confirm_leave():
+            return False
+        self._activate_tool("select")
+        p = self._parked
+        if hasattr(ws, "camera"):
+            ws.camera = self._camera_dict()
+        self.viewport.set_document(p["scene"], p["history"])
+        self._workspace, self._parked = None, None
+        self.set_tool_filter(None)
+        self._current_path = p["path"]
+        self._import_name = p["import_name"]
+        # set_document moved the version on: a model that was saved stays so.
+        self._saved_version = self.viewport.scene.version if p["clean"] else -1
+        self._apply_camera_dict(p["camera"])
+        if getattr(self, "_sheet_tabs", None) is not None:
+            self._sheet_tabs.setVisible(True)
+        self._update_title()
+        if hasattr(ws, "left"):
+            ws.left()
+        return True
+
+    def workspace(self):
+        """The extension workspace shown instead of the model, or None."""
+        return self._workspace
+
+    def set_tool_filter(self, allowed) -> None:
+        """Only the tools keyed in ``allowed`` can be picked (toolbar,
+        menus, shortcuts); None allows every tool again."""
+        self._tool_filter = set(allowed) if allowed is not None else None
+        for key, action in self._tool_actions.items():
+            action.setEnabled(self._tool_filter is None or key in self._tool_filter)
+
     def _on_new_window(self) -> None:
         from PySide6.QtCore import QProcess
         cmd = self._new_window_command()
@@ -3387,6 +3759,9 @@ class MainWindow(QMainWindow):
                                 tr("Could not start another IngeTrazo window."))
 
     def _on_new(self) -> None:
+        if self._workspace is not None and hasattr(self._workspace, "new"):
+            self._workspace.new()
+            return
         self.viewport.end_group_edit()
         if not self._confirm_discard(tr("Discard current drawing?")):
             return
@@ -3494,6 +3869,9 @@ class MainWindow(QMainWindow):
         self.open_path(path)
 
     def _on_open(self) -> None:
+        if self._workspace is not None and hasattr(self._workspace, "open"):
+            self._workspace.open()
+            return
         self.viewport.end_group_edit()
         if not self._confirm_discard(
                 tr("Discard current drawing and open another?")):
@@ -3514,8 +3892,16 @@ class MainWindow(QMainWindow):
 
         ``.igz`` is our native format; ``.dae``/``.skp`` are the interchange
         formats we also register in the desktop entry, so double-clicking one
-        imports it rather than failing to parse it as an IngeTrazo document."""
+        imports it rather than failing to parse it as an IngeTrazo document.
+        An extension may claim a suffix of its own
+        (``ExtensionApp.add_file_opener``); anything else needs the model,
+        so a workspace in front of it is left first."""
         suffix = path.suffix.lower()
+        opener = self.file_openers.get(suffix)
+        if opener is not None:
+            return bool(opener(path))
+        if self._workspace is not None and not self.leave_workspace():
+            return False
         if suffix == ".dae":
             self._import_dae_path(path)
             return True
@@ -3611,6 +3997,10 @@ class MainWindow(QMainWindow):
         gc.collect()
 
     def _on_save(self) -> None:
+        if self._workspace is not None:
+            self._workspace.save()
+            self._update_title()
+            return
         self.viewport.end_group_edit()
         if self._current_path is None:
             self._on_save_as()
@@ -3618,6 +4008,10 @@ class MainWindow(QMainWindow):
         self._do_save(self._current_path)
 
     def _on_save_as(self) -> None:
+        if self._workspace is not None:
+            self._workspace.save_as()
+            self._update_title()
+            return
         self.viewport.end_group_edit()
         default_name = (
             self._current_path.name if self._current_path is not None else "untitled.igz"
@@ -3933,6 +4327,7 @@ class MainWindow(QMainWindow):
             italic_check.isChecked(), height_spin.value(),
             depth_spin.value())
 
+    @_repeatable("3D Text")
     def _on_insert_3d_text(self) -> None:
         """SketchUp's 3D Text: the dialog generates REAL extruded geometry —
         a container group with ONE GROUP PER LETTER, editable later from
@@ -4020,12 +4415,6 @@ class MainWindow(QMainWindow):
         QMessageBox.information(
             self, tr("Get more models and textures"),
             tr("Free sources that open directly in IngeTrazo:") + "<br><br>"
-            "<b>3D Warehouse</b> — "
-            "<a href='https://3dwarehouse.sketchup.com'>"
-            "3dwarehouse.sketchup.com</a><br>"
-            + tr("Download as COLLADA (.dae) — or the .skp itself — and use "
-                 "File → Import.")
-            + "<br><br>"
             "<b>Poly Haven</b> — <a href='https://polyhaven.com'>"
             "polyhaven.com</a> " + tr("(CC0: models OBJ and PBR textures)")
             + "<br><b>ambientCG</b> — <a href='https://ambientcg.com'>"
@@ -4067,7 +4456,7 @@ class MainWindow(QMainWindow):
         """Parse ``skp`` off the UI thread, keeping the event loop responsive.
 
         Returns ``(payload, exc)`` — ``payload`` is the parsed geometry (or
-        ``None``), ``exc`` is a ``NeedsConverter`` (fall back to skp2dae), any
+        ``None``), ``exc`` is a ``NeedsConverter`` (the reader cannot read it), any
         other exception (real failure), or ``None``. The parse touches no
         ``Scene`` so it is safe off-thread; ``apply_payload`` runs on the UI
         thread in the caller. A local ``QEventLoop`` blocks here until the
@@ -4185,49 +4574,16 @@ class MainWindow(QMainWindow):
         self._update_title()
         self.statusBar().showMessage(tr("Imported {name}", name=path.name), 3000)
 
-    # ---- SKP via the skp2dae satellite converter -----------------------------
-    @staticmethod
-    def _find_skp_converter():
-        """Locate the external skp2dae converter and return the command list
-        to invoke it, or ``None``. Search order: ``SKP2DAE_EXE`` env var,
-        ``~/.local/share/skp2dae/skp2dae.exe``, then ``skp2dae`` on PATH.
-        The converter is a SEPARATE program (it loads Trimble's proprietary
-        SketchUpAPI.dll, which can never ship inside GPL IngeTrazo); on
-        Linux a ``.exe`` runs through Wine."""
-        import os
-        import shutil
-        import sys as _sys
-        candidates = []
-        env = os.environ.get("SKP2DAE_EXE")
-        if env:
-            candidates.append(Path(env))
-        candidates.append(
-            Path.home() / ".local" / "share" / "skp2dae" / "skp2dae.exe")
-        which = shutil.which("skp2dae")
-        if which:
-            candidates.append(Path(which))
-        for cand in candidates:
-            if not cand.exists():
-                continue
-            if cand.suffix.lower() == ".exe" and _sys.platform != "win32":
-                wine = shutil.which("wine")
-                if wine:
-                    return [wine, str(cand)]
-                continue
-            return [str(cand)]
-        return None
-
+    # ---- SKP import: IngeTrazo's own reader (formats/skp.py) -----------------
     def import_skp_path(self, skp: Path) -> bool:
-        """Import ``skp``. Prefers a pure-Python parser backend (offline, no
-        Wine/DLL — see ``formats/skp.py``); falls back to the external skp2dae
-        converter for versions no pure backend can read yet (its .dae and
-        texture folder land NEXT TO the .skp, so texture paths stay valid for
-        the session and for saved documents)."""
+        """Import ``skp`` with IngeTrazo's own pure-Python reader (offline,
+        no Wine, nothing of Trimble's -- see ``formats/skp.py``). A file it
+        cannot read is reported, with the way around it (export COLLADA or
+        OBJ from SketchUp)."""
         from formats import skp as skp_format
         if skp_format.can_handle(skp):
-            # Heavy parse OUTSIDE the undo history: decide pure-vs-converter
-            # before touching the scene, so a failed/empty parse never leaves a
-            # half-applied edit. NeedsConverter → fall through to skp2dae.
+            # Heavy parse OUTSIDE the undo history, so a failed/empty parse
+            # never leaves a half-applied edit.
             dlg, cb = self._import_progress(
                 tr("Importing {name}…", name=skp.name))
             # The parse is heavy (seconds on a big model) and pure-Python, so
@@ -4238,10 +4594,7 @@ class MainWindow(QMainWindow):
             # thread below.
             payload, exc = self._parse_skp_threaded(skp, cb)
             if isinstance(exc, skp_format.NeedsConverter):
-                payload = None
-                self.statusBar().showMessage(tr(
-                    "Pure importer unavailable for this file — using the "
-                    "external converter (slower)."), 8000)
+                payload = None             # unreadable: said below
             elif exc is not None:
                 dlg.close()
                 QMessageBox.critical(self, tr("Import SKP failed"), str(exc))
@@ -4270,171 +4623,17 @@ class MainWindow(QMainWindow):
                     self.statusBar().showMessage(
                         tr("Imported {name}", name=skp.name), 3000)
                 return True
-            dlg.close()   # no pure backend could read it → converter below
+            dlg.close()   # the reader could not read it: said below
 
-        # ---- Fallback: the external skp2dae converter (Trimble DLL via Wine) --
-        command = self._find_skp_converter()
-        if command is None:
-            answer = QMessageBox.question(
-                self, tr("Import SKP"),
-                tr("Opening .skp needs the skp2dae converter (a separate "
-                   "program IngeTrazo launches).\n\n"
-                   "Install it automatically? This downloads:\n"
-                   "• skp2dae.exe from the IngeTrazo releases (free "
-                   "software, MIT), and\n"
-                   "• the official SketchUp library (SketchUpAPI.dll) from "
-                   "the public release of Blender's 'SketchUp Importer' "
-                   "add-on (a third-party project).\n\n"
-                   "Everything lands in ~/.local/share/skp2dae/."),
-                QMessageBox.Yes | QMessageBox.No)
-            if answer != QMessageBox.Yes:
-                return False
-            if not self._install_skp_converter():
-                return False
-            command = self._find_skp_converter()
-            if command is None:
-                return False
-        import shutil
-        import subprocess
-        import tempfile
-        import unicodedata
-        from PySide6.QtCore import Qt as _Qt
-        from PySide6.QtWidgets import QApplication
-
-        # Wine re-encodes argv to the Windows ANSI codepage, so an accented
-        # path ("Imágenes", "ñandú.skp") reaches the converter — and the
-        # SDK's UTF-8 file API — mangled. Sidestep it: convert through a
-        # temporary ASCII path and move the results next to the original.
-        # The texture folder keeps the .dae's stem (its internal refs are
-        # relative to that name), so accented stems come back sanitized.
-        ascii_stem = unicodedata.normalize("NFKD", skp.stem)
-        ascii_stem = ascii_stem.encode("ascii", "ignore").decode() or "modelo"
-        needs_tmp = any(ord(c) > 127 for c in str(skp))
-        tmpdir: Path | None = None
-        if needs_tmp:
-            tmpdir = Path(tempfile.mkdtemp(prefix="skp2dae-"))
-            work_skp = tmpdir / (ascii_stem + ".skp")
-            shutil.copy(skp, work_skp)
-        else:
-            work_skp = skp
-        work_dae = work_skp.with_suffix(".dae")
-
-        self.statusBar().showMessage(
-            tr("Converting {name}… (skp2dae)", name=skp.name))
-        QApplication.setOverrideCursor(_Qt.WaitCursor)
-        try:
-            result = subprocess.run(
-                command + [str(work_skp), str(work_dae)],
-                capture_output=True, timeout=600)
-        except Exception as exc:  # noqa: BLE001
-            QApplication.restoreOverrideCursor()
-            QMessageBox.critical(self, tr("Import SKP failed"), str(exc))
-            return False
-        QApplication.restoreOverrideCursor()
-        # The converter (under Wine) may emit codepage bytes — never assume
-        # UTF-8 when surfacing its output.
-        detail = (result.stderr or result.stdout or b"").decode(
-            "utf-8", errors="replace").strip()[-800:]
-        if result.returncode != 0 or not work_dae.exists():
-            QMessageBox.critical(
-                self, tr("Import SKP failed"),
-                detail or tr("The converter produced no output."))
-            return False
-        dae = work_dae
-        if tmpdir is not None:
-            dae = skp.parent / work_dae.name
-            shutil.move(str(work_dae), dae)
-            tex_dir = tmpdir / ascii_stem
-            if tex_dir.is_dir():
-                target = skp.parent / ascii_stem
-                if target.exists():
-                    shutil.rmtree(target)
-                shutil.move(str(tex_dir), target)
-            shutil.rmtree(tmpdir, ignore_errors=True)
-        self._import_dae_path(dae)
-        self._import_name = skp.name
-        self._update_title()
-        return True
-
-    # URL del exe limpio (solo codigo MIT: bindea la DLL en runtime, no
-    # contiene nada de Trimble) — se publica como asset de los releases.
-    _SKP2DAE_EXE_URL = ("https://github.com/ingelibre/ingetrazo/releases/"
-                        "latest/download/skp2dae.exe")
-    #: Repo público del add-on de Blender cuyo release trae SketchUpAPI.dll.
-    _SKP_ADDON_REPO = "RedHaloStudio/Sketchup_Importer"
-
-    @staticmethod
-    def _download_bytes(url: str, timeout: int = 120) -> bytes:
-        import urllib.request
-        req = urllib.request.Request(url, headers={"User-Agent": "IngeTrazo"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.read()
-
-    @staticmethod
-    def _extract_skp_dlls(zip_bytes: bytes, dest: Path) -> list[str]:
-        """Pull the SketchUp runtime DLLs out of the add-on zip into ``dest``.
-        Returns the names extracted (empty when none found)."""
-        import io
-        import zipfile
-        wanted = ("SketchUpAPI.dll", "SketchUpCommonPreferences.dll")
-        got = []
-        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-            for entry in zf.namelist():
-                base = entry.rsplit("/", 1)[-1]
-                if base in wanted and base not in got:
-                    (dest / base).write_bytes(zf.read(entry))
-                    got.append(base)
-        return got
-
-    def _install_skp_converter(self) -> bool:
-        """One-click install of the skp2dae converter for non-technical
-        users: the MIT exe comes from OUR releases; the proprietary SketchUp
-        DLL is fetched by the USER'S machine from the Blender add-on's own
-        public release (never hosted or redistributed by us)."""
-        import json as _json
-        from PySide6.QtCore import Qt as _Qt
-        from PySide6.QtWidgets import QApplication
-        dest = Path.home() / ".local" / "share" / "skp2dae"
-        dest.mkdir(parents=True, exist_ok=True)
-        QApplication.setOverrideCursor(_Qt.WaitCursor)
-        try:
-            self.statusBar().showMessage(tr("Downloading skp2dae…"))
-            QApplication.processEvents()
-            (dest / "skp2dae.exe").write_bytes(
-                self._download_bytes(self._SKP2DAE_EXE_URL))
-
-            self.statusBar().showMessage(
-                tr("Downloading the SketchUp library (Blender add-on)…"))
-            QApplication.processEvents()
-            api = (f"https://api.github.com/repos/{self._SKP_ADDON_REPO}"
-                   "/releases/latest")
-            release = _json.loads(self._download_bytes(api).decode("utf-8"))
-            asset_url = next(
-                a["browser_download_url"] for a in release.get("assets", [])
-                if a["name"].lower().endswith(".zip"))
-            got = self._extract_skp_dlls(
-                self._download_bytes(asset_url, timeout=300), dest)
-            if "SketchUpAPI.dll" not in got:
-                raise RuntimeError(
-                    tr("The add-on zip did not contain SketchUpAPI.dll"))
-        except Exception as exc:  # noqa: BLE001
-            QApplication.restoreOverrideCursor()
-            QMessageBox.critical(self, tr("Import SKP"),
-                                 tr("Automatic install failed: {err}",
-                                    err=str(exc)))
-            return False
-        QApplication.restoreOverrideCursor()
-        import shutil as _shutil
-        import sys as _sys
-        if _sys.platform != "win32" and _shutil.which("wine") is None:
-            QMessageBox.information(
-                self, tr("Import SKP"),
-                tr("Converter installed, but Wine is missing. Install it "
-                   "with your package manager (e.g. sudo apt install wine) "
-                   "and try again."))
-            return False
-        self.statusBar().showMessage(tr("skp2dae converter installed"), 4000)
-        return True
+        # No converter behind this: IngeTrazo reads .skp with its own
+        # reader only (the external converter that loaded Trimble's DLL was
+        # removed after Trimble's copyright notice of 2026-09-28).
+        QMessageBox.warning(
+            self, tr("Import SKP"),
+            tr("IngeTrazo could not read {name} with its built-in SketchUp "
+               "reader.\n\nOpen it in SketchUp and export it as COLLADA "
+               "(.dae) or OBJ, then import that file here.", name=skp.name))
+        return False
 
     def _on_import_skp(self) -> None:
         path_str, _ = file_dialogs.getOpenFileName(
@@ -4933,7 +5132,11 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(
                 self, tr("Import DWG failed"),
                 tr("The LibreDWG converter (dwg2dxf) is not available in "
-                   "this installation."))
+                   "this installation.") + "\n\n" +
+                tr("To work on the drawing anyway: save it as DXF from your "
+                   "CAD program (or convert it with a free DWG → DXF "
+                   "converter such as ODA File Converter), then File ▸ "
+                   "Import ▸ AutoCAD DXF."))
             return False
         dlg, cb = self._import_progress(tr("Importing {name}…",
                                            name=path.name))
@@ -5321,11 +5524,6 @@ class MainWindow(QMainWindow):
     def _on_export_obj(self) -> None:
         self._export("OBJ", "obj", tr("Wavefront OBJ (*.obj)"), obj_format.save_obj)
 
-    def _on_export_skp(self) -> None:
-        """Native SketchUp export — opens directly in SketchUp 2017+."""
-        self._export("SketchUp", "skp", tr("SketchUp (*.skp)"),
-                     skp_out_format.save_skp)
-
     def _on_export_glb(self) -> None:
         """Single-file 3D export (geometry + materials + textures embedded).
         Best format for 'send it so a colleague can view it' — no texture folder
@@ -5444,6 +5642,15 @@ class MainWindow(QMainWindow):
             QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
             self)
         box.setOption(QMessageBox.Option.DontUseNativeDialog, True)
+        # main.py installs a Qt translator that already names the standard
+        # buttons in the app language, but only when the qtbase_<lang>.qm
+        # file is found, and «Don't Save» is worded differently per
+        # platform: name all three through our own catalog so they read
+        # the same everywhere.
+        for button, text in ((QMessageBox.Save, "Save"),
+                             (QMessageBox.Discard, "Don't Save"),
+                             (QMessageBox.Cancel, "Cancel")):
+            box.button(button).setText(tr(text))
         box.setDefaultButton(QMessageBox.Save)
         answer = box.exec()
         if answer == QMessageBox.Save:
@@ -5451,13 +5658,35 @@ class MainWindow(QMainWindow):
             return not self._is_dirty()
         return answer == QMessageBox.Discard
 
+    # "Saved" is recorded as the scene version at that moment (as every
+    # caller and test has always written it) and kept as the CONTENT version:
+    # a later selection bumps ``scene.version`` for the GL caches but not
+    # ``content_version``, so a click after Ctrl+S no longer asks to save
+    # again (issue #159). -1 stays "never saved".
+    @property
+    def _saved_version(self) -> int:
+        return self._saved_content
+
+    @_saved_version.setter
+    def _saved_version(self, version: int) -> None:
+        viewport = getattr(self, "viewport", None)
+        scene = getattr(viewport, "scene", None)
+        view = getattr(scene, "view_version", 0) if version >= 0 else 0
+        self._saved_content = version - view
+
     def _is_dirty(self) -> bool:
-        return self.viewport.scene.version != self._saved_version
+        if self._workspace is not None:
+            return bool(self._workspace.is_dirty())
+        return self.viewport.scene.content_version != self._saved_content
 
     def _on_scene_version_changed(self, _version: int) -> None:
         self._update_title()
 
     def _update_title(self) -> None:
+        if self._workspace is not None:
+            marker = " *" if self._is_dirty() else ""
+            self.setWindowTitle(f"IngeTrazo — {self._workspace.title()}{marker}")
+            return
         if self._current_path is not None:
             name = self._current_path.name
         elif self._import_name:
@@ -5470,6 +5699,10 @@ class MainWindow(QMainWindow):
 
     # ---- Window lifecycle ---------------------------------------------------
     def closeEvent(self, event) -> None:
+        # A workspace first (its own unsaved job), then the model it parked.
+        if self._workspace is not None and not self.leave_workspace():
+            event.ignore()
+            return
         if not self._confirm_discard(tr("Quit IngeTrazo?")):
             event.ignore()
             return

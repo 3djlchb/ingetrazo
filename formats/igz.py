@@ -462,12 +462,49 @@ def save_scene(scene, path: Path) -> dict:
         "app_version": __version__,
         "scene": payload,
     }
-    doc = json.dumps(data, indent=2)
+    try:
+        doc = json.dumps(data, indent=2, allow_nan=False)
+    except ValueError:
+        # A NaN or an infinity in a coordinate (#185). Python would write
+        # it as the bare word NaN — not JSON, and a broken shape for good.
+        # Refuse, and leave the file on disk as it was.
+        raise NonFiniteDocumentError(_non_finite_where(payload)) from None
     if blobs:
         _write_container(path, doc, blobs)
     else:
         _write_atomic(path, doc.encode("utf-8"))
     return {"embedded": len(blobs), "missing": missing}
+
+
+class NonFiniteDocumentError(ValueError):
+    """The document holds a coordinate that is not a number; it is not
+    written, so the file on disk keeps its last good version."""
+
+    def __init__(self, where: str) -> None:
+        from core.i18n import tr
+        self.where = where
+        super().__init__(tr(
+            "The model has a point with invalid coordinates (not a number), "
+            "so it was not saved and the file on disk keeps its last good "
+            "version. Undo the last step and save again. Where: {where}",
+            where=where))
+
+
+def _non_finite_where(node, path: str = "scene") -> str:
+    """The first place in the payload holding a NaN or an infinity."""
+    import math as _math
+    stack = [(node, path)]
+    while stack:
+        cur, here = stack.pop()
+        if isinstance(cur, float) and not _math.isfinite(cur):
+            return here
+        if isinstance(cur, dict):
+            stack.extend((v, f"{here} › {k}") for k, v in
+                         reversed(list(cur.items())))
+        elif isinstance(cur, (list, tuple)):
+            stack.extend((v, f"{here}[{i}]") for i, v in
+                         reversed(list(enumerate(cur))))
+    return path
 
 
 def _write_atomic(path: Path, data: bytes) -> None:

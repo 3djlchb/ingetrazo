@@ -63,12 +63,20 @@ Félix Riestra  (github.com/felixriestra)
     Components that come apart (pull request #96): OBJ files keep their
     parts, Split into Pieces, the Parts tray with its cut list, and the
     exploded view — furniture and joinery taken to pieces.
+    Extension API 2 (pull request #141): several named panels per
+    extension, overlays that project world points, file types an extension
+    opens itself, and workspaces that stand in for the model.
 
-Gabriel Rodríguez  (github.com/canalsecuario-blip)
+Gabriel Rodríguez Arregin  (github.com/canalsecuario-blip)
     The Back color in Styles (pull request #99): SketchUp's Front/Back
     colour pair, the tint of faces seen from behind.
     Edit ▸ Invert Selection (pull request #113), SketchUp's Ctrl+Shift+I,
     leaving out what is hidden or locked.
+    Edit ▸ Repeat Last Command (Shift+R): the last tool or one-shot
+    command comes back on the current selection.
+    Command search (pull request #168): F3 runs any command by name, as in
+    Blender — initials, typos and both languages, in the model and the
+    sheet composer.
 
 José Castro Basso — FADU–UDELAR, Montevideo  (github.com/castrobasso)
     Architect and teacher of architectural representation. Two-point
@@ -86,6 +94,10 @@ Sherod Taylor  (github.com/sherodtaylor)
 liuandy  (github.com/liujvnes)
     Simplified Chinese translation of the interface (issue #123, some
     2 080 strings): IngeTrazo's fourth language.
+
+deedend  (github.com/deedend)
+    Italian translation of the interface (pull request #182, some
+    2 110 strings): IngeTrazo's fifth language.
 
 Carlos Martins  (github.com/fafecm)
     Bug reports with screen recordings that made each one reproducible:

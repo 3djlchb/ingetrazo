@@ -25,6 +25,7 @@ from core.i18n import tr
 from core.mesh import Edge, Face
 from core.offset import offset_chain, offset_regions
 from core.topology import max_offset_distance, offset_loop
+from core.units import fmt_len
 from tools.base import Tool, ToolContext
 
 
@@ -292,8 +293,8 @@ class OffsetTool(Tool):
         off = self._offset_points()
         if off is None:
             viewport.flash_status(tr(
-                "{d:.3g} m collapses this run — try a smaller offset",
-                d=abs(self.distance)), 5000)
+                "{d} collapses this run — try a smaller offset",
+                d=fmt_len(abs(self.distance))), 5000)
             self._reset()
             viewport.update()
             return
@@ -313,12 +314,13 @@ class OffsetTool(Tool):
         side = tr("inward") if sign > 0 else tr("outward")
         if room <= 1e-4:
             viewport.flash_status(tr(
-                "{d:.3g} m closes this face — it takes no offset {side}",
-                d=abs(self.distance), side=side), 5000)
+                "{d} closes this face — it takes no offset {side}",
+                d=fmt_len(abs(self.distance)), side=side), 5000)
         else:
             viewport.flash_status(tr(
-                "{d:.3g} m closes this face — {side} it takes at most "
-                "{max:.3g} m", d=abs(self.distance), side=side, max=room),
+                "{d} closes this face — {side} it takes at most "
+                "{max}", d=fmt_len(abs(self.distance)), side=side,
+                max=fmt_len(room)),
                 5000)
         self._reset()
         viewport.update()

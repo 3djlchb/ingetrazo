@@ -33,6 +33,27 @@ jobs:
           grep -vE '^\s*pytest\b' requirements.txt > reqs.txt
           python -m pip install -r reqs.txt pyinstaller
 
+      # DWG on macOS (#101): LibreDWG publishes no Mac binaries, so build
+      # dwg2dxf from the release tarball (hash from its dist.sha256, the
+      # same release the Windows build takes). Static libredwg; only the
+      # system's libiconv and libSystem at run time.
+      - name: DWG converter (LibreDWG, from source)
+        run: |
+          set -e
+          V=0.14.8597
+          SHA=af2646681858a78d756cfb9e0eeb6901f61be3d09ae8f56a98e94b1490dec4ed
+          cd "$RUNNER_TEMP"
+          curl -fsSL -O "https://github.com/LibreDWG/libredwg/releases/download/$V/libredwg-$V.tar.xz"
+          echo "$SHA  libredwg-$V.tar.xz" | shasum -a 256 -c -
+          tar xf "libredwg-$V.tar.xz"
+          cd "libredwg-$V"
+          ./configure --disable-shared --disable-bindings --disable-python >/dev/null
+          make -j"$(sysctl -n hw.ncpu)" >/dev/null
+          mkdir -p "$GITHUB_WORKSPACE/vendor/libredwg/bin"
+          install -m 0755 programs/dwg2dxf "$GITHUB_WORKSPACE/vendor/libredwg/bin/dwg2dxf"
+          otool -L "$GITHUB_WORKSPACE/vendor/libredwg/bin/dwg2dxf"
+          "$GITHUB_WORKSPACE/vendor/libredwg/bin/dwg2dxf" --version || true
+
       - name: Build IngeTrazo.app and the .dmg
         env:
           PYTHON: python

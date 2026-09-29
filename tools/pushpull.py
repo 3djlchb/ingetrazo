@@ -848,8 +848,8 @@ class PushPullTool(Tool):
                 # (Marco, 2026-09-10: «quiero hacer push para abajo y no me
                 # deja»; the limit was 2 cm of material under one corner).
                 viewport.flash_status(
-                    tr("Push limited to {value} m — deeper would leave the "
-                       "solid", value=f"{self._limit_in:.2f}"), 5000)
+                    tr("Push limited to {value} — deeper would leave the "
+                       "solid", value=fmt_len(self._limit_in)), 5000)
 
     def _infer_reference_distance(self, ctx: ToolContext):
         """Distance making the moved face level with the model geometry under the
@@ -916,10 +916,33 @@ class PushPullTool(Tool):
                     best = (dd, QVector3D.dotProduct(
                         p - self._anchor, self._normal),
                         QVector3D(p), "vertex")
+        # Tape Measure guides (issue #165): a guide POINT is a corner like
+        # any vertex -- the nearest one on screen wins -- and a guide LINE
+        # is tried right after, like an edge. They live in ``scene.guides``,
+        # outside the mesh, so the vertex scan above never saw them.
+        guides = getattr(vp.scene, "guides", None) or []
+        for g in guides:
+            if getattr(g, "direction", None) is not None:
+                continue
+            pix = vp._world_to_pixel(g.point)
+            if pix is None:
+                continue
+            dd = (pix[0] - sx) ** 2 + (pix[1] - sy) ** 2
+            if dd <= thr * thr and (best is None or dd < best[0]):
+                best = (dd, QVector3D.dotProduct(
+                    g.point - self._anchor, self._normal),
+                    QVector3D(g.point), "guide_point")
         if best is not None:
             self._inference_point = best[2]
             self._inference_kind = best[3]
             return best[1]
+
+        line_hit = self._infer_guide_line(vp, guides, sx, sy, thr)
+        if line_hit is not None:
+            on, dist = line_hit
+            self._inference_point = on
+            self._inference_kind = "guide_line"
+            return dist
 
         # No corner nearby: the EDGE under the cursor — SketchUp's "On edge"
         # while pushing (Marco's capture, 2026-09-14: the half cylinder
@@ -969,6 +992,50 @@ class PushPullTool(Tool):
         self._inference_point = None
         self._inference_kind = None
         return None
+
+    def _infer_guide_line(self, vp, guides, sx, sy, thr):
+        """The guide LINE under the cursor, as (point on it, push distance):
+        the point of the guide nearest the cursor's ray, taken when it lands
+        within the snap threshold on screen. A guide parallel to the push
+        axis says nothing about how far to push, so it is skipped."""
+        lines = [g for g in guides if getattr(g, "direction", None) is not None]
+        to_ray = getattr(vp, "_pixel_to_ray", None)
+        if not lines or to_ray is None:
+            return None
+        origin, direction = to_ray(sx, sy)
+        if origin is None or direction is None:
+            return None
+        best = None
+        for g in lines:
+            gd = getattr(g, "direction", None)
+            if gd is None:
+                continue
+            if abs(QVector3D.dotProduct(gd, self._normal)) > 0.999:
+                continue
+            # closest points between the guide line and the cursor ray
+            w0 = g.point - origin
+            a = QVector3D.dotProduct(gd, gd)
+            b = QVector3D.dotProduct(gd, direction)
+            c = QVector3D.dotProduct(direction, direction)
+            d = QVector3D.dotProduct(gd, w0)
+            e = QVector3D.dotProduct(direction, w0)
+            den = a * c - b * b
+            if abs(den) < 1e-12:
+                continue
+            s_ = (b * e - c * d) / den
+            on = g.point + gd * s_
+            pix = vp._world_to_pixel(on)
+            if pix is None:
+                continue
+            dd = (pix[0] - sx) ** 2 + (pix[1] - sy) ** 2
+            if dd > thr * thr:
+                continue
+            dist = QVector3D.dotProduct(on - self._anchor, self._normal)
+            if abs(dist) < _MIN_EXTRUDE:
+                continue
+            if best is None or dd < best[0]:
+                best = (dd, QVector3D(on), dist)
+        return None if best is None else (best[1], best[2])
 
     @staticmethod
     def _cap_loop_positions(face) -> list[QVector3D]:
@@ -1089,8 +1156,8 @@ class PushPullTool(Tool):
             mesh=self._group.mesh if self._group is not None else None))
         if self._topped_out:
             viewport.flash_status(tr(
-                "Push stopped at {d:.2f} m: going further would break the "
-                "solid", d=abs(self.extrusion)), 4000)
+                "Push stopped at {d}: going further would break the "
+                "solid", d=fmt_len(abs(self.extrusion))), 4000)
             PushPullTool.last_distance = self.extrusion
         elif self._refused:
             # The guard rolled the push back to keep the solid watertight; tell

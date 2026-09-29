@@ -36,6 +36,11 @@ class Scene:
     mesh: Mesh = field(default_factory=Mesh)
     selection: set = field(default_factory=set)
     version: int = 0
+    #: How many of ``version``'s bumps changed only what is SHOWN -- the
+    #: selection -- and not the document. The GL caches key on ``version``
+    #: and need every bump; "unsaved changes" must not: a click on empty
+    #: space after Ctrl+S asked to save again (issue #159).
+    view_version: int = 0
     # Encapsulated chunks (own meshes), isolated from the main mesh's welding.
     groups: list = field(default_factory=list)
     # Annotation entities (static dimensions) — not geometry, drawn as overlays.
@@ -102,7 +107,8 @@ class Scene:
     units: dict = field(default_factory=lambda: {"length": "m", "precision": 2})
     #: Extensions' own document data, one JSON-safe value per extension key
     #: (``views.extension_api.ExtensionApp.document_data``). Travels in the
-    #: .igz; the core never reads it.
+    #: .igz; the core never reads it. Changed through
+    #: ``core.history.SetPluginDataCommand`` so each edit is undoable.
     plugin_data: dict = field(default_factory=dict)
     dimension_style: dict = field(default_factory=lambda: {
         "decimals": 2, "units": "m", "font_size": 9, "color": [45, 55, 75],
@@ -485,12 +491,24 @@ class Scene:
             self.selection.difference_update(edges)
         else:
             self.selection.update(edges)
-        self.version += 1
+        self.bump_view()
 
     def clear_selection(self) -> None:
         if self.selection:
             self.selection.clear()
-            self.version += 1
+            self.bump_view()
+
+    def bump_view(self) -> None:
+        """A change of what is shown, not of the document (the selection):
+        the caches keyed on ``version`` refresh, the document stays clean."""
+        self.version += 1
+        self.view_version += 1
+
+    @property
+    def content_version(self) -> int:
+        """``version`` minus the view-only bumps: what "unsaved changes"
+        compares against the version that was saved."""
+        return self.version - self.view_version
 
     def invert_selection(self) -> int:
         """SketchUp's Edit ▸ Invert Selection (Ctrl+Shift+I): select every
@@ -513,7 +531,7 @@ class Scene:
         new = [ent for ent in universe if ent not in self.selection]
         self.selection.clear()
         self.selection.update(new)
-        self.version += 1            # the GL colour caches are keyed on it
+        self.bump_view()             # the GL colour caches are keyed on it
         return len(new)
 
     def delete_selection(self) -> None:
@@ -534,7 +552,7 @@ class Scene:
                 or self.tile_layer or self.geo_paths or self.terrain
                 or self.guides or self.geo_points or self.text_labels
                 or self.saved_views or self.compositions
-                or self.image_planes):
+                or self.image_planes or self.plugin_data):
             self.mesh.clear()
             self.groups.clear()
             self.dimensions.clear()
@@ -546,6 +564,7 @@ class Scene:
             self.saved_views.clear()
             self.compositions.clear()
             self.custom_scales.clear()
+            self.plugin_data = {}
             self.selection.clear()
             from core.layers import DEFAULT_LAYER, Layer
             self.layers = [Layer(DEFAULT_LAYER)]
@@ -579,6 +598,53 @@ class Scene:
         for g, m in self.placements():
             for f in g.mesh.faces:
                 yield f, m
+
+    def selection_bounds(self) -> tuple[QVector3D, QVector3D] | tuple[None, None]:
+        """Axis-aligned bounding box of the SELECTION — what Zoom Selection
+        frames, as ``bounds()`` is what Zoom Extents frames. ``(None, None)``
+        when nothing selected has a place in space.
+
+        Loose edges and faces, whole groups (nested placements included,
+        vectorized per mesh like ``bounds()``), dimensions and reference
+        images. Not cached: it runs once per command, over the selection
+        only."""
+        import numpy as np
+        from core.group import iter_placements
+        pts: list = []
+
+        def add(p: QVector3D) -> None:
+            pts.append((p.x(), p.y(), p.z()))
+
+        for ent in self.selection:
+            if hasattr(ent, "mesh"):          # Group / component instance
+                for g, m in iter_placements(ent):
+                    verts = g.mesh.vertices
+                    if not verts:
+                        continue
+                    arr = np.array([[v.position.x(), v.position.y(),
+                                     v.position.z()] for v in verts])
+                    if m is not None:
+                        d = m.data()          # column-major
+                        rot = np.array([[d[0], d[4], d[8]],
+                                        [d[1], d[5], d[9]],
+                                        [d[2], d[6], d[10]]])
+                        arr = arr @ rot.T + np.array([d[12], d[13], d[14]])
+                    pts.append(tuple(arr.min(axis=0)))
+                    pts.append(tuple(arr.max(axis=0)))
+            elif hasattr(ent, "vertices"):    # Face
+                for v in ent.vertices:
+                    add(v)
+            elif hasattr(ent, "corners"):     # ImagePlane
+                for c in ent.corners():
+                    add(c)
+            elif hasattr(ent, "a") and hasattr(ent, "b"):    # Edge, Dimension
+                add(ent.a)
+                add(ent.b)
+        if not pts:
+            return None, None
+        arr = np.array(pts, dtype=float)
+        lo, hi = arr.min(axis=0), arr.max(axis=0)
+        return QVector3D(*lo), QVector3D(*hi)
 
     def bounds(self) -> tuple[QVector3D, QVector3D] | tuple[None, None]:
         """Axis-aligned bounding box of all geometry. ``(None, None)`` if empty.

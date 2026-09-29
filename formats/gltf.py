@@ -43,9 +43,21 @@ def _mime(name: str) -> str:
     return "image/png"
 
 
-def save_glb(scene, path) -> None:
-    """Write the scene as a binary glTF (``.glb``) to ``path``."""
-    materials_in, prims = collect_geometry(scene)
+def save_glb(scene, path, face_me=None) -> None:
+    """Write the scene as a binary glTF (``.glb``) to ``path``.
+
+    ``face_me`` turns the face-me figures toward a camera and brings them
+    along (see :func:`formats.meshexport.world_faces`); Render with Blender
+    passes its camera (#181)."""
+    # With a camera the face-me figures travel as nodes of their own, each
+    # with its feet and heading in extras: a renderer that moves the camera
+    # (Render ▸ sync with the view) turns them instead of re-exporting.
+    figures: list = []
+    if face_me is not None:
+        from formats.meshexport import collect_geometry_split
+        materials_in, prims, figures = collect_geometry_split(scene, face_me)
+    else:
+        materials_in, prims = collect_geometry(scene, face_me)
 
     buf = bytearray()
     buffer_views: list[dict] = []
@@ -73,6 +85,8 @@ def save_glb(scene, path) -> None:
 
     # ---- materials (+ embedded images) --------------------------------------
     keys = list(prims.keys())
+    for fig in figures:
+        keys += [k for k in fig["prims"] if k not in keys]
     gltf_materials: list[dict] = []
     images: list[dict] = []
     textures: list[dict] = []
@@ -81,6 +95,7 @@ def save_glb(scene, path) -> None:
     tex_for_image: dict[str, int] = {}
 
     names = export_names(materials_in)
+    used_ext: set = set()
     for key in keys:
         info = materials_in[key]
         mat: dict = {"name": names[key],
@@ -110,64 +125,107 @@ def save_glb(scene, path) -> None:
                     tex_idx = tex_for_image[str(src)] = len(textures) - 1
             if tex_idx is not None:
                 mat["pbrMetallicRoughness"]["baseColorTexture"] = {"index": tex_idx}
+                # A cut-out image (a face-me figure, leaves) stays cut out:
+                # without this its transparent texels rendered as a solid
+                # card (#181).
+                from core.texture import image_has_cutout
+                if image_has_cutout(str(src)):
+                    mat["alphaMode"] = "MASK"
+                    mat["alphaCutoff"] = 0.5
             else:  # image unreadable → fall back to white
                 mat["pbrMetallicRoughness"]["baseColorFactor"] = [1, 1, 1, 1]
         else:
             r, g, b = info["color"]
             mat["pbrMetallicRoughness"]["baseColorFactor"] = [r, g, b, 1.0]
+        # The finish (core.finish): plain glTF for every program, and the
+        # name in extras for Render with Blender's full materials.
+        finish = info.get("finish")
+        if finish:
+            from core.finish import PBR
+            rough, metal, trans, ior = PBR[finish]
+            pbr = mat["pbrMetallicRoughness"]
+            pbr["roughnessFactor"], pbr["metallicFactor"] = rough, metal
+            mat["extras"] = {"ingetrazo_finish": finish}
+            ext = {}
+            if trans:
+                ext["KHR_materials_transmission"] = {
+                    "transmissionFactor": trans}
+            if ior != 1.5:
+                ext["KHR_materials_ior"] = {"ior": ior}
+            if ext:
+                mat["extensions"] = ext
+                used_ext.update(ext)
+        op = info.get("opacity")
+        if op is not None:                     # glass and the like
+            factor = mat["pbrMetallicRoughness"].setdefault(
+                "baseColorFactor", [1.0, 1.0, 1.0, 1.0])
+            factor[3] = float(op)
+            mat["alphaMode"] = "BLEND"
+            mat.pop("alphaCutoff", None)
         mat_index[key] = len(gltf_materials)
         gltf_materials.append(mat)
 
     # ---- geometry: one primitive per material -------------------------------
-    primitives: list[dict] = []
-    for key in keys:
-        tris = prims[key]
-        textured = key[0] == "tex"
-        positions: list[tuple] = []
-        normals: list[tuple] = []
-        uvs: list[tuple] = []
-        indices: list[int] = []
-        vindex: dict[tuple, int] = {}
-        for normal, verts in tris:
-            nn = _yup(normal)
-            for pos, uv in verts:
-                p = _yup(pos)
-                uvk = (round(uv[0], 6), round(uv[1], 6)) if textured else (0.0, 0.0)
-                vkey = (round(p[0], 6), round(p[1], 6), round(p[2], 6),
-                        round(nn[0], 4), round(nn[1], 4), round(nn[2], 4), uvk)
-                idx = vindex.get(vkey)
-                if idx is None:
-                    idx = vindex[vkey] = len(positions)
-                    positions.append(p)
-                    normals.append(nn)
-                    if textured:
-                        # glTF texcoord origin is top-left; OBJ/COLLADA UVs are
-                        # bottom-left, so flip V.
-                        uvs.append((uv[0], 1.0 - uv[1]))
-                indices.append(idx)
-        if not positions:
-            continue
+    def _primitives(source: dict) -> list[dict]:
+        primitives: list[dict] = []
+        for key in keys:
+            if key not in source:
+                continue
+            tris = source[key]
+            textured = key[0] == "tex"
+            positions: list[tuple] = []
+            normals: list[tuple] = []
+            uvs: list[tuple] = []
+            indices: list[int] = []
+            vindex: dict[tuple, int] = {}
+            for normal, verts in tris:
+                nn = _yup(normal)
+                for pos, uv in verts:
+                    p = _yup(pos)
+                    uvk = (round(uv[0], 6), round(uv[1], 6)) if textured else (0.0, 0.0)
+                    vkey = (round(p[0], 6), round(p[1], 6), round(p[2], 6),
+                            round(nn[0], 4), round(nn[1], 4), round(nn[2], 4), uvk)
+                    idx = vindex.get(vkey)
+                    if idx is None:
+                        idx = vindex[vkey] = len(positions)
+                        positions.append(p)
+                        normals.append(nn)
+                        if textured:
+                            # glTF texcoord origin is top-left; OBJ/COLLADA UVs are
+                            # bottom-left, so flip V.
+                            uvs.append((uv[0], 1.0 - uv[1]))
+                    indices.append(idx)
+            if not positions:
+                continue
 
-        pos_bytes = b"".join(struct.pack("<3f", *p) for p in positions)
-        xs = [p[0] for p in positions]
-        ys = [p[1] for p in positions]
-        zs = [p[2] for p in positions]
-        pos_acc = _accessor(pos_bytes, _F32, len(positions), "VEC3",
-                            _ARRAY_BUFFER,
-                            [min(xs), min(ys), min(zs)],
-                            [max(xs), max(ys), max(zs)])
-        nrm_bytes = b"".join(struct.pack("<3f", *n) for n in normals)
-        nrm_acc = _accessor(nrm_bytes, _F32, len(normals), "VEC3", _ARRAY_BUFFER)
-        attrs = {"POSITION": pos_acc, "NORMAL": nrm_acc}
-        if textured and uvs:
-            uv_bytes = b"".join(struct.pack("<2f", *t) for t in uvs)
-            attrs["TEXCOORD_0"] = _accessor(uv_bytes, _F32, len(uvs), "VEC2",
-                                            _ARRAY_BUFFER)
-        idx_bytes = struct.pack(f"<{len(indices)}I", *indices)
-        idx_acc = _accessor(idx_bytes, _U32, len(indices), "SCALAR",
-                            _ELEMENT_ARRAY_BUFFER)
-        primitives.append({"attributes": attrs, "indices": idx_acc,
-                           "material": mat_index[key], "mode": 4})
+            pos_bytes = b"".join(struct.pack("<3f", *p) for p in positions)
+            xs = [p[0] for p in positions]
+            ys = [p[1] for p in positions]
+            zs = [p[2] for p in positions]
+            pos_acc = _accessor(pos_bytes, _F32, len(positions), "VEC3",
+                                _ARRAY_BUFFER,
+                                [min(xs), min(ys), min(zs)],
+                                [max(xs), max(ys), max(zs)])
+            nrm_bytes = b"".join(struct.pack("<3f", *n) for n in normals)
+            nrm_acc = _accessor(nrm_bytes, _F32, len(normals), "VEC3", _ARRAY_BUFFER)
+            attrs = {"POSITION": pos_acc, "NORMAL": nrm_acc}
+            if textured and uvs:
+                uv_bytes = b"".join(struct.pack("<2f", *t) for t in uvs)
+                attrs["TEXCOORD_0"] = _accessor(uv_bytes, _F32, len(uvs), "VEC2",
+                                                _ARRAY_BUFFER)
+            idx_bytes = struct.pack(f"<{len(indices)}I", *indices)
+            idx_acc = _accessor(idx_bytes, _U32, len(indices), "SCALAR",
+                                _ELEMENT_ARRAY_BUFFER)
+            primitives.append({"attributes": attrs, "indices": idx_acc,
+                               "material": mat_index[key], "mode": 4})
+        return primitives
+
+    primitives = _primitives(prims)
+    figure_meshes = []
+    for fig in figures:
+        fp = _primitives(fig["prims"])
+        if fp:
+            figure_meshes.append((fp, fig))
 
     # ---- assemble the glTF JSON ---------------------------------------------
     extras: dict = {"generator": "IngeTrazo"}
@@ -179,20 +237,30 @@ def save_glb(scene, path) -> None:
     gltf: dict = {
         "asset": {"version": "2.0", "generator": "IngeTrazo", "extras": extras},
     }
+    meshes: list[dict] = []
+    nodes: list[dict] = []
     if primitives:
-        gltf["meshes"] = [{"name": "IngeTrazo", "primitives": primitives}]
-        gltf["nodes"] = [{"mesh": 0, "name": "IngeTrazo"}]
-        gltf["scenes"] = [{"nodes": [0]}]
-        gltf["scene"] = 0
-    else:
-        gltf["scenes"] = [{"nodes": []}]
-        gltf["scene"] = 0
+        meshes.append({"name": "IngeTrazo", "primitives": primitives})
+        nodes.append({"mesh": 0, "name": "IngeTrazo"})
+    for i, (fp, fig) in enumerate(figure_meshes, 1):
+        feet = fig["feet"]
+        meshes.append({"name": f"Figure {i}", "primitives": fp})
+        nodes.append({"mesh": len(meshes) - 1, "name": f"Figure {i}",
+                      "extras": {"ingetrazo_faceme": [
+                          feet.x(), feet.y(), feet.z(), fig["yaw"]]}})
+    if meshes:
+        gltf["meshes"] = meshes
+        gltf["nodes"] = nodes
+    gltf["scenes"] = [{"nodes": list(range(len(nodes)))}]
+    gltf["scene"] = 0
     if accessors:
         gltf["accessors"] = accessors
         gltf["bufferViews"] = buffer_views
         gltf["buffers"] = [{"byteLength": len(buf)}]
     if gltf_materials:
         gltf["materials"] = gltf_materials
+    if used_ext:
+        gltf["extensionsUsed"] = sorted(used_ext)
     if images:
         gltf["images"] = images
         gltf["textures"] = textures

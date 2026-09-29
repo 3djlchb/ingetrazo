@@ -202,7 +202,53 @@ class OrbitCamera:
             math.radians(-89.0),
         )
 
-    def pan(self, dx_pixels: float, dy_pixels: float, viewport_h: int) -> None:
+    def orbit_about(self, pivot: QVector3D, dx_pixels: float,
+                    dy_pixels: float, viewport_h: int) -> None:
+        """:meth:`orbit` around ``pivot`` instead of the target (#164).
+
+        Same drag convention and the same yaw/pitch change, but the whole
+        camera (eye AND target) turns rigidly about ``pivot``: the model
+        point the gesture started on stays where it was on screen, instead
+        of the view swinging around the target -- which, on a model far
+        from the origin, was a point nowhere near what you were looking at.
+        The yaw turn is about the world vertical through the pivot, the
+        pitch turn about the view's horizontal axis, so the horizon stays
+        level (no roll) and the distance to the target never changes.
+        """
+        from PySide6.QtGui import QQuaternion
+
+        old_yaw, old_pitch = self.yaw, self.pitch
+        self.orbit(dx_pixels, dy_pixels, viewport_h)     # the angles, clamped
+        d_yaw = self.yaw - old_yaw
+        d_pitch = self.pitch - old_pitch
+        if abs(d_yaw) < 1e-12 and abs(d_pitch) < 1e-12:
+            return
+        z = QVector3D(0.0, 0.0, 1.0)
+        rot_yaw = QQuaternion.fromAxisAndAngle(z, math.degrees(d_yaw))
+        # the eye's direction from the target after the yaw turn; raising
+        # its elevation is a turn about (offset x Z), right-handed
+        cp = math.cos(old_pitch)
+        offset = QVector3D(cp * math.cos(self.yaw), cp * math.sin(self.yaw),
+                           math.sin(old_pitch))
+        axis = QVector3D.crossProduct(offset, z)
+        if axis.length() < 1e-9:
+            rot = rot_yaw
+        else:
+            rot = QQuaternion.fromAxisAndAngle(
+                axis.normalized(), math.degrees(d_pitch)) * rot_yaw
+        self.target = pivot + rot.rotatedVector(self.target - pivot)
+
+    def pan(self, dx_pixels: float, dy_pixels: float, viewport_h: int,
+            depth: float | None = None) -> None:
+        """Slide the view by a drag of ``(dx, dy)`` pixels.
+
+        ``depth`` is how far in front of the eye the point grabbed under
+        the cursor lies: in perspective, a pixel spans more the deeper it
+        is, so moving by that depth keeps the grabbed point under the
+        cursor, as SketchUp does. Without it the pan used the distance to
+        the orbit target, which zooming in shrinks to 2 cm: at full zoom a
+        wall metres away barely moved (Alejandro Limón, #184). Parallel
+        views scale the same at every depth and ignore it."""
         cp = math.cos(self.pitch)
         sp = math.sin(self.pitch)
         cy = math.cos(self.yaw)
@@ -213,9 +259,13 @@ class OrbitCamera:
         forward = QVector3D(-cp * cy, -cp * sy, -sp)
         right = QVector3D.crossProduct(forward, self.up_vector()).normalized()
         screen_up = QVector3D.crossProduct(right, forward).normalized()
+        span = self.distance
+        if (self.perspective and depth is not None and math.isfinite(depth)
+                and depth > 1e-6):
+            span = depth
         world_per_pixel = (
             2.0
-            * self.distance
+            * span
             * math.tan(math.radians(self.fov_deg) / 2.0)
             / max(viewport_h, 1)
         )

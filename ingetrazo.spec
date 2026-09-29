@@ -29,6 +29,8 @@ ROOT = Path(SPECPATH).resolve()
 datas = [
     ('resources/shaders/*.vert',   'resources/shaders'),
     ('resources/shaders/*.frag',   'resources/shaders'),
+    # Render with Blender (#181): the script Blender runs on the job.
+    ('resources/blender/*.py',     'resources/blender'),
     ('resources/icons/*.png',      'resources/icons'),
     ('resources/icons/*.ico',      'resources/icons'),
     ('resources/icons/mimetypes/*.ico', 'resources/icons/mimetypes'),
@@ -73,13 +75,24 @@ for opt_src, opt_dst in [
     if (ROOT / opt_src).is_dir():
         datas.append((opt_src, opt_dst))
 
-# The DWG satellite (LibreDWG dwg2dxf, see vendor/libredwg/SOURCES.md):
-# Linux-only ELF, found by formats/dwg_bridge.py at vendor/libredwg/bin
-# inside the bundle. The Windows build skips it — DWG on Windows stays a
-# documented gap until a dwg2dxf.exe exists.
+# The DWG satellite (LibreDWG dwg2dxf, see vendor/libredwg/SOURCES.md),
+# found by formats/dwg_bridge.py at vendor/libredwg/bin inside the bundle
+# (#101). Linux: the ELF in git. Windows: dwg2dxf.exe and its two DLLs,
+# which build-windows.yml fetches from LibreDWG's own win64 release.
+# macOS: built from the release tarball by release-macos.yml. A platform
+# whose files are not there builds without DWG, and --check says so.
 import sys as _sys
-if _sys.platform.startswith("linux"):
-    datas.append(('vendor/libredwg/bin/dwg2dxf', 'vendor/libredwg/bin'))
+_DWG_FILES = {
+    "linux": ["dwg2dxf"],
+    "win32": ["dwg2dxf.exe", "libredwg-0.dll", "libiconv-2.dll"],
+    "darwin": ["dwg2dxf"],
+}
+for _plat, _names in _DWG_FILES.items():
+    if _sys.platform.startswith(_plat):
+        for _n in _names:
+            if (ROOT / "vendor/libredwg/bin" / _n).is_file():
+                datas.append((f"vendor/libredwg/bin/{_n}", "vendor/libredwg/bin"))
+        datas.append(("vendor/libredwg/SOURCES.md", "vendor/libredwg"))
 
 # ── Hidden imports ───────────────────────────────────────────────────────────
 hiddenimports = [
@@ -115,6 +128,9 @@ hiddenimports += [
     # probing the API, which is the very waste it exists to stop.
     'core.ai_recipes',
     'core.bim',
+    # Render with Blender (#181): the plugin's logic and the GLB it sends.
+    'core.render_blender',
+    'formats.gltf',
     'tools.place_group',
     'tools.paste',
     'georef.points',
@@ -148,7 +164,13 @@ hiddenimports += [
 # 0.4.1). The Flatpak was fine because it ships the whole site-packages.
 from PyInstaller.utils.hooks import collect_data_files
 hiddenimports += collect_submodules('openskp')
-datas += collect_data_files('openskp')
+# ...except _scaffold/blank_v17.skp: a blank document written by Trimble's
+# SketchUp SDK (openskp's writer builds its files on top of it). IngeTrazo
+# does not distribute it since Trimble's copyright notice of 2026-09-28,
+# and has no SketchUp export without it; main.py --check fails a frozen
+# bundle that still carries it.
+datas += [(src, dst) for src, dst in collect_data_files('openskp')
+          if '_scaffold' not in src.replace('\\', '/')]
 # openskp 1.3.0 triangulates with mapbox_earcut instead of Shapely, so the
 # reader now pulls a NATIVE extension (_core*.so) that did not exist in the
 # dependency tree before. ``import openskp`` fails outright without it, so
@@ -244,6 +266,16 @@ if sys.platform.startswith('linux'):
                   if Path(b[0]).name not in _HOST_ONLY]
     print('spec: dropped %d bundled X libraries (issue #6)'
           % (_before - len(a.binaries)))
+
+# The DWG converter's DLLs live beside dwg2dxf.exe in vendor/libredwg/bin,
+# where Windows looks for them when the .exe starts. PyInstaller also
+# collects them into the bundle's root as dependencies of that .exe: a
+# second copy of 31 MB nobody loads (#101).
+if sys.platform == 'win32':
+    _DWG_DLLS = {'libredwg-0.dll', 'libiconv-2.dll'}
+    a.binaries = [b for b in a.binaries
+                  if not (Path(b[0]).name.lower() in _DWG_DLLS
+                          and Path(b[0]).parent == Path('.'))]
 
 pyz = PYZ(a.pure, a.zipped_data)
 

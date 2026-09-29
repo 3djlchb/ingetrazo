@@ -145,7 +145,7 @@ def _call(name: str, args: dict) -> dict:
     except OSError as exc:
         return _tool_result(
             "Cannot reach IngeTrazo's AI bridge on 127.0.0.1:%d (%s). "
-            "In IngeTrazo: Extensiones > AI Bridge (MCP) to start it."
+            "In IngeTrazo: the AI tab of the side tray > Start bridge (or Extensions > AI Bridge (MCP))."
             % (PORT, exc), is_error=True)
     if not reply.get("ok"):
         return _tool_result(str(reply.get("error")), is_error=True)

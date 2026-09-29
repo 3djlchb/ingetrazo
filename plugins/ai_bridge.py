@@ -3,8 +3,9 @@
 """AI Bridge plugin — let an AI coding agent drive the live document (MCP).
 
 The realisation of invariant #5 (AI-native): the agent generates RECIPES of
-actions over the deterministic engine, never raw meshes. Extensiones ▸
-"AI Bridge (MCP)" toggles a localhost-only TCP server; the companion
+actions over the deterministic engine, never raw meshes. The «AI» tab of
+the side tray (section "AI bridge (MCP)", or Extensions ▸ AI Bridge (MCP))
+starts a localhost-only TCP server; the companion
 ``scripts/ingetrazo_mcp.py`` bridges it to Claude Code / Claude Desktop as
 an MCP server. The same pattern as sketchup-mcp (a TCP server inside the
 app + an MCP process outside), with three legs up on SketchUp's:
@@ -35,9 +36,11 @@ import threading
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtWidgets import (QHBoxLayout, QLabel, QPlainTextEdit,
+                               QPushButton, QVBoxLayout, QWidget)
 
 from core.i18n import tr
-from tools.base import Tool
+from views.fold_section import FoldSection, narrow
 
 DEFAULT_PORT = 4763
 
@@ -297,53 +300,119 @@ def connect_instructions(port: int, platform: str | None = None, **kw) -> str:
     )
 
 
-class AIBridgeTool(Tool):
-    """Extensions-menu entry: toggle the localhost bridge on/off."""
-    name = "AI Bridge (MCP)"
-    uses_snap = False
+def _bridge_of(viewport) -> _Bridge:
+    window = viewport.window()
+    bridge = getattr(window, "_ai_bridge", None)
+    if bridge is None:
+        bridge = _Bridge(viewport)
+        window._ai_bridge = bridge
+    return bridge
 
-    def on_activate(self, viewport) -> None:
-        window = viewport.window()
-        bridge = getattr(window, "_ai_bridge", None)
-        if bridge is None:
-            bridge = _Bridge(viewport)
-            window._ai_bridge = bridge
+
+class BridgeSection(QWidget):
+    """The bridge's part of the «AI» tab: on/off, where it listens, and
+    the exact lines to paste into the MCP client — the user who reached
+    this is rarely the one who knows them by heart."""
+
+    def __init__(self, viewport, parent=None) -> None:
+        super().__init__(parent)
+        self._viewport = viewport
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(4, 0, 4, 4)
+        self.section = FoldSection(tr("AI bridge (MCP)"), "ia/open_bridge",
+                                   default_open=False)
+        lay.addWidget(self.section)
+        body = QVBoxLayout(self.section.body)
+        self._status = QLabel()
+        self._status.setWordWrap(True)
+        body.addWidget(self._status)
+        row = QHBoxLayout()
+        self._toggle = QPushButton()
+        self._toggle.clicked.connect(self.toggle)
+        row.addWidget(self._toggle)
+        self._copy = QPushButton(tr("Copy"))
+        self._copy.setToolTip(tr("Copy the connection instructions"))
+        self._copy.clicked.connect(self._on_copy)
+        row.addWidget(self._copy)
+        body.addLayout(row)
+        self._text = QPlainTextEdit()
+        self._text.setReadOnly(True)
+        self._text.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+        self._text.setMinimumHeight(140)
+        body.addWidget(self._text)
+        narrow(self._toggle, self._copy)
+        self._refresh()
+
+    @property
+    def running(self) -> bool:
+        bridge = getattr(self._viewport.window(), "_ai_bridge", None)
+        return bridge is not None and bridge.running
+
+    def start(self) -> bool:
+        bridge = _bridge_of(self._viewport)
         if bridge.running:
-            bridge.stop()
-            viewport.flash_status(tr("AI bridge stopped"))
-            return
+            return True
         try:
             port = bridge.start()
         except OSError as exc:
-            viewport.flash_status(tr(
+            self._viewport.flash_status(tr(
                 "AI bridge could not start: {err}", err=str(exc)))
-            return
-        viewport.flash_status(tr(
+            self._refresh(error=str(exc))
+            return False
+        self._port = port
+        self._viewport.flash_status(tr(
             "AI bridge listening on 127.0.0.1:{port}", port=port), 8000)
-        self._show_instructions(window, port)
+        self._refresh()
+        return True
 
-    @staticmethod
-    def _show_instructions(window, port: int) -> None:
-        """A non-modal window with the exact lines to paste — the user who
-        reached this menu is rarely the one who knows them by heart."""
-        from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QPlainTextEdit,
-                                       QVBoxLayout, QApplication)
-        text = connect_instructions(port)
-        dlg = QDialog(window)
-        dlg.setWindowTitle(tr("AI bridge (MCP): connect Claude"))
-        dlg.setAttribute(Qt.WA_DeleteOnClose, True)
-        layout = QVBoxLayout(dlg)
-        box = QPlainTextEdit(text)
-        box.setReadOnly(True)
-        box.setMinimumSize(640, 360)
-        layout.addWidget(box)
-        buttons = QDialogButtonBox()
-        copy = buttons.addButton(tr("Copy"), QDialogButtonBox.ActionRole)
-        copy.clicked.connect(lambda: QApplication.clipboard().setText(text))
-        buttons.addButton(QDialogButtonBox.Close)
-        buttons.rejected.connect(dlg.close)
-        layout.addWidget(buttons)
-        dlg.show()
+    def stop(self) -> None:
+        bridge = getattr(self._viewport.window(), "_ai_bridge", None)
+        if bridge is not None and bridge.running:
+            bridge.stop()
+            self._viewport.flash_status(tr("AI bridge stopped"))
+        self._refresh()
 
-    def on_deactivate(self, viewport) -> None:
-        pass
+    def toggle(self) -> None:
+        if self.running:
+            self.stop()
+        else:
+            self.start()
+
+    def _refresh(self, error: str | None = None) -> None:
+        on = self.running
+        self._toggle.setText(tr("Stop bridge") if on else tr("Start bridge"))
+        self._copy.setVisible(on)
+        self._text.setVisible(on)
+        if on:
+            port = getattr(self, "_port", DEFAULT_PORT)
+            self._status.setText(tr(
+                "Listening on 127.0.0.1:{port} — connect your MCP client "
+                "with the lines below.", port=port))
+            self._text.setPlainText(connect_instructions(port))
+        elif error:
+            self._status.setText(tr(
+                "AI bridge could not start: {err}", err=error))
+        else:
+            self._status.setText(tr(
+                "Off. Start it to let an AI agent (Claude, Cursor, "
+                "Antigravity…) model in this document over MCP."))
+
+    def _on_copy(self) -> None:
+        from PySide6.QtWidgets import QApplication
+        QApplication.clipboard().setText(self._text.toPlainText())
+        self._viewport.flash_status(tr("Copied"))
+
+
+def setup(app) -> None:
+    """The bridge joins the assistant in the side tray's «AI» tab; the
+    Extensions entry opens that section and starts the bridge."""
+    section = BridgeSection(app.viewport)
+    dock = app.add_panel(tr("AI"), section, panel="ai")
+    app.window._ai_bridge_section = section
+
+    def summon() -> None:
+        app.show_panel(dock)
+        section.section.set_open(True)
+        section.start()
+
+    app.add_menu_action(tr("AI Bridge (MCP)"), summon)

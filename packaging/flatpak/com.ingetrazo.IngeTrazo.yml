@@ -68,6 +68,9 @@ modules:
       # 1. Python dependencies into /app's prefix. pytest is a test tool.
       - grep -vE '^\s*pytest\b' requirements.txt > reqs.txt
       - pip3 install --prefix=${FLATPAK_DEST} --no-warn-script-location -r reqs.txt
+      # openskp's blank template was written by Trimble's SketchUp SDK: not
+      # distributed (Trimble's notice, 2026-09-28; no SketchUp export).
+      - rm -rf ${FLATPAK_DEST}/lib/python3*/site-packages/openskp/_scaffold
       # 2. The application, as source — GPL code hides from nobody.
       #    materials/ and styles/ are importable packages; plugins/ carries
       #    the bundled reference extensions (core/extensions.py discovers
@@ -76,6 +79,12 @@ modules:
       - cp -a main.py core views tools formats georef materials styles plugins resources i18n scripts LICENSE ${FLATPAK_DEST}/ingetrazo/
       # The example extensions (Extensions ▸ Example extensions installs one
       # into the user's plugins folder): shipped, never loaded by default.
+      # DWG import (#101): LibreDWG's dwg2dxf, the same binary the AppImage
+      # carries (libc/libm only; runs on the 25.08 runtime). formats.dwg_bridge
+      # finds it under app_root()/vendor/libredwg/bin; SOURCES.md says where
+      # its source is, as the GPL asks.
+      - install -Dm755 vendor/libredwg/bin/dwg2dxf ${FLATPAK_DEST}/ingetrazo/vendor/libredwg/bin/dwg2dxf
+      - install -Dm644 vendor/libredwg/SOURCES.md ${FLATPAK_DEST}/ingetrazo/vendor/libredwg/SOURCES.md
       - mkdir -p ${FLATPAK_DEST}/ingetrazo/examples
       - cp -a examples/extensions ${FLATPAK_DEST}/ingetrazo/examples/
       - find ${FLATPAK_DEST}/ingetrazo -name '__pycache__' -type d -exec rm -rf {} +

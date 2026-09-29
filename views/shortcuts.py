@@ -27,6 +27,31 @@ from core.i18n import source_of, tr
 
 _GROUP = "shortcuts"
 _DEFAULTS = "ingetrazo_default_shortcuts"
+_TIP = "ingetrazo_tooltip_base"
+
+
+def set_tooltip(action: QAction, base: str) -> None:
+    """A toolbar tooltip that names the action's CURRENT keys: «Line  (L)».
+
+    The keys used to be written into the text once, at start-up, so a
+    shortcut changed in Preferences showed in the menus (Qt reads the
+    action) and not on the toolbar buttons (issue #171). The tooltip is
+    rebuilt whenever the action changes -- whoever changed the keys."""
+    fresh = action.property(_TIP) is None
+    action.setProperty(_TIP, base)
+    if fresh:
+        action.changed.connect(lambda a=action: _refresh_tooltip(a))
+    _refresh_tooltip(action)
+
+
+def _refresh_tooltip(action: QAction) -> None:
+    base = action.property(_TIP)
+    if base is None:
+        return
+    keys = action.shortcut().toString(QKeySequence.NativeText)
+    # setToolTip with the same text returns early, so the changed signal
+    # this emits does not loop.
+    action.setToolTip(f"{base}  ({keys})" if keys else base)
 
 
 def _plain(text: str) -> str:
@@ -235,6 +260,17 @@ class ShortcutsPanel(QWidget):
             self._tree.setCurrentItem(first)
             if first is None:
                 self._edit.setKeySequence(QKeySequence())
+
+    def pick(self, act: QAction) -> None:
+        """Select ``act``'s row, ready for its new keys."""
+        self._filter.clear()
+        for i in range(self._tree.topLevelItemCount()):
+            row = self._tree.topLevelItem(i)
+            if row.data(0, Qt.UserRole) is act:
+                self._tree.setCurrentItem(row)
+                self._tree.scrollToItem(row)
+                self._edit.setFocus()
+                return
 
     def _current(self):
         row = self._tree.currentItem()

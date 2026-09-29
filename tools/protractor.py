@@ -58,11 +58,20 @@ _OFF_AXIS_RGBA = (0.24, 0.27, 0.32, 1.0)
 class ProtractorBase(Tool):
     """Shared protractor state + behaviour (see module docstring)."""
 
+    def value_is_unitless(self) -> bool:
+        """The typed value is an ANGLE: the document's length unit must
+        not scale it («45» was 0.045° in a millimetre model, #176)."""
+        return True
+
     #: The Line tool's axis magnet for the arms (@pacaeiro, issue #41): a
     #: base arm within 3° of an axis that lies in the disc's plane lands
     #: on it. Only the world half — the screen detector would hand back a
     #: point on an axis OUTSIDE the disc's plane, which an arm cannot be.
     magnetic_axis_deg = 3.0
+    #: The arms are directions from the centre, not lines being drawn: the
+    #: snap engine leaves out 'through point', 'extension' and 'from point'
+    #: for them, so the axis magnet is not outvoted (issue #140).
+    radial_arm = True
 
     def __init__(self) -> None:
         self.start_point: QVector3D | None = None   # the protractor centre
@@ -80,6 +89,9 @@ class ProtractorBase(Tool):
         self._axis_drag_live: QVector3D | None = None
         self._disc_r = 1.0                          # world radius of the disc
         self._snap_ticks = False                    # cursor near the disc?
+        #: The cursor is held by an inference (an endpoint, an axis, an
+        #: intersection...): the arm must reach THAT point exactly.
+        self._exact_snap = False
 
     # ---- Click-drag axis ----------------------------------------------------
     #: How far the cursor must travel from the vertex for the press to read
@@ -261,6 +273,29 @@ class ProtractorBase(Tool):
                 deg += 360.0
         return round(deg, 1)
 
+    #: Snap kinds that are NOT a precise target: the free cursor and a
+    #: point merely on a face. Everything else (endpoint, midpoint,
+    #: intersection, on-edge, axis, guide...) is a point the user aimed at.
+    _FREE_SNAPS = frozenset({"none", "on_face"})
+
+    def _note_snap(self, ctx) -> None:
+        """Remember whether the cursor is held by an inference."""
+        snap = getattr(ctx, "snap", None)
+        kind = getattr(snap, "kind", "none") or "none"
+        self._exact_snap = kind not in self._FREE_SNAPS
+
+    def _commit_deg(self, point: QVector3D) -> float | None:
+        """The angle to APPLY: exact when the cursor sits on an inferred
+        point, so the arm lands on it (SketchUp); otherwise the displayed
+        value -- the 15° tick near the disc, 0.1° farther out.
+
+        Issue #163: the rotation always applied the 0.1°-rounded angle, so
+        a panel swung to an endpoint missed it by ~0.7 mm two metres out
+        (70.2789° applied as 70.3°). The label still reads 0.1°."""
+        if self._exact_snap and not self._snap_ticks:
+            return self._angle_to(point)
+        return self._display_deg(point)
+
     def _direction_at(self, deg: float) -> QVector3D:
         """Unit direction of the base arm rotated by ``deg`` in the plane."""
         u, v = plane_axes(self._axis())
@@ -303,6 +338,7 @@ class ProtractorBase(Tool):
         self._axis_drag_live = None
         self._axis_drag_armed = False
         self._snap_ticks = False
+        self._exact_snap = False
 
 
 class ProtractorTool(ProtractorBase):
@@ -367,7 +403,8 @@ class ProtractorTool(ProtractorBase):
                 return
             self.ref_point = ctx.world
             return
-        deg = self._display_deg(ctx.world)
+        self._note_snap(ctx)
+        deg = self._commit_deg(ctx.world)
         if deg is not None:
             self._commit(ctx.viewport, deg)
 
@@ -376,6 +413,7 @@ class ProtractorTool(ProtractorBase):
         self._track_axis_drag(ctx.viewport)
         self._infer_plane(ctx)
         self._update_screen_metrics(ctx)
+        self._note_snap(ctx)
         ctx.viewport.update()
 
     def on_release(self, viewport) -> None:
@@ -442,7 +480,7 @@ class ProtractorTool(ProtractorBase):
         if (not self._guides or self.start_point is None
                 or self.ref_point is None or self.hover_point is None):
             return []
-        deg = self._display_deg(self.hover_point)
+        deg = self._commit_deg(self.hover_point)
         if deg is None:
             return []
         return [Guide(self.start_point, self._direction_at(deg)).segment()]

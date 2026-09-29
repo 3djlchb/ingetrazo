@@ -46,6 +46,7 @@ from array import array
 from pathlib import Path
 from typing import Optional
 from core.units import fmt_len as _fmt_len
+from core.units import typed_value_text as _typed_value_text
 
 # Perf telemetry (INGETRAZO_PERF=1): every operation slower than 50 ms and a
 # once-per-second frame summary land in ~/ingetrazo-perf.log — the tool for
@@ -236,6 +237,26 @@ SHADER_DIR = app_root() / "resources" / "shaders"
 #: ~a dozen times per hover, and an exploded medium import (9k faces =
 #: ~20k edges) froze every mouse move (user report, piscina.igz).
 _LOOSE_SNAP_CAP = 3000
+
+
+def _ray_aabb_span(o, d, lo, hi):
+    """``(t_in, t_out)`` of the forward ray (t >= 0) through the AABB, or
+    ``None`` if it misses. Plain floats."""
+    tmin, tmax = 0.0, float("inf")
+    for i in range(3):
+        di = d[i]
+        if -1e-12 < di < 1e-12:
+            if o[i] < lo[i] - 1e-9 or o[i] > hi[i] + 1e-9:
+                return None
+            continue
+        t1 = (lo[i] - o[i]) / di
+        t2 = (hi[i] - o[i]) / di
+        if t1 > t2:
+            t1, t2 = t2, t1
+        tmin, tmax = max(tmin, t1), min(tmax, t2)
+        if tmin > tmax:
+            return None
+    return tmin, tmax
 
 
 def _ray_aabb(o, d, lo, hi) -> bool:
@@ -581,7 +602,9 @@ def _parse_number(tok: str):
         return None                      # "1-2" without a fraction: not ours
     if m.group(1):
         v += float(m.group(1))
-    return v
+    # A number too long for a float comes back as inf, and inf − inf is
+    # NaN a few steps later: a coordinate no tool can recover from (#185).
+    return v if math.isfinite(v) else None
 
 
 def _merge_mixed_numbers(fields: list) -> list:
@@ -783,6 +806,7 @@ class Viewport(QOpenGLWidget):
         "through_point": "Through point",
         "perp_face": "Perpendicular to face",
         "center": "Center",
+        "guide_point": "Guide point",
     }
 
     def __init__(self, parent=None) -> None:
@@ -991,6 +1015,8 @@ class Viewport(QOpenGLWidget):
         # Camera navigation state (middle button)
         self._last_pos = None
         self._pan_mode = False
+        #: where the current orbit gesture turns (#164); None = the target
+        self._orbit_pivot = None
         # A mouse-look drag for a tool with ``on_look`` (First Person):
         # (button, last local point) while a button is held, else None.
         self._look_drag = None
@@ -5592,18 +5618,8 @@ class Viewport(QOpenGLWidget):
         hook = getattr(self.active_tool, "draw_overlay", None)
         if callable(hook):
             hook(self, painter)
-        # Extensions' overlays (``ExtensionApp.add_overlay``): whatever the
-        # active tool, and never able to break the frame.
-        for fn in list(getattr(self, "_ext_overlays", ())):
-            painter.save()
-            try:
-                fn(self, painter)
-            except Exception:  # noqa: BLE001 — a plugin never breaks paint
-                import logging
-                logging.getLogger("ingetrazo.plugins").exception(
-                    "extension overlay failed")
-            finally:
-                painter.restore()
+        # Extensions' overlays (``ExtensionApp.add_overlay``).
+        self._draw_extension_overlays(painter)
 
         # Terrain-surface fills (draped / flat) under the georef paths — Track G.
         self._draw_geo_surfaces(painter)
@@ -6734,6 +6750,8 @@ class Viewport(QOpenGLWidget):
         rgb, label = {
             "edge": (COLOR_ON_EDGE, "on_edge"),
             "face": (COLOR_ON_FACE, "on_face"),
+            "guide_line": (COLOR_ON_EDGE, "on_line"),
+            "guide_point": (COLOR_ENDPOINT, "guide_point"),
         }.get(kind, (COLOR_ENDPOINT, "endpoint"))
         color = QColor.fromRgbF(*rgb, 1.0)
         painter.setPen(QPen(QColor(255, 255, 255, 230), 4.0))
@@ -6783,7 +6801,11 @@ class Viewport(QOpenGLWidget):
         if pixel is None:
             return
         if self._value_buffer:
-            text = f"{self._value_buffer} m"
+            unitless = getattr(tool, "value_is_unitless", None)
+            if callable(unitless) and unitless():
+                text = self._value_buffer   # an angle or a count: no unit mark
+            else:
+                text = _typed_value_text(self._value_buffer)
             fg = QColor("#0F141B")
             shadow = QColor(255, 220, 130, 235)  # warm tint while typing
         else:
@@ -7196,8 +7218,10 @@ class Viewport(QOpenGLWidget):
             return None
         if w0 < eps:
             c0 = c0 + (c1 - c0) * ((eps - w0) / (w1 - w0))
+            c0.setW(eps)
         elif w1 < eps:
             c1 = c1 + (c0 - c1) * ((eps - w1) / (w0 - w1))
+            c1.setW(eps)
         (x0, y0), (x1, y1) = [
             ((c.x() / c.w() * 0.5 + 0.5) * self.width(),
              (1.0 - (c.y() / c.w() * 0.5 + 0.5)) * self.height())
@@ -7224,6 +7248,42 @@ class Viewport(QOpenGLWidget):
         if t0 > t1:
             return None
         return [(x0 + dx * t0, y0 + dy * t0), (x0 + dx * t1, y0 + dy * t1)]
+
+    def _draw_extension_overlays(self, painter: QPainter) -> None:
+        """Extensions' overlays (``ExtensionApp.add_overlay``): whatever the
+        active tool, and never able to break the frame. Each call is fenced
+        by save/restore, and one that raises is logged ONCE and dropped: a
+        paint handler failing on every frame would flood the log and leave
+        the view half drawn for good."""
+        for fn in list(getattr(self, "_ext_overlays", ())):
+            painter.save()
+            try:
+                fn(self, painter)
+            except Exception:  # noqa: BLE001 — a plugin never breaks paint
+                import logging
+                logging.getLogger("ingetrazo.plugins").exception(
+                    "extension overlay %r failed; removed", fn)
+                try:
+                    self._ext_overlays.remove(fn)
+                except ValueError:
+                    pass
+            finally:
+                painter.restore()
+
+    def world_to_pixel(self, world: QVector3D) -> Optional[tuple[float, float]]:
+        """Public API (extensions): world point (metres) → widget pixel
+        ``(x, y)`` in logical pixels, or ``None`` when the point is behind
+        the camera. The same projection the host's own overlays use."""
+        return self._world_to_pixel(world)
+
+    def world_to_pixels(self, pts):
+        """Public API (extensions): an ``(N, 3)`` float array of world points
+        (metres) → ``(px, py, in_front)`` NumPy arrays, vectorised — for
+        overlays with thousands of points, where a Python loop over
+        :meth:`world_to_pixel` would cost frames. Points with
+        ``in_front == False`` are behind the camera; skip them."""
+        import numpy as np
+        return self._project_px(np.asarray(pts, dtype=float).reshape(-1, 3))
 
     def _world_to_pixel(self, world: QVector3D) -> Optional[tuple[float, float]]:
         """World point → screen pixel (or None if behind the camera)."""
@@ -8733,6 +8793,16 @@ class Viewport(QOpenGLWidget):
                     best = path
         return best
 
+    @classmethod
+    def _tool_busy_for_delete(cls, tool) -> bool:
+        """``_tool_busy`` plus the per-tool state that means "an operation
+        holds geometry": Offset's / Push-Pull's base face, Follow Me's
+        profile, Fillet's picked edges or live sizing. Delete waits then."""
+        if cls._tool_busy(tool):
+            return True
+        return any(getattr(tool, attr, None)
+                   for attr in ("base_face", "_profile", "sizing", "edges"))
+
     @staticmethod
     def _tool_busy(tool) -> bool:
         """Whether the active tool has an operation in progress that Esc should
@@ -9972,6 +10042,7 @@ class Viewport(QOpenGLWidget):
         # any camera drag it was in the middle of.
         self.nav_mode = None
         self._last_pos = None
+        self._orbit_pivot = None
         self._pan_mode = False
         self._look_drag = None
         self.unsetCursor()
@@ -10263,6 +10334,36 @@ class Viewport(QOpenGLWidget):
         parent when the group you were editing lived in another group."""
         self._leave_group_edit(todos=False)
 
+    def set_document(self, scene, history) -> tuple:
+        """Show another document: ``scene`` with its own undo ``history``
+        (for an extension's workspace, ``ExtensionApp.enter_workspace``).
+        Returns the ``(scene, history)`` pair it replaces, untouched, to be
+        handed back later — the parked document keeps its undo steps and its
+        selection.
+
+        A document boundary like New / Open: the id()-keyed chunk caches
+        are reset (:meth:`reset_document_caches`), and since the other
+        render caches remember the scene VERSION they were built for, not
+        which scene it was, the incoming scene is moved past every version
+        this viewport has shown before it is drawn."""
+        self.end_group_edit()
+        old = (self.scene, self.history)
+        self.reset_document_caches()
+        seen = max(getattr(self, "_versions_seen", 0), self.scene.version, scene.version)
+        scene.version = self._versions_seen = seen + 1
+        self.scene = scene
+        self.history = history
+        from core import units as _units
+        _units.bind_scene(scene)
+        self._edges_version = -1
+        self._hover_entity = None
+        self._hover_edge = None
+        self.last_snap = None
+        self.reference_edge = None
+        self.reference_mode = None
+        self.notify_scene_changed()
+        return old
+
     def end_group_edit(self) -> None:
         """Leave every open group, back to the model. What the menus and the
         save/export paths call."""
@@ -10364,9 +10465,53 @@ class Viewport(QOpenGLWidget):
             return False          # the container and what lives inside it
         return self._owner_of(group) is not ctx
 
+    def _depth_of(self, point) -> Optional[float]:
+        """How far ``point`` lies in front of the eye, along the view
+        direction: what one pixel of pan is worth there (#184)."""
+        if point is None:
+            return None
+        cam = self.camera
+        return QVector3D.dotProduct(point - cam.eye(), cam.forward())
+
+    def _orbit_pivot_at(self, x: float, y: float):
+        """Where an orbit gesture that starts at pixel ``(x, y)`` turns (#164).
+
+        1. The model point under the cursor -- the nearest face the pick
+           ray hits (loose geometry and groups alike);
+        2. else, with the cursor on sky or ground, the middle of the
+           stretch of the view's central ray that crosses the model's
+           bounding box -- the middle of what is on screen;
+        3. else the camera target (an empty scene, a model off screen).
+        Worked out once per gesture: the pivot stays put while dragging.
+        """
+        origin, direction = self._pixel_to_ray(x, y)
+        if origin is not None and direction is not None:
+            try:
+                idx = self._pick_index()
+                if idx.entities:
+                    import numpy as np
+                    face_t = self._hover_face_t(idx, origin, direction)
+                    if face_t is not None and len(face_t):
+                        t = float(np.min(face_t))
+                        if math.isfinite(t) and t > 0.0:
+                            return origin + direction * t
+            except Exception:                  # noqa: BLE001 - fall back
+                pass
+        lo, hi = self.scene.bounds()
+        if lo is not None:
+            o, d = self._pixel_to_ray(self.width() / 2.0, self.height() / 2.0)
+            if o is not None and d is not None:
+                span = _ray_aabb_span(
+                    (o.x(), o.y(), o.z()), (d.x(), d.y(), d.z()),
+                    (lo.x(), lo.y(), lo.z()), (hi.x(), hi.y(), hi.z()))
+                if span is not None:
+                    return o + d * ((span[0] + span[1]) * 0.5)
+        return QVector3D(self.camera.target)
+
     def _end_camera_drag(self) -> None:
         """Forget a camera drag in progress (orbit, pan or zoom by drag)."""
         self._last_pos = None
+        self._orbit_pivot = None
         self._pan_mode = False
         if self.nav_mode is not None:
             self._apply_nav_cursor()
@@ -10388,6 +10533,7 @@ class Viewport(QOpenGLWidget):
         self.last_snap = None
         self.nav_mode = mode
         self._last_pos = None             # a drag in progress ends here
+        self._orbit_pivot = None
         self._pan_mode = False
         if mode is not None:
             self._apply_nav_cursor()      # orbit / pan / magnifier icons
@@ -10450,6 +10596,9 @@ class Viewport(QOpenGLWidget):
         if ev.button() == Qt.MiddleButton:
             self._last_pos = ev.position().toPoint()
             self._pan_mode = bool(ev.modifiers() & Qt.ShiftModifier)
+            self._orbit_pivot = self._orbit_pivot_at(
+                ev.position().x(), ev.position().y())
+            self._pan_depth = self._depth_of(self._orbit_pivot)
             # SketchUp: while the wheel-drag lasts, the pointer becomes the
             # orbit (or pan) icon; the tool cursor comes back on release.
             from views.icons import tool_cursor
@@ -10471,6 +10620,13 @@ class Viewport(QOpenGLWidget):
                 self.nav_mode == "pan"
                 or bool(ev.modifiers() & Qt.ShiftModifier)
             )
+            self._orbit_pivot = (
+                self._orbit_pivot_at(ev.position().x(), ev.position().y())
+                if self.nav_mode == "orbit" else None)
+            self._pan_depth = (
+                self._depth_of(self._orbit_pivot_at(
+                    ev.position().x(), ev.position().y()))
+                if self._pan_mode else None)
             # The orbit/pan icon stays through the drag (SketchUp).
             self._apply_nav_cursor()
             return
@@ -10557,7 +10713,30 @@ class Viewport(QOpenGLWidget):
                     tr("Operation failed and was undone: {err}",
                        err=self.history.last_error), 8000)
             self._release_axis_lock_after_operation(committed=_drew)
+            if _drew:
+                self._reassert_tool_cursor()
             self.update()
+
+    def _reassert_tool_cursor(self) -> None:
+        """Put the active tool's pointer back after an operation (#191,
+        fafecm on Windows: «after the push/pull cursor is used once, the
+        cursor symbol disappears» — the Line did the same). On Windows the
+        viewport is a native OpenGL window and the system brought the arrow
+        back when an operation ended, while Qt still believed its cursor
+        set, so setting the same one again changed nothing: unset first,
+        then set. Nothing to do while a camera mode or a look drag owns
+        the pointer."""
+        if (self.active_tool is None or self.nav_mode is not None
+                or self._look_drag is not None):
+            return
+        self.unsetCursor()
+        self._apply_tool_cursor()
+
+    def enterEvent(self, ev) -> None:
+        # Coming back from a panel or a dialog is the other moment Windows
+        # shows the arrow over the viewport (#191).
+        self._reassert_tool_cursor()
+        super().enterEvent(ev)
 
     def mouseDoubleClickEvent(self, ev) -> None:
         """Qt replaces the second press of a double-click with this event, so
@@ -10644,10 +10823,15 @@ class Viewport(QOpenGLWidget):
             if self.nav_mode == "zoom":
                 self.camera.zoom(-dy * 0.035)        # drag up = zoom in
             elif self._pan_mode:
-                self.camera.pan(dx, dy, self.height())
+                self.camera.pan(dx, dy, self.height(),
+                                depth=getattr(self, "_pan_depth", None))
             else:
-                self.camera.orbit(
-                    dx, -dy if self._invert_orbit_y else dy, self.height())
+                pivot = getattr(self, "_orbit_pivot", None)
+                ody = -dy if self._invert_orbit_y else dy
+                if pivot is not None:
+                    self.camera.orbit_about(pivot, dx, ody, self.height())
+                else:
+                    self.camera.orbit(dx, ody, self.height())
             self.update()
             return
 
@@ -10828,6 +11012,7 @@ class Viewport(QOpenGLWidget):
             return
         if ev.button() == Qt.MiddleButton:
             self._last_pos = None
+            self._orbit_pivot = None
             self._pan_mode = False
             if self.nav_mode is not None:
                 self._apply_nav_cursor()
@@ -10847,6 +11032,7 @@ class Viewport(QOpenGLWidget):
 
         if ev.button() == Qt.LeftButton and self.nav_mode is not None:
             self._last_pos = None
+            self._orbit_pivot = None
             self._pan_mode = False
             self._apply_nav_cursor()
             return
@@ -10855,8 +11041,11 @@ class Viewport(QOpenGLWidget):
         # stroke can commit as one step. No-op default on other tools.
         if (ev.button() == Qt.LeftButton and self.active_tool is not None
                 and not self._box_active and self.nav_mode is None):
+            _before = len(self.history.undo_stack)
             self.active_tool.on_release(self)
             self._release_axis_lock_after_operation()
+            if len(self.history.undo_stack) > _before:
+                self._reassert_tool_cursor()     # a drag committed (#191)
 
         if ev.button() == Qt.LeftButton and self._box_active:
             self._box_active = False
@@ -10987,7 +11176,20 @@ class Viewport(QOpenGLWidget):
                   extra=f"reused={'proj' if reproj else reused}", floor=10.0)
         self.update()
 
+    _MODIFIER_KEYS = frozenset({Qt.Key_Control, Qt.Key_Shift, Qt.Key_Alt,
+                                Qt.Key_Meta, Qt.Key_AltGr})
+
+    def ctrl_tapped(self) -> bool:
+        """Whether the Ctrl being released was pressed ALONE — no other key
+        in between, not even one a menu shortcut took (Ctrl+Z reaches us
+        only as a ShortcutOverride). Tools that toggle on a Ctrl tap ask
+        this on the release (#183)."""
+        return getattr(self, "_ctrl_alone", False)
+
     def event(self, ev) -> bool:
+        if (ev.type() in (QEvent.ShortcutOverride, QEvent.KeyPress)
+                and ev.key() not in self._MODIFIER_KEYS):
+            self._ctrl_alone = False
         # With a VCB buffer in progress, claim keys that continue it (unit
         # suffixes m/cm/mm, separators, sign) before the window's QAction
         # shortcuts swallow them — otherwise typing "2m" would fire the Move
@@ -11012,6 +11214,8 @@ class Viewport(QOpenGLWidget):
         return callable(claims) and bool(claims(ev.key(), ev.modifiers()))
 
     def keyPressEvent(self, ev) -> None:
+        if ev.key() == Qt.Key_Control and not ev.isAutoRepeat():
+            self._ctrl_alone = True       # until another key says otherwise
         # Held keys (First Person): the press and the release are the
         # tool's; auto-repeat says nothing new.
         if self._tool_claims_key(ev):
@@ -11039,6 +11243,17 @@ class Viewport(QOpenGLWidget):
         # 2. Active tool gets first shot at the key.
         if self.active_tool is not None:
             if self.active_tool.on_key(self, ev.key(), ev.modifiers()):
+                return
+
+        # 2b. Delete in any other tool (Paint, Push/Pull, Offset…): with the
+        #     tool idle, erase the selection or — nothing selected — the edge
+        #     or face highlighted under the cursor. Mid-operation it would
+        #     pull the geometry out from under the tool, so it waits.
+        if ev.key() == Qt.Key_Delete and not ev.isAutoRepeat():
+            tool = self.active_tool
+            if tool is None or not self._tool_busy_for_delete(tool):
+                from tools.select import delete_selection_or_hover
+                delete_selection_or_hover(self)
                 return
 
         # 3. Esc, escalating (standard CAD): first clear the typed value buffer,
@@ -11280,6 +11495,7 @@ class Viewport(QOpenGLWidget):
             shift_lock_color=self._shift_lock[1] if self._shift_lock else None,
             linear_mode=self.linear_inference_mode,
             work_plane_normal=self._work_plane_normal(),
+            radial_arm=bool(getattr(self.active_tool, "radial_arm", False)),
         )
         snap = self._axis_source_cue(snap, px_x, px_y)
         snap = self._extension_snap(snap, px_x, px_y)
@@ -11360,6 +11576,7 @@ class Viewport(QOpenGLWidget):
         claim on it lapses (issue #26)."""
         self._alt_tap = False
         self._alt_down = False        # its release will not reach us either
+        self._ctrl_alone = False      # nor will Ctrl's
         # Nor will the release of a held walking key (First Person).
         lost = getattr(self.active_tool, "on_focus_out", None)
         if callable(lost):
@@ -11406,8 +11623,11 @@ class Viewport(QOpenGLWidget):
                                               direction flip it, SketchUp-style).
         - ``"30cm"`` / ``"1500mm"`` / ``"2m"`` → unit suffix per field; bare
                                               numbers are metres (project unit).
-        Comma is always the decimal separator; ``;`` and space are field
-        separators (SketchUp convention adapted to our locale).
+        Comma is the decimal separator; ``;`` and space are field
+        separators (SketchUp convention adapted to our locale) -- except for
+        a tool that only takes several values (``vcb_comma_lists``, the
+        Rectangle): there ``200,100`` is two fields, as in SketchUp (#152).
+        See :meth:`_parse_value_buffer`.
         """
         if self.active_tool is None:
             return False
@@ -11418,7 +11638,21 @@ class Viewport(QOpenGLWidget):
         if key in (Qt.Key_Return, Qt.Key_Enter):
             if not self._value_buffer:
                 return False
-            value = self._parse_value_buffer(self._value_buffer)
+            # An angle, a factor or a count is not a length: the tool says
+            # so and the document's unit stays out of it (#176).
+            unitless = getattr(self.active_tool, "value_is_unitless", None)
+            if callable(unitless) and unitless():
+                from core.units import unitless_numbers
+                with unitless_numbers():
+                    value = self._parse_value_buffer(
+                        self._value_buffer,
+                        comma_lists=getattr(self.active_tool,
+                                            "vcb_comma_lists", False))
+            else:
+                value = self._parse_value_buffer(
+                    self._value_buffer,
+                    comma_lists=getattr(self.active_tool, "vcb_comma_lists",
+                                        False))
             if value is None:
                 self._set_value_buffer("")
                 return True
@@ -11527,7 +11761,7 @@ class Viewport(QOpenGLWidget):
         return False
 
     @staticmethod
-    def _parse_value_buffer(buffer: str):
+    def _parse_value_buffer(buffer: str, comma_lists: bool = False):
         """Return a float, a 2-tuple ``(w, h)`` (rectangle dimensions), a
         3-tuple ``(dx, dy, dz)`` (delta), or ``None`` on parse error. Each tool's
         ``on_value`` accepts the arity it understands and ignores the rest.
@@ -11535,7 +11769,20 @@ class Viewport(QOpenGLWidget):
         ``in`` or ``"``, ``ft`` or ``'``, feet-and-inches ``1'6"``, fractions
         ``3/4"`` (SketchUp's forms, so a 2×4 is typed ``2";4"`` while the
         span stays ``3.2``). Bare numbers are metres, and a leading minus is
-        kept (direction tools flip on it)."""
+        kept (direction tools flip on it).
+
+        **The comma (#152).** ``;`` and whitespace always separate fields.
+        A comma is a decimal separator (``2,5`` is 2.5, ``2,5;1,2`` is
+        2.5 × 1.2 -- Spanish and Portuguese write decimals that way) --
+        EXCEPT when ``comma_lists`` is set and the entry has no ``;`` and no
+        space: then commas separate fields, so ``200,100`` is 200 × 100 as
+        in SketchUp. ``comma_lists`` is the caller's word that the tool takes
+        only several values (the Rectangle), where a lone decimal could never
+        be meant; a user who wants decimals there separates with ``;``
+        (``1,5;2,5``), which is SketchUp's own rule in comma-decimal locales."""
+        if (comma_lists and ";" not in buffer
+                and not any(ch.isspace() for ch in buffer.strip())):
+            buffer = buffer.replace(",", " ")
         normalized = buffer.replace(",", ".").replace(";", " ")
         stripped = normalized.strip()
         # SketchUp's arrays after a copy: "3x" / "3*" / "*3" (external) and
@@ -11576,7 +11823,7 @@ class Viewport(QOpenGLWidget):
             if m is None:
                 return None
             rise, run = float(m.group(1)), float(m.group(2))
-            if run <= 0:
+            if run <= 0 or not (math.isfinite(rise) and math.isfinite(run)):
                 return None
             return ("ratio", math.degrees(math.atan2(rise, run)))
         nums = []
@@ -11693,6 +11940,7 @@ class Viewport(QOpenGLWidget):
             shift_lock_color=self._shift_lock[1] if self._shift_lock else None,
             linear_mode=self.linear_inference_mode,
             work_plane_normal=self._work_plane_normal(),
+            radial_arm=bool(getattr(self.active_tool, "radial_arm", False)),
         )
         snap = self._axis_source_cue(snap, px_x, px_y)
         snap = self._extension_snap(snap, px_x, px_y)

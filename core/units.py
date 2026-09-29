@@ -11,6 +11,7 @@ fractional forms the precision field picks the finest denominator:
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 from fractions import Fraction
 
 IN_M = 0.0254
@@ -164,16 +165,57 @@ def unit_label(code: str) -> str:
     return tr(UNIT_LABELS[code]) if code in UNIT_LABELS else code
 
 
+#: Set while the value being read is not a length (see ``unitless_numbers``).
+_UNITLESS = False
+
+
 def bare_number_scale() -> float:
     """Metres per unit for a number typed without a unit: ``2`` is 2 m in
-    a metric document and 2 mm in a millimetre one."""
+    a metric document and 2 mm in a millimetre one -- and 1 while
+    ``unitless_numbers`` holds, when the number is not a length."""
+    if _UNITLESS:
+        return 1.0
     return _BARE_SCALE.get(model_unit(), 1.0)
+
+
+@contextmanager
+def unitless_numbers():
+    """Read typed numbers as they are: an angle, a scale factor or a side
+    count has no unit, so the document's must not touch it -- «45» in a
+    millimetre model was a turn of 0.045° (#176). A field that does carry
+    a unit («2m») still converts."""
+    global _UNITLESS
+    before, _UNITLESS = _UNITLESS, True
+    try:
+        yield
+    finally:
+        _UNITLESS = before
 
 
 def fmt_len(metres: float) -> str:
     """A length in the model's units and precision — the one formatter
     every readout uses (tool labels, Entity Info, status bar)."""
     return format_length(float(metres), model_unit(), model_precision())
+
+
+#: The mark a bare typed number gets in each unit: what the number MEANS
+#: (``bare_number_scale``), shown while it is typed.
+_TYPED_MARK = {"m": " m", "cm": " cm", "mm": " mm", "in": '"', "ft": "'",
+               "ft-in": '"', "in-frac": '"', "ft-in-frac": '"'}
+
+
+def typed_value_text(buffer: str) -> str:
+    """What the user is typing in the VCB, as the canvas shows it: a bare
+    number (or a ``a,b`` / ``a;b`` list of them) gets the model's unit, the
+    one it will be read in -- «500» in a millimetre document is 500 mm, and
+    showing «500 m» told the user the opposite (issue #149). Anything that
+    already carries a unit or a mark is shown as typed."""
+    import re
+
+    text = (buffer or "").strip()
+    if text and re.fullmatch(r"[-+]?[\d.]+(\s*[,;]\s*[-+]?[\d.]+)*", text):
+        return text + _TYPED_MARK.get(model_unit(), " m")
+    return text
 
 
 def fmt_num(metres: float) -> str:

@@ -1,5 +1,14 @@
 # SKP import backend seam
 
+> **2026-09-28 — Trimble's copyright notice.** IngeTrazo no longer runs,
+> downloads or links to anything of Trimble's: the skp2dae converter (which
+> loaded Trimble's `SketchUpAPI.dll` under Wine) and its automatic download
+> are gone, the SDK-based validation tests are gone, and the `.skp` export is
+> off because OpenSKP's writer builds on a blank document written by
+> Trimble's SDK, which IngeTrazo no longer distributes. `.skp` files are read
+> with OpenSKP only. The sections below that mention skp2dae or the SDK
+> oracle are the record of how the reader was validated at the time.
+
 IngeTrazo aims to open **any** `.skp` (old → recent). This document describes
 the single seam that decouples the app from *how* a `.skp` is read.
 
@@ -10,9 +19,6 @@ the single seam that decouples the app from *how* a `.skp` is read.
   "What works / what's missing"). An **optional dependency**: `pip install
   openskp` (pulls `trimesh`). Not in `requirements.txt` yet — the seam falls
   back gracefully when it's absent.
-- **skp2dae** (Trimble's `SketchUpAPI.dll` via Wine). The full-coverage
-  fallback: a SEPARATE program (the DLL never enters GPL IngeTrazo). Its
-  install/dialog/subprocess flow stays in `views/main_window.py`.
 
 ## The seam — `formats/skp.py`
 
@@ -62,8 +68,10 @@ Backends implement `available()`, `supports(fmt)`, `parse(path, progress)`.
 `views/main_window.py::import_skp_path`:
 
 1. If `can_handle(skp)` → `parse_skp` (outside history). Non-empty → apply
-   through `SnapshotImport`. Empty/`NeedsConverter` → step 2.
-2. **skp2dae** converter (Wine).
+   through `SnapshotImport`.
+2. Empty or `NeedsConverter` → the file is reported as unreadable, with the
+   way around it (export COLLADA or OBJ from SketchUp). There is no
+   converter behind it any more.
 
 ## The OpenSKP adapter — `formats/skp_openskp.py`
 

@@ -364,6 +364,12 @@ class MoveTool(Tool):
             self._apply_preview(ctx.viewport, ctx.world - self.grab)
         ctx.viewport.update()
 
+    def value_is_unitless(self) -> bool:
+        """A rotation grip held (or just used) takes an ANGLE (#176);
+        otherwise the value is a distance."""
+        rot = self._grip_rot or self._grip_rot_done
+        return rot is not None and self.start_point is None
+
     def on_value(self, viewport, value) -> bool:
         rot = self._grip_rot or self._grip_rot_done
         if rot is not None and self.start_point is None:
@@ -653,16 +659,39 @@ class MoveTool(Tool):
         for e in self._sel_edges:
             self._base_segments.append((QVector3D(e.a), QVector3D(e.b)))
 
-    def _make_copy_builder(self):
+    def _make_copy_builder(self, scene=None):
         """A closure that builds the copy command for a list of offsets —
         one copy per offset. Kept by the array window so ``3x`` / ``/3`` can
-        re-lay the copies after the tool has reset."""
+        re-lay the copies after the tool has reset.
+
+        Plain copied edges go through the same edge planner as the Line
+        tool, so a copy laid across a face splits it and one crossing an
+        edge cuts it there, as SketchUp does (Lefteris Schetakis, #177).
+        Faces are stamped FIRST: the planner then finds their loops closed
+        and does not add a second face over them."""
         groups = list(self._groups)
         faces = list(self._sel_faces)
         edges = list(self._sel_edges)
 
+        # Edges that bound a copied face travel with it the old way: the
+        # planner runs before the faces are stamped and would lay a second
+        # face over their loop.
+        def _k(p):
+            return (round(p.x(), 6), round(p.y(), 6), round(p.z(), 6))
+        face_sides = set()
+        for f in faces:
+            for lp in (list(f.vertices), *[list(h) for h in f.holes]):
+                for i in range(len(lp)):
+                    a, b = _k(lp[i]), _k(lp[(i + 1) % len(lp)])
+                    face_sides.add((a, b) if a <= b else (b, a))
+
+        def _bounds_a_face(e):
+            a, b = _k(e.a), _k(e.b)
+            return ((a, b) if a <= b else (b, a)) in face_sides
+
         def build(deltas):
             cmds: list = []
+            plain: list = []
             for d in deltas:
                 m = QMatrix4x4()
                 m.translate(d)
@@ -678,12 +707,21 @@ class MoveTool(Tool):
                 id_map: dict[int, int] = {}
                 for e in edges:
                     curve = getattr(e, "curve", None)
+                    soft = getattr(e, "soft", False)
+                    if (scene is not None and curve is None and not soft
+                            and not _bounds_a_face(e)):
+                        plain.append((e.a + d, e.b + d))
+                        continue
+                    # Soft edges and curves keep their flags on the copy.
                     if curve is not None and curve not in id_map:
                         id_map[curve] = Mesh.next_curve_id()
                     cmds.append(AddEdgeCommand(
                         e.a + d, e.b + d,
-                        soft=getattr(e, "soft", False) or None,
+                        soft=soft or None,
                         curve=id_map.get(curve)))
+            if plain:
+                from core.edits import build_add_edges
+                cmds.append(build_add_edges(scene, plain, detect_faces=True))
             if not cmds:
                 return None
             return cmds[0] if len(cmds) == 1 else CompoundCommand(cmds)
@@ -775,7 +813,7 @@ class MoveTool(Tool):
         self._revert_preview(viewport)
         if self._copy and delta.length() > 1e-9:
             # Copy mode: the original never moved; stamp the copies.
-            build = self._make_copy_builder()
+            build = self._make_copy_builder(viewport.scene)
             cmd = build([delta])
             if cmd is not None:
                 viewport.history.execute(cmd)

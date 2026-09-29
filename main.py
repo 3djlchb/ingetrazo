@@ -33,7 +33,8 @@ elif sys.stderr is not None:
 # if the ghost bothers you: run with QT_QPA_PLATFORM=xcb. Re-test the ghost
 # when Mutter/Qt update; no app-side workaround cured it (see CLAUDE.md).
 
-from PySide6.QtCore import QEvent, QLocale, QSettings, Qt
+from PySide6.QtCore import (QEvent, QLibraryInfo, QLocale, QSettings, Qt,
+                            QTranslator)
 from PySide6.QtGui import QSurfaceFormat
 from PySide6.QtWidgets import QApplication
 
@@ -59,6 +60,56 @@ def _init_language() -> None:
         else:
             saved = "en"
     i18n.set_language(str(saved))
+    _install_qt_translator(str(saved))
+
+
+class _ButtonsOnlyTranslator(QTranslator):
+    """Qt's own catalog, limited to the standard button texts.
+
+    ``qtbase_<lang>.qm`` also names the keys — «Control+Mayúsculas+Re Pág»
+    for Ctrl+Shift+PgUp in menus, tooltips and the shortcut editor — and
+    the shortcuts stay in English on purpose. The button texts live in
+    these contexts; everything else is left untranslated."""
+
+    _CONTEXTS = frozenset({"QPlatformTheme", "QMessageBox",
+                           "QDialogButtonBox"})
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._qt = QTranslator()
+
+    def load_qt(self, lang: str) -> bool:
+        folder = QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)
+        return self._qt.load(f"qtbase_{lang.replace('-', '_')}", folder)
+
+    def isEmpty(self) -> bool:
+        return self._qt.isEmpty()
+
+    def translate(self, context, source, disambiguation=None, n=-1):
+        if context not in self._CONTEXTS:
+            return None                   # not ours: Qt keeps its text
+        return self._qt.translate(context, source, disambiguation, n)
+
+
+#: Kept alive for the whole session: Qt drops a translator that is freed.
+_qt_translator: QTranslator | None = None
+
+
+def _install_qt_translator(lang: str) -> None:
+    """Let Qt name its standard buttons in ``lang`` too.
+
+    Our catalog only covers ``tr()`` strings; the standard buttons of
+    QMessageBox and QDialogButtonBox (OK, Cancel, Yes, No…) come from
+    Qt's own ``qtbase_<lang>.qm``, which PySide6 ships. Without it they
+    stayed in English under every language. A missing file just leaves
+    them in English, as before."""
+    global _qt_translator
+    if lang == "en":
+        return
+    translator = _ButtonsOnlyTranslator()
+    if translator.load_qt(lang):
+        QApplication.installTranslator(translator)
+        _qt_translator = translator
 
 from views.main_window import MainWindow
 
@@ -88,8 +139,8 @@ def _open_document_in(window, doc: "Path") -> None:
     the window must be visible, not frozen pre-show). Shared by the initial
     launch and the single-instance second-launch handler."""
     ext = doc.suffix.lower()
-    if ext == ".igz":
-        window.open_path(doc)
+    if ext == ".igz" or ext in getattr(window, "file_openers", {}):
+        window.open_path(doc)       # an extension's own type goes to its opener
     elif ext == ".skp":
         from PySide6.QtCore import QTimer
 
@@ -164,6 +215,14 @@ def _self_check() -> int:
         if not ok:
             problems.append(label)
 
+    # DWG import goes through LibreDWG's dwg2dxf (#101). Every package
+    # carries it now; a packaged build without it is a broken package.
+    from formats.dwg_bridge import find_dwg2dxf
+    dwg = find_dwg2dxf()
+    print(f"  DWG converter  : {'found' if dwg else 'MISSING'}  {dwg or ''}")
+    if dwg is None and is_frozen():
+        problems.append("DWG converter")
+
     # ``ingetrazo --mcp`` runs scripts/ingetrazo_mcp.py by path, and that
     # server reads its recipe book from core.ai_recipes. The Flatpak of
     # 0.4.9 shipped without scripts/ at all: the app ran, and the MCP door
@@ -187,26 +246,24 @@ def _self_check() -> int:
     if not ok:
         problems.append("AI recipe book")
 
-    # The .skp writer builds every file on top of openskp's bundled blank
-    # (``_scaffold/blank_v17.skp``, package data PyInstaller doesn't collect
-    # by itself): a bundle without it starts fine and dies on Export ▸
-    # SketchUp with "[Errno 2]" — 0.4.1 on Windows shipped exactly that.
+    # openskp ships a blank .skp template made with Trimble's SketchUp SDK
+    # (its writer builds files on top of it). IngeTrazo does not distribute
+    # it since Trimble's notice of 2026-09-28 and has no SketchUp export:
+    # a bundle that still carries it is a packaging regression.
     try:
         from importlib import resources
 
         scaffold = resources.files("openskp") / "_scaffold" / "blank_v17.skp"
-        ok = scaffold.is_file()
-        where = str(scaffold)
-    except Exception as exc:  # openskp itself missing or unimportable
-        ok, where = False, f"({exc})"
-    print(f"  skp scaffold   : {'found' if ok else 'MISSING'}  {where}")
-    if not ok:
-        problems.append("skp scaffold")
+        shipped = scaffold.is_file()
+    except Exception:  # openskp itself missing: reported below
+        shipped = False
+    print(f"  skp template   : {'SHIPPED (remove it)' if shipped else 'not shipped'}")
+    if shipped and getattr(sys, "frozen", False):
+        problems.append("SketchUp SDK template shipped")
 
     # openskp 1.3.0 triangulates with mapbox_earcut, a NATIVE extension that
     # ``import openskp`` needs before it will load at all. Reported on its
-    # own line: without it the scaffold probe above fails too, and its
-    # message would blame the wrong thing.
+    # own line.
     try:
         import mapbox_earcut  # noqa: F401
         ok, where = True, getattr(mapbox_earcut, "__file__", "?")
@@ -227,12 +284,17 @@ def _self_check() -> int:
     if not ok:
         problems.append("manifold3d")
 
-    # The .skp fallback converter is optional (user-installed, runs under
-    # Wine); report presence without failing on absence.
-    wine = shutil.which("wine")
-    skp2dae = Path.home() / ".local" / "share" / "skp2dae" / "skp2dae.exe"
-    print(f"  wine (optional): {wine or 'not installed'}")
-    print(f"  skp2dae (opt.) : {skp2dae if skp2dae.is_file() else 'not installed'}")
+    # Qt's own catalog for the standard buttons (see _install_qt_translator).
+    # Optional: without the file the buttons stay in English, as before, so
+    # it is reported but never fails the check.
+    try:
+        from PySide6.QtCore import QLibraryInfo
+        folder = Path(QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath))
+        have = sorted(f.stem[len("qtbase_"):] for f in folder.glob("qtbase_*.qm"))
+        where = f"{len(have)} languages, es {'yes' if 'es' in have else 'NO'}  {folder}"
+    except Exception as exc:  # noqa: BLE001
+        where = f"({exc})"
+    print(f"  Qt buttons (opt): {where}")
 
     if problems:
         print(f"\nNOT OK — missing: {', '.join(problems)}")

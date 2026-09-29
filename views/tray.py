@@ -1158,7 +1158,7 @@ class ComponentsPanel(QWidget):
         scene = self._window.viewport.scene
         scene.selection.clear()
         scene.selection.update(groups)
-        scene.version += 1
+        scene.bump_view()
         self._window.viewport.update()
 
 
@@ -1231,10 +1231,10 @@ class PartsPanel(QWidget):
         row.addStretch(1)
         row.addWidget(self._copy_btn)
         lay.addLayout(row)
-        self._by_material = QCheckBox(tr("Count identical parts only when "
-                                         "the material matches too"))
+        self._by_material, by_material_row = _wrapping_check(
+            tr("Count identical parts only when the material matches too"))
         self._by_material.setChecked(True)
-        lay.addWidget(self._by_material)
+        lay.addWidget(by_material_row)
 
         # Exploded view (core/explode.py): the parts pulled apart from the
         # assembly's centre. Dragging previews live and lands as ONE undo
@@ -1411,7 +1411,7 @@ class PartsPanel(QWidget):
             self._explode_mode.blockSignals(False)
         self._reassemble_btn.setEnabled(bool(state))
         self._copy_btn.setEnabled(bool(kids))
-        self._by_material.setVisible(bool(kids))
+        self._by_material.parentWidget().setVisible(bool(kids))
         self._split_btn.setEnabled(cont is not None
                                    and not getattr(cont, "billboard", False))
         fit_rows(self.tree, max_rows=14)
@@ -1498,7 +1498,7 @@ class PartsPanel(QWidget):
         self._shown_selection = tuple(
             id(it.data(0, Qt.UserRole)) for it in self._items
             if it.data(0, Qt.UserRole) in scene.selection)
-        scene.version += 1
+        scene.bump_view()
         vp.update()
 
     def _on_item_changed(self, item, column) -> None:
@@ -1624,21 +1624,20 @@ class MaterialsPanel(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 6, 8, 8)
 
-        # Active material preview.
-        row = QHBoxLayout()
+        # Active material preview. A flow, so the Default swatch drops to a
+        # second line in a narrow tray instead of widening it.
+        row = FlowLayout(spacing=6)
         row.addWidget(QLabel(tr("Active:")))
         self._preview = QLabel()
         self._preview.setFixedSize(_SWATCH, _SWATCH)
         self._preview.setFrameShape(QFrame.Box)
         row.addWidget(self._preview)
-        row.addStretch(1)
         # SketchUp's «Default» swatch: paints the material OFF a side.
         default_btn = _swatch_button(
             _default_pixmap(),
             tr("Default material (no material) — paint with it to remove "
                "a face's or an object's material"))
         default_btn.clicked.connect(self._apply_default)
-        row.addWidget(default_btn)
         root.addLayout(row)
 
         # SketchUp's "edit material": tile width/height + rotation, tucked
@@ -1654,7 +1653,8 @@ class MaterialsPanel(QWidget):
         self._edit_toggle.setStyleSheet(
             "QToolButton { border: none; padding: 2px; }"
             "QToolButton:hover { background: palette(midlight); }")
-        row.insertWidget(2, self._edit_toggle)
+        row.addWidget(self._edit_toggle)
+        row.addWidget(default_btn)
         self._edit_body = QWidget()
         # Two rows, not one: tile size + rotation above, colour below. A
         # single row with W/H/Rot/Colour/mode/Apply runs past the panel's
@@ -1745,7 +1745,7 @@ class MaterialsPanel(QWidget):
         root.addWidget(self._heading(tr("Library")))
         self._fill_library_categories(root)
 
-        btns = QHBoxLayout()
+        btns = FlowLayout(spacing=4)         # wraps in a narrow tray
         add_color = QPushButton(tr("+ Color…"))
         add_color.clicked.connect(self._add_color)
         add_tex = QPushButton(tr("+ Texture…"))
@@ -1989,11 +1989,12 @@ class MaterialsPanel(QWidget):
                               self._apply_color(c, name=n))
             if name:
                 # Slice (b): edit the material once, restamp every face
-                # that wears it — right-click the swatch.
+                # that wears it — right-click the swatch; and its finish
+                # for the render (#181).
                 b.setContextMenuPolicy(Qt.CustomContextMenu)
                 b.customContextMenuRequested.connect(
-                    lambda _pos, n=name, c=tuple(col):
-                    self._edit_named_color(n, c))
+                    lambda _pos, n=name, c=tuple(col), w=b:
+                    self._swatch_menu(w, n, color=c))
             self._in_model_grid.addWidget(b, i // self.COLS, i % self.COLS)
             i += 1
         for path, tex in textures.items():
@@ -2006,6 +2007,10 @@ class MaterialsPanel(QWidget):
                 lambda _=False, t=dict(tex), n=t_name,
                 o=opacities.get(path): self._apply_texture(
                     t["path"], t.get("sw", 1.0), name=n, opacity=o))
+            if t_name:
+                b.setContextMenuPolicy(Qt.CustomContextMenu)
+                b.customContextMenuRequested.connect(
+                    lambda _pos, n=t_name, w=b: self._swatch_menu(w, n))
             self._in_model_grid.addWidget(b, i // self.COLS, i % self.COLS)
             i += 1
         if bar is not None and keep is not None:
@@ -2025,6 +2030,48 @@ class MaterialsPanel(QWidget):
         self._window._activate_tool("paint")
         self._refresh_preview()
 
+    def _swatch_menu(self, button, name: str, color=None) -> None:
+        """Right-click on a named material: edit its colour, and choose its
+        finish for Render with Blender (#181) — «Automatic» names the finish
+        it would be guessed as, so the user sees what the name already says."""
+        from PySide6.QtGui import QCursor
+        from PySide6.QtWidgets import QMenu
+        from core import finish as fin
+        scene = self._window.viewport.scene
+        mat = scene.materials.get(name)
+        menu = QMenu(button)
+        if color is not None:
+            menu.addAction(tr("Edit colour…"),
+                           lambda: self._edit_named_color(name, color))
+        if mat is not None:
+            sub = menu.addMenu(tr("Finish for the render"))
+            pic = (mat.texture or {}).get("path")
+            guessed = fin.guess(name, pic and Path(pic).name, mat.opacity)
+            auto = sub.addAction(tr("Automatic: {finish}",
+                                    finish=tr(fin.LABELS[guessed])))
+            auto.setCheckable(True)
+            auto.setChecked(mat.finish not in fin.FINISHES)
+            auto.triggered.connect(lambda: self._set_finish(name, None))
+            sub.addSeparator()
+            for key in fin.FINISHES:
+                act = sub.addAction(tr(fin.LABELS[key]))
+                act.setCheckable(True)
+                act.setChecked(mat.finish == key)
+                act.triggered.connect(
+                    lambda _c=False, k=key: self._set_finish(name, k))
+        if not menu.isEmpty():
+            menu.exec(QCursor.pos())
+
+    def _set_finish(self, name: str, finish) -> None:
+        from core.finish import LABELS
+        from core.history import SetMaterialFinishCommand
+        self._window.viewport.history.execute(
+            SetMaterialFinishCommand(name, finish))
+        label = tr("Automatic") if finish is None else tr(LABELS[finish])
+        self._window.statusBar().showMessage(
+            tr("Finish of '{name}' for the render: {finish}", name=name,
+               finish=label), 3000)
+
     def _edit_named_color(self, name: str, current_rgb) -> None:
         """Slice (b) of the registry track: edit a named colour material
         and restamp every face wearing it, one undoable step."""
@@ -2041,7 +2088,8 @@ class MaterialsPanel(QWidget):
             return
         new_mat = Material(
             name, color=(chosen.redF(), chosen.greenF(), chosen.blueF()),
-            opacity=existing.opacity if existing else None)
+            opacity=existing.opacity if existing else None,
+            finish=existing.finish if existing else None)
         self._window.viewport.history.execute(
             RestampMaterialCommand(name, new_mat))
         self._window.viewport.notify_scene_changed()
@@ -3077,6 +3125,36 @@ class _ScrollAnchor(QObject):
         return False
 
 
+def _wrapping_check(text: str):
+    """A check box whose text wraps: ``(checkbox, row widget)``. A long
+    QCheckBox label is one line and sets the tray's minimum width; here the
+    label is a word-wrapping QLabel beside a text-less box, and clicking the
+    label toggles the box like a check box's own text would."""
+    row = QWidget()
+    box = QHBoxLayout(row)
+    box.setContentsMargins(0, 0, 0, 0)
+    check = QCheckBox()
+    label = QLabel(text)
+    label.setWordWrap(True)
+    label.mousePressEvent = lambda _e: check.isEnabled() and check.toggle()
+    box.addWidget(check, 0, Qt.AlignTop)
+    box.addWidget(label, 1)
+    return check, row
+
+
+#: Combo boxes in a tray ask for this many characters, not their longest
+#: item: «Esri World Imagery (satellite)» would otherwise set the width.
+_COMBO_MIN_CHARS = 8
+
+
+def _let_narrow(widget: QWidget) -> None:
+    """Keep a tray's combo boxes from sizing the dock area to their longest
+    item; the popup still shows every item in full."""
+    for combo in widget.findChildren(QComboBox):
+        combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        combo.setMinimumContentsLength(_COMBO_MIN_CHARS)
+
+
 def _scrolled(sections) -> QScrollArea:
     """A scroll area wrapping a vertical stack of collapsible sections."""
     inner = QWidget()
@@ -3090,6 +3168,7 @@ def _scrolled(sections) -> QScrollArea:
         section.installEventFilter(anchor)
         col.addWidget(section)
     col.addStretch(1)
+    _let_narrow(inner)
     scroll.setWidgetResizable(True)
     scroll.setWidget(inner)
     scroll.setMinimumWidth(240)
@@ -3136,10 +3215,12 @@ class LayersPanel(QWidget):
                                  "highlighted in the list (also: Entity "
                                  "info ▸ Layer, or right-click ▸ Layer)"))
         assign_btn.clicked.connect(self._on_assign)
+        # A flow, not a row: the four buttons wrap when the tray is narrow
+        # instead of setting the whole right-hand dock area's minimum width.
+        row = FlowLayout(spacing=4)
         row.addWidget(add_btn)
         row.addWidget(del_btn)
         row.addWidget(purge_btn)
-        row.addStretch(1)
         row.addWidget(assign_btn)
         lay.addLayout(row)
         self.refresh()
@@ -3342,9 +3423,9 @@ class ScenesPanel(QWidget):
         del_btn = QPushButton(tr("−"))
         del_btn.setToolTip(tr("Delete the selected scene"))
         del_btn.clicked.connect(self._on_delete)
+        row = FlowLayout(spacing=4)          # wraps in a narrow tray (see Layers)
         row.addWidget(add_btn)
         row.addWidget(upd_btn)
-        row.addStretch(1)
         row.addWidget(del_btn)
         lay.addLayout(row)
         self.refresh()
@@ -3574,7 +3655,7 @@ class BimPanel(QWidget):
             scene.selection.add(obj["group"])
         else:
             scene.selection.update(obj["faces"])
-        scene.version += 1
+        scene.bump_view()
         self._window.viewport.update()
 
     def _on_export_csv(self) -> None:

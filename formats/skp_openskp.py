@@ -918,7 +918,7 @@ def _is_empty_model(model, skp_path, legacy_era: bool) -> bool:
 
 def _adapt(model, name: str, skp_path=None):
     """An ``SkpModel`` → a payload ``{"backend", "groups", "protos"}`` or
-    ``None`` when it yields no geometry (so the seam can fall back to skp2dae).
+    ``None`` when it yields no geometry (the seam reports it as unreadable).
 
     SketchUp-style structure, mirroring the DAE reference import:
 
@@ -1220,9 +1220,9 @@ def _adapt(model, name: str, skp_path=None):
     payload = {"backend": "openskp", "groups": groups, "protos": protos}
     if not groups and not any(e["faces"] or e["children"] for e in protos):
         # Nothing to draw. Either the parser missed the geometry (→ None,
-        # the caller falls back to skp2dae) or the file really is empty — a
-        # template, #103: sending THAT to the converter asked Windows users
-        # to install a program to open a blank page.
+        # the caller reports it as unreadable) or the file really is empty
+        # — a template, #103: reporting THAT as unreadable would be wrong,
+        # it is a blank page.
         if not _is_empty_model(model, skp_path, legacy_era):
             return None
         payload["empty"] = True

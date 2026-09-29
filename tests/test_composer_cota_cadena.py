@@ -203,3 +203,69 @@ def test_the_second_key_comes_across_without_its_gap():
         for key, _dropped in ComposerWindow._COTA_STYLE_KEYS_OLD:
             QSettings().remove(key)
         QSettings().remove(ComposerWindow._COTA_STYLE_KEY)
+
+
+def _rebuilt(composer):
+    """What the app does after every placed cota: the history rebuilds
+    the canvas (#187 — the offscreen tests never got to it)."""
+    composer._rebuild_after_change()
+    _app.processEvents()
+
+
+@pytest.mark.parametrize("tool", ["cota_cadena", "cota_base"])
+def test_a_chain_outlives_the_canvas_rebuild_of_each_cota(tool):
+    """#187 (tonfdd): «The run is finished right after the first cota is
+    placed… The total is never stacked.» Each cota rebuilt the canvas and
+    the rebuild ended the run; now the run keeps going on the same sheet."""
+    composer, _host = _composer()
+    view = composer._view
+    composer._set_tool_mode(tool)
+    P = [QPointF(20, 50), QPointF(50, 50), QPointF(90, 50), QPointF(110, 50)]
+    view._chain_click(P[0], None)
+    view._chain_click(P[1], None)
+    view._chain_click(QPointF(35, 40), None)
+    _rebuilt(composer)
+    view._chain_click(P[2], None)
+    _rebuilt(composer)
+    view._chain_click(P[3], None)
+    _rebuilt(composer)
+    assert len(composer.comp.cotas) == 3
+    assert len(view._chain_cotas) == 3               # one run, not three
+    view._chain_click(P[3], None)                    # the last point: end
+    if tool == "cota_cadena":
+        assert len(composer.comp.cotas) == 4         # the total stacked
+        assert composer.comp.cotas[-1].real_distance_m() == pytest.approx(9.0)
+    assert view._chain_cotas == []
+
+
+def test_an_undo_mid_chain_drops_that_segment_from_the_run():
+    composer, _host = _composer()
+    view = composer._view
+    composer._set_tool_mode("cota_cadena")
+    P = [QPointF(20, 50), QPointF(50, 50), QPointF(90, 50)]
+    view._chain_click(P[0], None)
+    view._chain_click(P[1], None)
+    view._chain_click(QPointF(35, 40), None)
+    _rebuilt(composer)
+    view._chain_click(P[2], None)
+    _rebuilt(composer)
+    composer._on_undo()                              # takes 50 → 90 back
+    _rebuilt(composer)
+    assert len(view._chain_cotas) == 1
+    assert len(view._chain_pts) == 2                 # continue from 50
+    view._chain_click(QPointF(70, 50), None)
+    _rebuilt(composer)
+    last = composer.comp.cotas[-1]
+    assert (last.x_mm, last.dx_mm) == (50, 20)
+
+
+def test_another_sheet_ends_the_run():
+    composer, _host = _composer()
+    view = composer._view
+    composer._set_tool_mode("cota_cadena")
+    view._chain_click(QPointF(20, 50), None)
+    view._chain_click(QPointF(50, 50), None)
+    view._chain_click(QPointF(35, 40), None)
+    view._chain_comp = object()                      # the run was elsewhere
+    _rebuilt(composer)
+    assert view._chain_pts == [] and view._chain_cotas == []
