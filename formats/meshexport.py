@@ -100,14 +100,17 @@ def _facing_quad(mesh, toward):
     return out
 
 
-def _placements_facing(group, toward):
+def _placements_facing(group, toward, figures: bool = True):
     """Every placement of ``group`` in world space, face-me figures (at any
     depth) turned toward the camera: a cut-out outline (``"mesh"``) by
-    :func:`_turned_toward`, a simple quad rebuilt by :func:`_facing_quad`."""
+    :func:`_turned_toward`, a simple quad rebuilt by :func:`_facing_quad`.
+    ``figures=False`` leaves the figures out (:func:`faceme_figures`)."""
     from core.group import iter_placements, transformed_mesh
     for g, m in iter_placements(group):
-        mesh = g.mesh if m is None else transformed_mesh(g.mesh, m)
         kind = getattr(g, "billboard", False)
+        if kind and not figures:
+            continue
+        mesh = g.mesh if m is None else transformed_mesh(g.mesh, m)
         if kind == "mesh":
             mesh = _turned_toward(mesh, toward)
         elif kind:
@@ -115,7 +118,48 @@ def _placements_facing(group, toward):
         yield from mesh.faces
 
 
-def world_faces(scene, face_me=None):
+def _feet(mesh):
+    """Where a figure stands: the middle of its footprint, at its lowest
+    point — the vertical it turns about."""
+    from PySide6.QtGui import QVector3D
+    verts = [v.position for v in mesh.vertices]
+    if not verts:
+        return None
+    xs = [p.x() for p in verts]
+    ys = [p.y() for p in verts]
+    return QVector3D((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2,
+                     min(p.z() for p in verts))
+
+
+def faceme_figures(scene, toward):
+    """Each visible face-me figure as ``(faces, feet, yaw)``: its faces
+    turned toward ``toward(feet)`` as :func:`world_faces` gives them, the
+    point it turns about and the heading it was turned to (radians, from
+    +X). A renderer that moves the camera turns each one by the change of
+    heading instead of exporting the model again (#181, sync with view)."""
+    import math
+    from core.group import iter_placements, transformed_mesh
+    out = []
+    for group in getattr(scene, "groups", []):
+        if not scene.entity_visible(group) or not _has_billboard(group):
+            continue
+        for g, m in iter_placements(group):
+            kind = getattr(g, "billboard", False)
+            if not kind:
+                continue
+            mesh = g.mesh if m is None else transformed_mesh(g.mesh, m)
+            feet = _feet(mesh)
+            if feet is None:
+                continue
+            d = toward(feet)
+            yaw = math.atan2(d.y(), d.x())
+            turned = (_turned_toward(mesh, toward) if kind == "mesh"
+                      else _facing_quad(mesh, toward))
+            out.append((list(turned.faces), feet, yaw))
+    return out
+
+
+def world_faces(scene, face_me=None, figures: bool = True):
     """Every renderable face in WORLD space: loose mesh + groups. Component
     instances share a prototype mesh in local coordinates, so their faces come
     from a transformed copy. Same rule as ``formats.stl`` / ``formats.obj``.
@@ -123,7 +167,8 @@ def world_faces(scene, face_me=None):
     ``face_me`` — a function from a figure's feet to the direction it should
     look (a camera) — brings the face-me figures along, turned that way, as
     a render needs them (#181). Without it they stay out, as before: a file
-    has no camera for them to face."""
+    has no camera for them to face. ``figures=False`` keeps them out even
+    then — :func:`faceme_figures` hands them over one by one."""
     if face_me is not None and hasattr(scene, "render_faces"):
         for f in scene.loose_mesh.faces:
             if scene.entity_visible(f):
@@ -133,7 +178,7 @@ def world_faces(scene, face_me=None):
             if not scene.entity_visible(g):
                 continue
             if _has_billboard(g):
-                yield from _placements_facing(g, face_me)
+                yield from _placements_facing(g, face_me, figures)
             else:
                 yield from world_mesh(g).faces
         return
@@ -172,45 +217,69 @@ def collect_geometry(scene, face_me=None):
     ``key`` is ``("color", rgb)`` or ``("tex", basename)`` — identical to the
     OBJ exporter's material keys, so painted colours and textures survive.
     """
-    from core.texture import affine_uv, planar_uv
-
     materials: dict[tuple, dict] = {}
     prims: dict[tuple, list] = {}
     for face in world_faces(scene, face_me):
-        n = face.normal()
-        op = face.attrs.get("opacity")
-        op = None if op is None or float(op) >= 0.999 else round(float(op), 3)
-        tex = face.attrs.get("texture")
-        if tex is not None and tex.get("path"):
-            src = Path(tex["path"])
-            key = ("tex", src.name) if op is None else ("tex", src.name, op)
-            materials.setdefault(key, {"color": (1.0, 1.0, 1.0),
-                                       "map": src.name, "src": src,
-                                       "opacity": op})
-            if face.attrs.get("mat") and "mat" not in materials[key]:
-                materials[key]["mat"] = face.attrs["mat"]
-            sw = tex.get("sw", 1.0) or 1.0
-            sh = tex.get("sh", 1.0) or 1.0
-            rot = float(tex.get("rot", 0.0))
-            uvw = tex.get("uvw")
-            for tri in face.triangulate():
-                pts = list(tri)
-                uv = affine_uv(uvw, pts) if uvw else planar_uv(n, pts, sw, sh, rot)
-                prims.setdefault(key, []).append(
-                    (n, [(pts[k], (uv[k][0], uv[k][1])) for k in range(3)]))
-        else:
-            col = tuple(face.attrs.get("color") or _DEFAULT_COLOR)
-            key = ("color", col) if op is None else ("color", col, op)
-            materials.setdefault(key, {"color": col, "map": None,
-                                       "opacity": op})
-            if face.attrs.get("mat") and "mat" not in materials[key]:
-                materials[key]["mat"] = face.attrs["mat"]
-            for tri in face.triangulate():
-                pts = list(tri)
-                prims.setdefault(key, []).append(
-                    (n, [(pts[k], None) for k in range(3)]))
+        _add_face(face, materials, prims)
     _resolve_finishes(scene, materials)
     return materials, prims
+
+
+def collect_geometry_split(scene, face_me):
+    """:func:`collect_geometry` with the face-me figures apart: returns
+    ``(materials, prims, figures)`` where ``prims`` holds everything else
+    and each figure is ``{"prims": …, "feet": QVector3D, "yaw": float}``
+    (see :func:`faceme_figures`); ``materials`` covers all of them."""
+    materials: dict[tuple, dict] = {}
+    prims: dict[tuple, list] = {}
+    for face in world_faces(scene, face_me, figures=False):
+        _add_face(face, materials, prims)
+    figures = []
+    for faces, feet, yaw in faceme_figures(scene, face_me):
+        own: dict[tuple, list] = {}
+        for face in faces:
+            _add_face(face, materials, own)
+        if own:
+            figures.append({"prims": own, "feet": feet, "yaw": yaw})
+    _resolve_finishes(scene, materials)
+    return materials, prims, figures
+
+
+def _add_face(face, materials, prims) -> None:
+    """One face's triangles into ``prims`` under its material's key."""
+    from core.texture import affine_uv, planar_uv
+    n = face.normal()
+    op = face.attrs.get("opacity")
+    op = None if op is None or float(op) >= 0.999 else round(float(op), 3)
+    tex = face.attrs.get("texture")
+    if tex is not None and tex.get("path"):
+        src = Path(tex["path"])
+        key = ("tex", src.name) if op is None else ("tex", src.name, op)
+        materials.setdefault(key, {"color": (1.0, 1.0, 1.0),
+                                   "map": src.name, "src": src,
+                                   "opacity": op})
+        if face.attrs.get("mat") and "mat" not in materials[key]:
+            materials[key]["mat"] = face.attrs["mat"]
+        sw = tex.get("sw", 1.0) or 1.0
+        sh = tex.get("sh", 1.0) or 1.0
+        rot = float(tex.get("rot", 0.0))
+        uvw = tex.get("uvw")
+        for tri in face.triangulate():
+            pts = list(tri)
+            uv = affine_uv(uvw, pts) if uvw else planar_uv(n, pts, sw, sh, rot)
+            prims.setdefault(key, []).append(
+                (n, [(pts[k], (uv[k][0], uv[k][1])) for k in range(3)]))
+    else:
+        col = tuple(face.attrs.get("color") or _DEFAULT_COLOR)
+        key = ("color", col) if op is None else ("color", col, op)
+        materials.setdefault(key, {"color": col, "map": None,
+                                   "opacity": op})
+        if face.attrs.get("mat") and "mat" not in materials[key]:
+            materials[key]["mat"] = face.attrs["mat"]
+        for tri in face.triangulate():
+            pts = list(tri)
+            prims.setdefault(key, []).append(
+                (n, [(pts[k], None) for k in range(3)]))
 
 
 def _resolve_finishes(scene, materials) -> None:

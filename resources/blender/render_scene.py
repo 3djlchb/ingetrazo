@@ -14,6 +14,15 @@ Written against Blender 3.6–5.x: every name that changed between versions
 (the EEVEE engine id, the physical sky) is tried in turn, and anything a
 version lacks degrades to something plainer instead of failing the render.
 Progress goes to stdout as ``INGETRAZO <what>`` lines the dialog reads.
+
+With ``"serve": true`` in the job it renders nothing at first: it builds
+the scene once, says ``INGETRAZO ready`` and then reads one JSON request per
+line on stdin — ``{"camera": …, "output": …, "width": …, "height": …,
+"samples": …}`` → renders it and says ``INGETRAZO done <output>``;
+``{"quit": true}`` or the end of stdin stops it. That is Render ▸ «Sync
+with the view»: only the camera travels, and the face-me figures (glTF
+nodes with ``ingetrazo_faceme`` = feet + heading in their extras) are turned
+toward each new camera instead of exporting the model again.
 """
 import json
 import math
@@ -123,10 +132,13 @@ def apply_finishes():
 
 
 def set_camera(scene, cam_cfg, width, height):
-    data = bpy.data.cameras.new("IngeTrazo")
-    cam = bpy.data.objects.new("IngeTrazo camera", data)
-    scene.collection.objects.link(cam)
-    scene.camera = cam
+    cam = scene.camera
+    if cam is None or cam.name != "IngeTrazo camera":
+        data = bpy.data.cameras.new("IngeTrazo")
+        cam = bpy.data.objects.new("IngeTrazo camera", data)
+        scene.collection.objects.link(cam)
+        scene.camera = cam
+    data = cam.data
     eye = Vector(cam_cfg["eye"])
     target = Vector(cam_cfg["target"])
     up = Vector(cam_cfg["up"])
@@ -150,6 +162,39 @@ def set_camera(scene, cam_cfg, width, height):
     data.clip_start = max(cam_cfg.get("near", 0.05), 1e-4)
     data.clip_end = max(cam_cfg.get("far", 1e5), data.clip_start * 10)
     return cam
+
+
+def find_figures():
+    """The face-me figures: ``(object, feet, heading, matrix as imported)``."""
+    out = []
+    for obj in bpy.context.scene.objects:
+        tag = obj.get("ingetrazo_faceme")
+        if tag is None:
+            continue
+        try:
+            fx, fy, fz, yaw = (float(v) for v in tag)
+        except (TypeError, ValueError):
+            continue
+        out.append((obj, Vector((fx, fy, fz)), yaw, obj.matrix_world.copy()))
+    if out:
+        say("figures", len(out))
+    return out
+
+
+def face_figures(figures, cam_cfg):
+    """Turn each figure about the vertical through its feet to face the
+    camera — as the viewport does: toward the eye in perspective, along the
+    view in a parallel projection."""
+    eye = Vector(cam_cfg["eye"])
+    target = Vector(cam_cfg["target"])
+    for obj, feet, yaw0, base in figures:
+        d = (eye - feet) if cam_cfg.get("perspective", True) else (eye - target)
+        if math.hypot(d.x, d.y) < 1e-9:
+            continue
+        turn = math.atan2(d.y, d.x) - yaw0
+        obj.matrix_world = (Matrix.Translation(feet)
+                            @ Matrix.Rotation(turn, 4, "Z")
+                            @ Matrix.Translation(-feet) @ base)
 
 
 def add_sun(scene, direction, strength):
@@ -266,6 +311,13 @@ def add_ground(scene, z, size, color):
     ground.data.materials.append(mat)
 
 
+def set_samples(scene, samples):
+    if scene.render.engine == "CYCLES":
+        scene.cycles.samples = samples
+    elif hasattr(scene.eevee, "taa_render_samples"):
+        scene.eevee.taa_render_samples = samples
+
+
 def set_engine(scene, engine, samples):
     if engine == "cycles":
         scene.render.engine = "CYCLES"
@@ -297,9 +349,8 @@ def set_engine(scene, engine, samples):
                 break
             except TypeError:
                 continue
+        set_samples(scene, samples)
         eevee = scene.eevee
-        if hasattr(eevee, "taa_render_samples"):
-            eevee.taa_render_samples = samples
         for flag in ("use_shadows", "use_raytracing", "use_gtao",
                      "use_ssr", "use_ssr_refraction"):
             if hasattr(eevee, flag):
@@ -313,8 +364,10 @@ def main():
     scene = bpy.context.scene
     import_model(job["glb"])
     apply_finishes()
+    figures = find_figures()
     w, h = int(job["width"]), int(job["height"])
     set_camera(scene, job["camera"], w, h)
+    face_figures(figures, job["camera"])
     ambience = job.get("ambience", "day")
     sun_dir = job.get("sun") if ambience == "day" else None
     if ambience == "night":
@@ -360,12 +413,42 @@ def main():
 
     if hasattr(bpy.app.handlers, "render_stats"):
         bpy.app.handlers.render_stats.append(_stats)
+    if job.get("serve"):
+        serve(scene, figures)
+        return
     say("rendering", w, "x", h)
     bpy.ops.render.render(write_still=True)
     if job.get("blend"):
         bpy.ops.wm.save_as_mainfile(filepath=job["blend"])
         say("blend", job["blend"])
     say("done", job["output"])
+
+
+
+def serve(scene, figures):
+    """Render each camera IngeTrazo sends until told to stop."""
+    say("ready")
+    r = scene.render
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            req = json.loads(line)
+        except ValueError:
+            say("error", "bad request")
+            continue
+        if req.get("quit"):
+            break
+        w, h = int(req["width"]), int(req["height"])
+        set_camera(scene, req["camera"], w, h)
+        face_figures(figures, req["camera"])
+        set_samples(scene, int(req.get("samples", 16)))
+        r.resolution_x, r.resolution_y = w, h
+        r.filepath = req["output"]
+        say("rendering", w, "x", h)
+        bpy.ops.render.render(write_still=True)
+        say("done", req["output"])
 
 
 main()

@@ -2235,5 +2235,13 @@
  "Listening on 127.0.0.1:{port} — connect your MCP client with the lines below.": "正在监听 127.0.0.1:{port} — 用下面的内容连接你的 MCP 客户端。",
  "Off. Start it to let an AI agent (Claude, Cursor, Antigravity…) model in this document over MCP.": "已关闭。启动后，AI 代理（Claude、Cursor、Antigravity…）可通过 MCP 在此文档中建模。",
  "Copied": "已复制",
- "Render with Blender…": "用 Blender 渲染…"
+ "Render with Blender…": "用 Blender 渲染…",
+ "Sync with the view": "与视图同步",
+ "Stop moving in the model and a quick draft of what you see is rendered here by itself; «Render» still makes the final image": "在模型中停止移动，这里会自动渲染当前视图的快速草图；「渲染」仍生成最终图像",
+ "Stop moving in the model and a quick draft of what you see is rendered in the image window by itself; «Render» still makes the final image": "在模型中停止移动，图像窗口会自动渲染当前视图的快速草图；「渲染」仍生成最终图像",
+ "Loading the scene into Blender…": "正在将场景载入 Blender…",
+ "Rendering the view…": "正在渲染视图…",
+ "In sync — stop moving to update": "已同步 — 停下即可更新",
+ "Blender stopped; it will start again": "Blender 已停止，将重新启动",
+ "In sync": "已同步"
 }

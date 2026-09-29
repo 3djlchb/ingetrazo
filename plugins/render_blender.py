@@ -22,7 +22,8 @@ import math
 import time
 from pathlib import Path
 
-from PySide6.QtCore import (QPointF, QProcess, QProcessEnvironment,
+from PySide6.QtCore import (QObject, QPointF, QProcess, QProcessEnvironment,
+                            QTimer, Signal,
                             QSettings, Qt, QUrl)
 from PySide6.QtGui import (QColor, QDesktopServices, QFont, QPainter, QPen,
                            QPixmap, QVector3D)
@@ -153,15 +154,15 @@ class _ZoomView(QGraphicsView):
 
 
 class ImageViewer(QDialog):
-    """A larger look at a render: fit, 100 %, zoom and pan."""
+    """A larger look at a render: fit, 100 %, zoom and pan — and, with
+    «Sync with the view», the image that follows the camera."""
 
-    def __init__(self, path: Path, save, parent=None, folder=None) -> None:
+    def __init__(self, path: Path, save, parent=None, folder=None,
+                 sync=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle(tr("Render") + f" — {path.name}")
         self.resize(1200, 800)
-        pix = QPixmap(str(path))
         lay = QVBoxLayout(self)
-        self.view = _ZoomView(pix, self)
+        self.view = _ZoomView(QPixmap(), self)
         lay.addWidget(self.view, 1)
         row = QHBoxLayout()
         buttons = [(tr("Fit to window"), self.view.fit),
@@ -173,13 +174,46 @@ class ImageViewer(QDialog):
             b = QPushButton(label)
             b.clicked.connect(slot)
             row.addWidget(b)
-        row.addStretch(1)
-        row.addWidget(QLabel(tr("Wheel: zoom · drag: move · {w} × {h} px",
-                                w=pix.width(), h=pix.height())))
+        self.sync_box = QCheckBox(tr("Sync with the view"))
+        self.sync_box.setToolTip(tr(
+            "Stop moving in the model and a quick draft of what you see is "
+            "rendered here by itself; «Render» still makes the final image"))
+        if sync is not None:
+            self.sync_box.toggled.connect(sync)
+        else:
+            self.sync_box.setVisible(False)
+        row.addWidget(self.sync_box)
+        self.info = QLabel()
+        # The status gives way on a narrow window, never the buttons.
+        self.info.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.info.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        row.addWidget(self.info, 1)
         close = QPushButton(tr("Close"))
         close.clicked.connect(self.close)
         row.addWidget(close)
         lay.addLayout(row)
+        self._shown_size = None
+        self.set_image(path)
+
+    def set_image(self, path: Path, note: str = "") -> None:
+        """Show ``path``; the zoom stays unless the picture changed size."""
+        pix = QPixmap(str(path))
+        self.view._item.setPixmap(pix)
+        self.view.scene().setSceneRect(self.view._item.boundingRect())
+        self.setWindowTitle(tr("Render") + f" — {path.name}")
+        self.info.setText((note + " · " if note else "") + tr(
+            "Wheel: zoom · drag: move · {w} × {h} px",
+            w=pix.width(), h=pix.height()))
+        size = (pix.width(), pix.height())
+        if self.isVisible() and size != self._shown_size:
+            self.view.fit()
+        self._shown_size = size
+
+    def set_note(self, note: str) -> None:
+        pix = self.view._item.pixmap()
+        self.info.setText((note + " · " if note else "") + tr(
+            "Wheel: zoom · drag: move · {w} × {h} px",
+            w=pix.width(), h=pix.height()))
 
     def showEvent(self, ev) -> None:
         super().showEvent(ev)
@@ -231,6 +265,172 @@ def _make_pick_tool(prompt: str, done, cancelled):
 
 # ---- The panel ---------------------------------------------------------------------
 
+class SyncSession(QObject):
+    """«Sync with the view»: one Blender kept open with the scene loaded;
+    whenever the camera comes to rest somewhere new, it renders a quick
+    draft of that view (issue #181, Marco: «me detenga y la ventana del
+    render automáticamente detecte y haga el render»).
+
+    Only the camera travels to Blender; an edit to the model, its lights or
+    the image settings reloads the scene once. A request made while Blender
+    is busy is not queued: when the running image is done, the camera as it
+    is THEN is rendered, so it never falls behind a camera already left."""
+
+    image = Signal(object)          # Path of a finished draft
+    state = Signal(str)             # a line for the viewer and the panel
+
+    POLL_MS = 150
+
+    def __init__(self, panel) -> None:
+        super().__init__(panel)
+        self.panel = panel
+        self._proc: QProcess | None = None
+        self._ready = False
+        self._busy = False
+        self._buf = ""
+        self._scene_key = None      # what the loaded scene was built from
+        self._seen_key = None       # camera as last polled
+        self._still_since = 0.0
+        self._done_key = None       # camera of the image on screen (or asked)
+        self._count = 0
+        self._work: Path | None = None
+        self._timer = QTimer(self)
+        self._timer.setInterval(self.POLL_MS)
+        self._timer.timeout.connect(self._poll)
+
+    @property
+    def active(self) -> bool:
+        return self._timer.isActive()
+
+    def start(self) -> None:
+        if self.active:
+            return
+        self._done_key = None
+        self._seen_key = None
+        self._timer.start()
+        self._poll()
+
+    def stop(self) -> None:
+        self._timer.stop()
+        self._shutdown()
+
+    # ---- Watching the camera ---------------------------------------------
+    def _poll(self) -> None:
+        cam_key = rb.camera_key(self.panel.app.viewport.camera)
+        now = time.monotonic()
+        if cam_key != self._seen_key:
+            self._seen_key = cam_key
+            self._still_since = now
+            return
+        if QApplication.mouseButtons() != Qt.NoButton:
+            self._still_since = now          # still dragging, only paused
+            return
+        if (now - self._still_since) * 1000 < rb.SYNC_REST_MS:
+            return
+        scene_key = self.panel._sync_scene_key()
+        if scene_key != self._scene_key:
+            self._load(scene_key)
+            return
+        if cam_key != self._done_key and self._ready and not self._busy:
+            self._render(cam_key)
+
+    # ---- The Blender that waits ------------------------------------------
+    def _load(self, scene_key) -> None:
+        self._shutdown()
+        self._scene_key = scene_key
+        self._done_key = None
+        panel = self.panel
+        st = _state(panel.app)
+        base = _work_dir()
+        self._work = base.with_name(base.name + "-sync")
+        self.state.emit(tr("Loading the scene into Blender…"))
+        try:
+            job = rb.write_job(
+                panel.app.scene, panel.app.viewport.camera, self._work,
+                engine=panel._engine.currentData(), quality=0,
+                width=rb.SYNC_WIDTH, height=self._height(),
+                ground=panel._ground.isChecked(), ambience=st["ambience"],
+                lights=st["lights"], sun_scale=st["sun_scale"], serve=True)
+        except Exception as exc:  # noqa: BLE001 - say it, do not crash
+            self.state.emit(str(exc))
+            self._timer.stop()
+            return
+        argv = rb.command(panel._found, job)
+        proc = QProcess(self)
+        env = QProcessEnvironment()
+        for k, v in rb.clean_env().items():
+            env.insert(k, v)
+        proc.setProcessEnvironment(env)
+        proc.setProcessChannelMode(QProcess.MergedChannels)
+        proc.readyReadStandardOutput.connect(self._read)
+        proc.finished.connect(self._ended)
+        self._proc = proc
+        self._ready = self._busy = False
+        self._buf = ""
+        proc.start(argv[0], argv[1:])
+
+    def _height(self) -> int:
+        return max(2, round(rb.SYNC_WIDTH / self.panel._aspect()))
+
+    def _render(self, cam_key) -> None:
+        self._count += 1
+        out = self._work / f"sync-{self._count:04d}.png"
+        stale = self._work / f"sync-{self._count - 3:04d}.png"
+        if stale.exists():                     # keep the last few only
+            try:
+                stale.unlink()
+            except OSError:
+                pass
+        self._busy = True
+        self._done_key = cam_key
+        self.state.emit(tr("Rendering the view…"))
+        self._proc.write(rb.sync_request(
+            self.panel.app.viewport.camera, out, rb.SYNC_WIDTH,
+            self._height(), self.panel._engine.currentData()).encode())
+
+    def _read(self) -> None:
+        if self._proc is None:
+            return
+        self._buf += bytes(self._proc.readAllStandardOutput()).decode(
+            "utf-8", "replace")
+        *lines, self._buf = self._buf.split("\n")
+        for line in lines:
+            if line.startswith("INGETRAZO ready"):
+                self._ready = True
+                self.state.emit(tr("In sync — stop moving to update"))
+            elif line.startswith("INGETRAZO done "):
+                self._busy = False
+                self.image.emit(Path(line[len("INGETRAZO done "):].strip()))
+                self.state.emit(tr("In sync — stop moving to update"))
+
+    def _ended(self, *_a) -> None:
+        if self.sender() is not self._proc:
+            return
+        self._proc = None
+        self._ready = self._busy = False
+        if self.active:
+            self._scene_key = None             # try again at the next rest
+            self.state.emit(tr("Blender stopped; it will start again"))
+
+    def _shutdown(self) -> None:
+        proc, self._proc = self._proc, None
+        self._ready = self._busy = False
+        self._scene_key = None
+        if proc is None:
+            return
+        try:
+            proc.finished.disconnect(self._ended)
+        except (RuntimeError, TypeError):
+            pass
+        if proc.state() != QProcess.NotRunning:
+            proc.write(b'{"quit": true}\n')
+            proc.closeWriteChannel()
+            if not proc.waitForFinished(1500):
+                proc.kill()
+                proc.waitForFinished(1000)
+        proc.deleteLater()
+
+
 def _Section(title: str, key: str, parent=None) -> FoldSection:
     """A folding section whose open state is kept under ``render/``."""
     return FoldSection(title, _SETTINGS + "open_" + key, parent)
@@ -252,6 +452,10 @@ class RenderPanel(QWidget):
         self._image: Path | None = None
         self._viewer = None
         self._log: list = []
+        self._sync = SyncSession(self)
+        self._sync.image.connect(self._synced)
+        self._sync.state.connect(self._sync_state)
+        QApplication.instance().aboutToQuit.connect(self._sync.stop)
         self._picking = None            # what the next click is for
         self._saved = str(QSettings().value(rb.SETTINGS_KEY, "") or "")
         self._found = rb.find_blender(self._saved or None)
@@ -490,6 +694,14 @@ class RenderPanel(QWidget):
         _narrow(self._go, self._stop)
         rl.addWidget(self._go)
         rl.addWidget(self._stop)
+        self._sync_box = QCheckBox(tr("Sync with the view"))
+        self._sync_box.setToolTip(tr(
+            "Stop moving in the model and a quick draft of what you see is "
+            "rendered in the image window by itself; «Render» still makes "
+            "the final image"))
+        self._sync_box.toggled.connect(self.set_sync)
+        _narrow(self._sync_box)
+        rl.addWidget(self._sync_box)
         self._bar = QProgressBar()
         self._bar.setRange(0, 1000)
         self._bar.setVisible(False)
@@ -901,9 +1113,14 @@ class RenderPanel(QWidget):
             return
         old = self._viewer
         if old is not None:
+            old.destroyed.disconnect(self._forget_viewer)
             old.close()
         self._viewer = ImageViewer(self._image, self._save_image,
-                                   self.window(), folder=self._open_folder)
+                                   self.window(), folder=self._open_folder,
+                                   sync=self.set_sync)
+        self._viewer.sync_box.blockSignals(True)
+        self._viewer.sync_box.setChecked(self._sync.active)
+        self._viewer.sync_box.blockSignals(False)
         self._viewer.setAttribute(Qt.WA_DeleteOnClose)
         self._viewer.destroyed.connect(self._forget_viewer)
         self._viewer.show()
@@ -911,6 +1128,51 @@ class RenderPanel(QWidget):
 
     def _forget_viewer(self, *_a) -> None:
         self._viewer = None
+        # The synced image lives in that window: closing it ends the sync.
+        if self._sync.active:
+            self._sync_box.setChecked(False)
+
+    # ---- Sync with the view ----------------------------------------------
+    def set_sync(self, on: bool) -> None:
+        for box in (self._sync_box,
+                    getattr(self._viewer, "sync_box", None)):
+            if box is not None and box.isChecked() != on:
+                box.blockSignals(True)
+                box.setChecked(on)
+                box.blockSignals(False)
+        if on and self._found is None:
+            self._sync_box.setChecked(False)
+            return
+        if on:
+            self._sync.start()
+        else:
+            self._sync.stop()
+            if self._viewer is not None:
+                self._viewer.set_note("")
+
+    def _sync_scene_key(self):
+        """What the loaded scene depends on besides the camera: the model
+        (its lights and ambience included — they are document data) and
+        the image settings."""
+        scene = self.app.scene
+        return (id(scene), scene.content_version, self._engine.currentData(),
+                self._ground.isChecked(), round(self._aspect(), 3))
+
+    def _synced(self, path: Path) -> None:
+        if not self._sync.active or not Path(path).is_file():
+            return
+        self._image = Path(path)
+        self._work = Path(path).parent
+        if self._viewer is None:
+            self._open_viewer()
+        else:
+            self._viewer.set_image(self._image, tr("In sync"))
+
+    def _sync_state(self, text: str) -> None:
+        if self._viewer is not None:
+            self._viewer.set_note(text)
+        if self._proc is None:
+            self._status.setText(text)
 
     def _cancel(self) -> None:
         if self._proc is not None:

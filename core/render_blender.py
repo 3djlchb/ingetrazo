@@ -389,11 +389,12 @@ def write_job(scene, camera, work: Path, *, engine: str = "eevee",
               quality: int = 1, width: int = 1600, height: int = 900,
               ground: bool = True, keep_blend: bool = False,
               ambience: str = "day", lights=(),
-              sun_scale: float = 1.0) -> Path:
+              sun_scale: float = 1.0, serve: bool = False) -> Path:
     """Export the model and write ``job.json`` in ``work``; returns its path.
     ``lights`` are the document's (:func:`clean_lights`); the ones switched
     off stay out. ``sun_scale`` brightens or dims the day's sun (1 = as
-    measured for a clear day)."""
+    measured for a clear day). ``serve`` = Blender builds the scene and
+    waits for cameras (:func:`sync_request`) instead of rendering once."""
     from formats.gltf import save_glb
     if engine not in ENGINES:
         raise ValueError(f"unknown engine {engine!r}")
@@ -425,6 +426,9 @@ def write_job(scene, camera, work: Path, *, engine: str = "eevee",
         "lights": [lt for lt in clean_lights(list(lights)) if lt["on"]],
         "ground": ground_dict(scene) if ground else None,
     }
+    if serve:
+        job["serve"] = True
+        job["blend"] = None
     path = work / "job.json"
     path.write_text(json.dumps(job, indent=2), encoding="utf-8")
     return path
@@ -435,6 +439,33 @@ def command(found: BlenderFound, job: Path) -> list:
     file or add-ons, running our script on the job."""
     return [*found.command, "-b", "--factory-startup",
             "--python", str(render_script()), "--", str(job)]
+
+
+# ---- Sync with the view ----------------------------------------------------------
+
+#: A synced image is a draft: small and few samples, so it is back within a
+#: second or two of the camera stopping. Render gives the final one.
+SYNC_WIDTH = 960
+SYNC_SAMPLES = {"eevee": 8, "cycles": 16}
+#: How long the camera must rest before a synced render starts (ms).
+SYNC_REST_MS = 700
+
+
+def sync_request(camera, output, width: int, height: int,
+                 engine: str = "eevee") -> str:
+    """One line for a serving Blender: render this camera to ``output``."""
+    return json.dumps({"camera": camera_dict(camera), "output": str(output),
+                       "width": int(width), "height": int(height),
+                       "samples": SYNC_SAMPLES.get(engine, 8)}) + "\n"
+
+
+def camera_key(camera) -> tuple:
+    """What a synced image depends on in the camera, rounded so that a
+    redraw with the camera untouched never asks for a new one."""
+    d = camera_dict(camera)
+    return (tuple(round(v, 3) for v in d["eye"] + d["target"] + d["up"]),
+            d["perspective"], round(d["fov_deg"], 2),
+            round(d["half_height"], 3))
 
 
 # ---- Progress -----------------------------------------------------------------

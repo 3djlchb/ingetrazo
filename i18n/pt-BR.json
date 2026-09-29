@@ -2232,5 +2232,13 @@
  "Listening on 127.0.0.1:{port} — connect your MCP client with the lines below.": "Escutando em 127.0.0.1:{port} — conecte seu cliente MCP com as linhas abaixo.",
  "Off. Start it to let an AI agent (Claude, Cursor, Antigravity…) model in this document over MCP.": "Desligada. Ligue-a para que um agente de IA (Claude, Cursor, Antigravity…) modele neste documento via MCP.",
  "Copied": "Copiado",
- "Render with Blender…": "Renderizar com o Blender…"
+ "Render with Blender…": "Renderizar com o Blender…",
+ "Sync with the view": "Sincronizar com a vista",
+ "Stop moving in the model and a quick draft of what you see is rendered here by itself; «Render» still makes the final image": "Pare de se mover no modelo e um rascunho rápido do que você vê é renderizado aqui sozinho; «Renderizar» continua fazendo a imagem final",
+ "Stop moving in the model and a quick draft of what you see is rendered in the image window by itself; «Render» still makes the final image": "Pare de se mover no modelo e um rascunho rápido do que você vê é renderizado sozinho na janela da imagem; «Renderizar» continua fazendo a imagem final",
+ "Loading the scene into Blender…": "Carregando a cena no Blender…",
+ "Rendering the view…": "Renderizando a vista…",
+ "In sync — stop moving to update": "Sincronizado — pare para atualizar",
+ "Blender stopped; it will start again": "O Blender parou; vai iniciar de novo",
+ "In sync": "Sincronizado"
 }
