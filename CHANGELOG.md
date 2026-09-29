@@ -16,6 +16,11 @@ follow [SemVer](https://semver.org).
   `tip=` en `add_menu_action`), en español, inglés, portugués, chino e
   italiano.
 
+### Corregido
+- **Los globos de ayuda sobre un botón de color se leen**: en Estilos y en
+  el compositor tomaban el color del botón como fondo (texto claro sobre
+  blanco); ahora tienen el mismo fondo oscuro que los demás.
+
 ## [0.5.6] — 2026-09-29
 
 **Render con Blender, una pestaña para la IA y los aportes de la comunidad.**

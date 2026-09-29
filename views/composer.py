@@ -6808,7 +6808,7 @@ class ComposerWindow(QMainWindow):
                                     self, tr("Colour"))
         if col.isValid():
             self._panel_edit(item, {attr: col.name()})
-            button.setStyleSheet(f"background: {col.name()};")
+            button.setStyleSheet(f"QAbstractButton {{ background: {col.name()}; }}")
 
     def _page_cota(self) -> QWidget:
         w = QWidget()
@@ -8159,7 +8159,7 @@ class ComposerWindow(QMainWindow):
                 self.et_arrow.setChecked(m.arrow)
                 self.et_dot.setChecked(bool(getattr(m, "dot", True)))
                 self.et_stroke.setValue(m.stroke_mm)
-                self.et_color_btn.setStyleSheet(f"background: {m.color};")
+                self.et_color_btn.setStyleSheet(f"QAbstractButton {{ background: {m.color}; }}")
                 self.et_bg_check.setChecked(bool(m.bg_color))
                 self.et_bg_btn.setStyleSheet(
                     f"background: {m.bg_color};" if m.bg_color else "")
@@ -8175,7 +8175,7 @@ class ComposerWindow(QMainWindow):
                 self.ll_shape.setCurrentIndex(max(sidx, 0))
                 self.ll_size.setValue(float(m.size_mm))
                 self.ll_stroke.setValue(float(m.stroke_mm))
-                self.ll_color_btn.setStyleSheet(f"background: {m.color};")
+                self.ll_color_btn.setStyleSheet(f"QAbstractButton {{ background: {m.color}; }}")
                 self.ll_follow.setChecked(bool(m.follow))
                 self.ll_follow.setEnabled(bool(m.frame_uid))
                 self.props.setCurrentIndex(14)
@@ -8197,7 +8197,7 @@ class ComposerWindow(QMainWindow):
                 self.nv_line.setValue(float(m.line_mm))
                 self.nv_mirror.setChecked(bool(m.mirror))
                 self.nv_stroke.setValue(float(m.stroke_mm))
-                self.nv_color_btn.setStyleSheet(f"background: {m.color};")
+                self.nv_color_btn.setStyleSheet(f"QAbstractButton {{ background: {m.color}; }}")
                 self.props.setCurrentIndex(13)
             elif isinstance(item, PerfilItem):
                 m = item.model
@@ -8235,7 +8235,7 @@ class ComposerWindow(QMainWindow):
                 eidx = self.crad_ends.findData(m.ends)
                 self.crad_ends.setCurrentIndex(max(eidx, 0))
                 self.crad_stroke.setValue(m.stroke_mm)
-                self.crad_color_btn.setStyleSheet(f"background: {m.color};")
+                self.crad_color_btn.setStyleSheet(f"QAbstractButton {{ background: {m.color}; }}")
                 self.props.setCurrentIndex(15)
             elif isinstance(item, CotaAngularCanvasItem):
                 m = item.model
@@ -8246,7 +8246,7 @@ class ComposerWindow(QMainWindow):
                 eidx = self.cang_ends.findData(m.ends)
                 self.cang_ends.setCurrentIndex(max(eidx, 0))
                 self.cang_stroke.setValue(m.stroke_mm)
-                self.cang_color_btn.setStyleSheet(f"background: {m.color};")
+                self.cang_color_btn.setStyleSheet(f"QAbstractButton {{ background: {m.color}; }}")
                 self.cang_text_color_btn.setStyleSheet(
                     f"background: {m.text_color or m.color};")
                 abg = getattr(m, "text_bg", "") or ""
@@ -10063,7 +10063,7 @@ class ComposerWindow(QMainWindow):
                                     tr("Border colour"))
         if col.isValid():
             self.comp.border_color = col.name()
-            self.border_color_btn.setStyleSheet(f"background: {col.name()};")
+            self.border_color_btn.setStyleSheet(f"QAbstractButton {{ background: {col.name()}; }}")
             self._mark_dirty()
             self._rebuild_canvas()
 
@@ -10474,7 +10474,7 @@ class ComposerWindow(QMainWindow):
         last = getattr(self, "_last_cajetin_fill", "#e9ecf0")
         item.prepareGeometryChange()
         self._panel_edit(item, {"fill_color": last if on else ""})
-        self.caj_fill_btn.setStyleSheet(f"background: {last};" if on else "")
+        self.caj_fill_btn.setStyleSheet(f"QAbstractButton {{ background: {last}; }}" if on else "")
         self._sync_cajetin_design_combo(item.model)
 
     def _on_cajetin_design(self, *_a) -> None:
@@ -10679,7 +10679,7 @@ class ComposerWindow(QMainWindow):
             self._updating = True
             self.text_bg_check.setChecked(True)
             self._updating = False
-            self.text_bg_btn.setStyleSheet(f"background: {col.name()};")
+            self.text_bg_btn.setStyleSheet(f"QAbstractButton {{ background: {col.name()}; }}")
 
     def _on_pick_text_color(self) -> None:
         from PySide6.QtWidgets import QColorDialog
@@ -10690,7 +10690,7 @@ class ComposerWindow(QMainWindow):
                                     tr("Colour"))
         if col.isValid():
             self._panel_edit(item, {"color": col.name()})
-            self.text_color_btn.setStyleSheet(f"background: {col.name()};")
+            self.text_color_btn.setStyleSheet(f"QAbstractButton {{ background: {col.name()}; }}")
 
     def _on_norte_props(self, *_a) -> None:
         item = self._selected_item()
@@ -10879,7 +10879,7 @@ class ComposerWindow(QMainWindow):
         last = getattr(self, "_last_text_bg", "#ffffff")
         item.prepareGeometryChange()
         self._panel_edit(item, {attr: last if on else ""})
-        button.setStyleSheet(f"background: {last};" if on else "")
+        button.setStyleSheet(f"QAbstractButton {{ background: {last}; }}" if on else "")
         if isinstance(item.model, CotaItem):
             self._remember_cota_style(item.model)
 
@@ -10899,7 +10899,7 @@ class ComposerWindow(QMainWindow):
             self._updating = True
             check.setChecked(True)
             self._updating = False
-            button.setStyleSheet(f"background: {col.name()};")
+            button.setStyleSheet(f"QAbstractButton {{ background: {col.name()}; }}")
             if isinstance(item.model, CotaItem):
                 self._remember_cota_style(item.model)
 
@@ -10914,7 +10914,7 @@ class ComposerWindow(QMainWindow):
         if col.isValid():
             item.prepareGeometryChange()
             self._panel_edit(item, {attr: col.name()})
-            button.setStyleSheet(f"background: {col.name()};")
+            button.setStyleSheet(f"QAbstractButton {{ background: {col.name()}; }}")
 
     def _on_pick_cota_text_color(self) -> None:
         from PySide6.QtWidgets import QColorDialog
@@ -11002,7 +11002,7 @@ class ComposerWindow(QMainWindow):
                                     tr("Colour"))
         if col.isValid():
             self._panel_edit(item, {"color": col.name()})
-            self.cota_color_btn.setStyleSheet(f"background: {col.name()};")
+            self.cota_color_btn.setStyleSheet(f"QAbstractButton {{ background: {col.name()}; }}")
 
     def _item_label(self, model) -> str:
         if isinstance(model, EtiquetaItem):

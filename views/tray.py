@@ -2512,7 +2512,8 @@ class StylesPanel(QWidget):
     @staticmethod
     def _css(color) -> str:
         r, g, b = (max(0, min(255, round(c * 255))) for c in color[:3])
-        return f"background: rgb({r},{g},{b}); min-height: 18px;"
+        return (f"QAbstractButton {{ background: rgb({r},{g},{b}); "
+                "min-height: 18px; }")
 
     def refresh(self) -> None:
         """Mirror the active style and the user library (called on loads,
