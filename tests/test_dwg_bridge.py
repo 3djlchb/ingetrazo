@@ -115,3 +115,50 @@ def test_dwg_round_trip_through_the_real_converters(tmp_path):
     assert g.name == "obra"               # the USER's name, not "converted"
     curves = {e.curve for e in g.mesh.edges if e.curve is not None}
     assert len(curves) == 1               # the circle survived as one contour
+
+
+# ---- Every package carries the converter (#101) ------------------------------
+
+def test_windows_looks_for_the_exe_beside_its_dlls(tmp_path, monkeypatch):
+    """«El conversor de LibreDWG (dwg2dxf) no está disponible en esta
+    instalación» (#101, #180): Windows now ships dwg2dxf.exe, and the
+    bridge must look for that name there."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "dwg2dxf.exe").write_bytes(b"MZ")
+    monkeypatch.setattr(dwg_bridge, "_VENDOR_BIN", bin_dir)
+    monkeypatch.setattr(dwg_bridge, "_SIBLING_BIN", tmp_path / "none")
+    monkeypatch.setattr(dwg_bridge.shutil, "which", lambda name: None)
+    monkeypatch.setattr(dwg_bridge.sys, "platform", "win32")
+    assert dwg_bridge.find_dwg2dxf() == bin_dir / "dwg2dxf.exe"
+    monkeypatch.setattr(dwg_bridge.sys, "platform", "linux")
+    assert dwg_bridge.find_dwg2dxf() is None     # the bare name is not there
+
+
+def _root():
+    from pathlib import Path
+    return Path(__file__).resolve().parents[1]
+
+
+def test_the_flatpak_installs_the_converter():
+    recipe = (_root() / "packaging/flatpak/com.ingetrazo.IngeTrazo.yml").read_text()
+    assert ("vendor/libredwg/bin/dwg2dxf ${FLATPAK_DEST}/ingetrazo/"
+            "vendor/libredwg/bin/dwg2dxf") in recipe
+    assert "vendor/libredwg/SOURCES.md" in recipe
+
+
+def test_the_spec_bundles_it_on_all_three_platforms():
+    spec = (_root() / "ingetrazo.spec").read_text()
+    for name in ('"dwg2dxf.exe"', '"libredwg-0.dll"', '"libiconv-2.dll"',
+                 '"linux": ["dwg2dxf"]', '"darwin": ["dwg2dxf"]'):
+        assert name in spec
+    win = (_root() / ".github/workflows/build-windows.yml").read_text()
+    assert "libredwg-$V-win64.zip" in win and "sha256sum -c" in win
+    mac = (_root() / ".github/workflows/release-macos.yml").read_text()
+    assert "programs/dwg2dxf" in mac and "shasum -a 256 -c" in mac
+
+
+def test_check_reports_the_converter(capsys):
+    import main
+    main._self_check()
+    assert "DWG converter" in capsys.readouterr().out

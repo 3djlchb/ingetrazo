@@ -215,6 +215,14 @@ def _self_check() -> int:
         if not ok:
             problems.append(label)
 
+    # DWG import goes through LibreDWG's dwg2dxf (#101). Every package
+    # carries it now; a packaged build without it is a broken package.
+    from formats.dwg_bridge import find_dwg2dxf
+    dwg = find_dwg2dxf()
+    print(f"  DWG converter  : {'found' if dwg else 'MISSING'}  {dwg or ''}")
+    if dwg is None and is_frozen():
+        problems.append("DWG converter")
+
     # ``ingetrazo --mcp`` runs scripts/ingetrazo_mcp.py by path, and that
     # server reads its recipe book from core.ai_recipes. The Flatpak of
     # 0.4.9 shipped without scripts/ at all: the app ran, and the MCP door

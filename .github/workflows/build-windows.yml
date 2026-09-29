@@ -63,6 +63,25 @@ jobs:
           pip install "openskp @ git+https://github.com/iamahsanmehmood/openskp@291700bc213655a00461838de71e5f206311e619#subdirectory=packages/python"
           python -c "import openskp, openskp.legacy; print('openskp OK:', openskp.__name__)" 
 
+      # DWG en Windows (#101): el dwg2dxf.exe OFICIAL de LibreDWG (su
+      # release win64, mingw), con las dos DLL que carga — nada más del zip.
+      # Hash medido el 2026-09-28 (su dist.sha256 no lista los zips): si
+      # cambia, falla aquí en vez de empaquetar otra cosa. Mismo resultado
+      # que el binario de Linux sobre un DWG real (10 084 entidades, 65 capas).
+      - name: Conversor DWG (LibreDWG win64)
+        shell: bash
+        run: |
+          set -e
+          V=0.14.8597
+          SHA=7fee5c67c4f451f0542c0d6a3b12e91e99b15faf363fbf8b98ad84bac17ddfa2
+          curl -fsSL -o "$RUNNER_TEMP/ldwg.zip" \
+            "https://github.com/LibreDWG/libredwg/releases/download/$V/libredwg-$V-win64.zip"
+          echo "$SHA  $RUNNER_TEMP/ldwg.zip" | sha256sum -c -
+          mkdir -p vendor/libredwg/bin
+          unzip -j -o "$RUNNER_TEMP/ldwg.zip" dwg2dxf.exe libredwg-0.dll libiconv-2.dll \
+            -d vendor/libredwg/bin
+          ls -la vendor/libredwg/bin
+
       - name: Compilar con PyInstaller
         shell: bash
         run: |
@@ -83,6 +102,10 @@ jobs:
           # (ingetrazo.spec la excluye y no hay exportación a SketchUp). Si
           # un paquete la trae otra vez, falla aquí — y también --check.
           test ! -e dist/ingetrazo/_internal/openskp/_scaffold
+          # El conversor DWG y sus DLL (#101).
+          for f in dwg2dxf.exe libredwg-0.dll libiconv-2.dll; do
+            test -f "dist/ingetrazo/_internal/vendor/libredwg/bin/$f"
+          done
           # Y el mismo --check que ya corren el tar, el AppImage y el snap
           # (release.yml), que Windows no tenía: cubre estos archivos y los
           # que se añadan después, sin que haya que acordarse de listarlos

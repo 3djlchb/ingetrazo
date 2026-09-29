@@ -73,13 +73,24 @@ for opt_src, opt_dst in [
     if (ROOT / opt_src).is_dir():
         datas.append((opt_src, opt_dst))
 
-# The DWG satellite (LibreDWG dwg2dxf, see vendor/libredwg/SOURCES.md):
-# Linux-only ELF, found by formats/dwg_bridge.py at vendor/libredwg/bin
-# inside the bundle. The Windows build skips it — DWG on Windows stays a
-# documented gap until a dwg2dxf.exe exists.
+# The DWG satellite (LibreDWG dwg2dxf, see vendor/libredwg/SOURCES.md),
+# found by formats/dwg_bridge.py at vendor/libredwg/bin inside the bundle
+# (#101). Linux: the ELF in git. Windows: dwg2dxf.exe and its two DLLs,
+# which build-windows.yml fetches from LibreDWG's own win64 release.
+# macOS: built from the release tarball by release-macos.yml. A platform
+# whose files are not there builds without DWG, and --check says so.
 import sys as _sys
-if _sys.platform.startswith("linux"):
-    datas.append(('vendor/libredwg/bin/dwg2dxf', 'vendor/libredwg/bin'))
+_DWG_FILES = {
+    "linux": ["dwg2dxf"],
+    "win32": ["dwg2dxf.exe", "libredwg-0.dll", "libiconv-2.dll"],
+    "darwin": ["dwg2dxf"],
+}
+for _plat, _names in _DWG_FILES.items():
+    if _sys.platform.startswith(_plat):
+        for _n in _names:
+            if (ROOT / "vendor/libredwg/bin" / _n).is_file():
+                datas.append((f"vendor/libredwg/bin/{_n}", "vendor/libredwg/bin"))
+        datas.append(("vendor/libredwg/SOURCES.md", "vendor/libredwg"))
 
 # ── Hidden imports ───────────────────────────────────────────────────────────
 hiddenimports = [

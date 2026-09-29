@@ -79,6 +79,12 @@ modules:
       - cp -a main.py core views tools formats georef materials styles plugins resources i18n scripts LICENSE ${FLATPAK_DEST}/ingetrazo/
       # The example extensions (Extensions ▸ Example extensions installs one
       # into the user's plugins folder): shipped, never loaded by default.
+      # DWG import (#101): LibreDWG's dwg2dxf, the same binary the AppImage
+      # carries (libc/libm only; runs on the 25.08 runtime). formats.dwg_bridge
+      # finds it under app_root()/vendor/libredwg/bin; SOURCES.md says where
+      # its source is, as the GPL asks.
+      - install -Dm755 vendor/libredwg/bin/dwg2dxf ${FLATPAK_DEST}/ingetrazo/vendor/libredwg/bin/dwg2dxf
+      - install -Dm644 vendor/libredwg/SOURCES.md ${FLATPAK_DEST}/ingetrazo/vendor/libredwg/SOURCES.md
       - mkdir -p ${FLATPAK_DEST}/ingetrazo/examples
       - cp -a examples/extensions ${FLATPAK_DEST}/ingetrazo/examples/
       - find ${FLATPAK_DEST}/ingetrazo -name '__pycache__' -type d -exec rm -rf {} +

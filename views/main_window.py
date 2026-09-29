@@ -4744,7 +4744,11 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(
                 self, tr("Import DWG failed"),
                 tr("The LibreDWG converter (dwg2dxf) is not available in "
-                   "this installation."))
+                   "this installation.") + "\n\n" +
+                tr("To work on the drawing anyway: save it as DXF from your "
+                   "CAD program (or convert it with a free DWG → DXF "
+                   "converter such as ODA File Converter), then File ▸ "
+                   "Import ▸ AutoCAD DXF."))
             return False
         dlg, cb = self._import_progress(tr("Importing {name}…",
                                            name=path.name))

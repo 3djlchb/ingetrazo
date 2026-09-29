@@ -2110,5 +2110,6 @@
  "Guide point at {d}": "Ponto guia a {d}",
  "Italian translation of the interface.": "Tradução da interface para o italiano.",
  "Show or hide the sidebar": "Mostrar ou ocultar a barra lateral",
- "The model has a point with invalid coordinates (not a number), so it was not saved and the file on disk keeps its last good version. Undo the last step and save again. Where: {where}": "O modelo tem um ponto com coordenadas inválidas (não é um número), por isso não foi salvo e o arquivo no disco mantém sua última versão boa. Desfaça o último passo e salve de novo. Onde: {where}"
+ "The model has a point with invalid coordinates (not a number), so it was not saved and the file on disk keeps its last good version. Undo the last step and save again. Where: {where}": "O modelo tem um ponto com coordenadas inválidas (não é um número), por isso não foi salvo e o arquivo no disco mantém sua última versão boa. Desfaça o último passo e salve de novo. Onde: {where}",
+ "To work on the drawing anyway: save it as DXF from your CAD program (or convert it with a free DWG → DXF converter such as ODA File Converter), then File ▸ Import ▸ AutoCAD DXF.": "Para trabalhar sobre o desenho mesmo assim: salve-o como DXF no seu programa CAD (ou converta-o com um conversor gratuito de DWG para DXF, como o ODA File Converter) e depois use Arquivo ▸ Importar ▸ AutoCAD DXF."
 }

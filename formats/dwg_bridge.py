@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Optional
@@ -42,8 +43,11 @@ class DwgBridgeError(Exception):
 
 
 def _find_tool(name: str) -> Optional[Path]:
+    # Windows ships dwg2dxf.exe (with libredwg-0.dll and libiconv-2.dll
+    # beside it, #101); everywhere else the bare name.
+    exe = name + ".exe" if sys.platform == "win32" else name
     for base in (_VENDOR_BIN, _SIBLING_BIN):
-        bundled = base / name
+        bundled = base / exe
         if bundled.is_file():
             return bundled
     system = shutil.which(name)
