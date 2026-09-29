@@ -119,18 +119,21 @@ suite rápida 3444 y lenta 804 correctas.
 
 ## [0.5.5] — 2026-09-28
 
-**Íconos propios y lo que los usuarios pidieron.** IngeTrazo se queda solo
-con piezas libres: el conversor auxiliar de `.skp` y la exportación a `.skp`
-se retiran, y los `.skp` se siguen abriendo con el lector libre integrado.
-Íconos propios en toda la interfaz. Y una tanda
+**Íconos renovados y lo que los usuarios pidieron.** IngeTrazo se queda solo
+con piezas libres: el enlace a un conversor externo de `.skp` y la
+exportación a `.skp` se retiran, y los `.skp` se siguen abriendo con el
+lector libre integrado. Los íconos se actualizan para mantenerlos coherentes
+en toda la interfaz. Y una tanda
 de reportes resueltos: la órbita gira alrededor de lo que miras, Empujar/Tirar
 se detiene en las guías de la Cinta, rotar cae exacto en el punto enganchado,
 guardar ya no deja un «cambios sin guardar» fantasma, y las medidas salen en
 las unidades del documento.
 
 ### Retirado
-- **El conversor auxiliar de `.skp`**, que corría bajo Wine, y su descarga
-  automática. Los `.skp` se abren con el lector libre integrado (OpenSKP);
+- **El enlace a un conversor externo de `.skp`.** Nunca formó parte de
+  IngeTrazo: ningún paquete lo incluía; IngeTrazo solo ofrecía descargarlo
+  aparte para ejecutarlo bajo Wine. Ese enlace y la descarga se retiran.
+  Los `.skp` se abren con el lector libre integrado (OpenSKP);
   si uno no se puede leer, IngeTrazo lo dice y sugiere exportarlo como
   COLLADA u OBJ desde el programa de origen.
 - **Exportar a `.skp`**: el molde en blanco que usaba el escritor ya no se
@@ -144,7 +147,8 @@ las unidades del documento.
   Sketchfab.
 
 ### Cambiado
-- **Íconos propios de IngeTrazo**:
+- **Íconos actualizados para mantenerlos coherentes con el resto de la
+  interfaz**:
   Caminar son dos huellas, Mirar alrededor una cabeza vista desde arriba con
   su cono de visión, las herramientas de sólidos dos discos que se cruzan, el
   texto una T en un marco, el zoom a la extensión cuatro esquinas alrededor
