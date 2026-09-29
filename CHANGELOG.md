@@ -4,6 +4,105 @@ All notable changes to IngeTrazo are documented here.
 Format inspired by [Keep a Changelog](https://keepachangelog.com); versions
 follow [SemVer](https://semver.org).
 
+## [0.5.6] — 2026-09-29
+
+**Render con Blender, una pestaña para la IA y los aportes de la comunidad.**
+IngeTrazo renderiza imágenes fotorrealistas con el Blender que ya tengas
+instalado, de día o de noche con luces propias, y puede renderizar sola la
+vista cada vez que te detienes al recorrer el modelo. El Asistente IA y el
+puente MCP viven ahora en una pestaña de la barra lateral, y Ventana ▸ Paneles
+deja ocultar las pestañas que no uses. De la comunidad llegan el buscador de
+comandos F3, la API de extensiones 2, importar STL, Pegar en su lugar y Zoom a
+la selección. Y una tanda de reportes resueltos, incluido el transportador que
+en milímetros o pulgadas no daba el ángulo tecleado.
+
+### Añadido
+- **Renderizar con Blender** (#181), una pestaña de la barra lateral:
+  - Usa el Blender del sistema (EEVEE o Cycles); si no lo encuentra, explica
+    cómo instalarlo según el paquete (Windows, Mac, AppImage, Flatpak).
+  - **Ambiente** de día (el sol del panel Sombras, con su intensidad), de
+    noche o nublado.
+  - **Luces puntuales y focos** que se colocan con un clic sobre el modelo,
+    con temperatura de color (Kelvin), potencia, apertura y orientación; se
+    guardan en el documento y se deshacen con Ctrl+Z.
+  - **Acabados para el render** en cada material (vidrio, agua, metal,
+    brillante…), desde el clic derecho sobre la muestra; «Automático»
+    lo adivina por el nombre.
+  - Las figuras que miran a la cámara (Sumari, árboles de imagen) salen de
+    frente y recortadas.
+  - La imagen se abre en su propia ventana, con zoom, Guardar y Abrir carpeta.
+  - **Sincronizar con la vista**: con Blender abierto en segundo plano, cada
+    vez que la cámara se detiene sale un borrador de lo que ves en uno o dos
+    segundos; editar el modelo recarga la escena.
+- **Pestaña IA**: el Asistente IA y el puente MCP en la barra lateral. El
+  prompt admite varias líneas (Enter envía, Mayús+Enter salta de línea);
+  Ctrl+Mayús+A trae la pestaña aunque esté oculta.
+- **Ventana ▸ Paneles**: todas las pestañas de la barra lateral, también las
+  de extensiones, para ocultarlas o mostrarlas; la misma lista con clic
+  derecho sobre las pestañas. Lo oculto se recuerda al reabrir.
+- **Buscador de comandos (F3)**, como en Blender: escribe unas letras, con
+  iniciales o errores de tecleo, y Enter ejecuta. Una letra tecleada en un
+  menú abierto busca en ese menú; el compositor tiene el suyo (#168,
+  @canalsecuario-blip). La barra de estado lo menciona al abrir el programa.
+- **Importar STL** (binario y de texto) con la unidad del modelo y la unión
+  de caras planas, leído en segundo plano; y **Edición ▸ Simplificar malla**
+  (#161, @kagehak).
+- **API de extensiones 2**: varios paneles con nombre por extensión que
+  vuelven a su lugar, dibujo sobre el visor con `world_to_pixels`, tipos de
+  archivo propios y espacios de trabajo (#141, @felixriestra). Además, varias
+  extensiones pueden compartir una pestaña y añadir entradas al menú
+  Extensiones; la guía explica dónde conviene poner la interfaz de cada una.
+- **Pegar en su lugar** (Ctrl+Alt+V), dentro de cualquier grupo (#188), y
+  **Zoom a la selección** (#193) (@canalsecuario-blip).
+- **Supr borra la arista o cara bajo el cursor**, sin seleccionarla; Retroceso
+  borra sólo la selección (#98, @canalsecuario-blip).
+- **Importar DWG en Windows, macOS y el Flatpak**: el conversor de LibreDWG
+  va dentro de todos los paquetes (#101, #180).
+- **Traducción al italiano** (#182, @deedend) y portugués de Brasil al día
+  (#186, @dafrobozao).
+- En Ayuda ▸ Acerca de, los créditos se detienen al pasar el ratón y se
+  recorren con la rueda.
+
+### Corregido
+- **Un ángulo, un factor de escala o un número de lados tecleado se escalaba
+  con la unidad del documento**: en milímetros, «45» en Rotar giraba 0,045°
+  (#176, reporte de Esteban Penzo).
+- **Una arista copiada con Mover a través de una cara no la dividía** (#177,
+  reporte de Lefteris Schetakis).
+- **Ctrl+Z a mitad de una línea** deja la cadena en el vértice anterior en vez
+  de seguir desde un punto que ya no existe (#175, @pacaeiro).
+- **La Cinta métrica cambiaba de modo con Ctrl+Z**: ahora sólo con un toque de
+  Ctrl (#183); no crea guías de longitud cero ni recorta su vista previa
+  (#173, #174, @pacaeiro).
+- **El pan era lentísimo con el zoom al máximo**: se mide por la profundidad
+  de lo que está bajo el cursor (#184).
+- **Valores no finitos** (un número enorme en el cuadro de medidas) ya no
+  bloquean las herramientas ni se guardan en el documento (#185, primera
+  parte). Reportes de Alejandro Limón.
+- **La cota en cadena del compositor** seguía cortándose tras cada tramo
+  (#187, @tonfdd).
+- **La barra de herramientas muestra el atajo configurado**, no el de
+  fábrica (#171, @pacaeiro).
+- **Rectángulo**: la inferencia de cuadrado engancha (#169, #170, @pacaeiro).
+- **El cursor de Empujar/Tirar desaparecía en Windows** tras usarlo (#191).
+- **El Asistente IA en Mac no conectaba** (`CERTIFICATE_VERIFY_FAILED`): usa
+  los certificados del sistema, sin desactivar la verificación (#198,
+  diagnóstico de @troya2).
+- El diálogo de cambios sin guardar y los botones estándar de Qt salen en el
+  idioma del programa (#154, @canalsecuario-blip).
+
+### Antivirus
+- El instalador de Windows se construye con un cargador de PyInstaller
+  compilado por nosotros, lo que reduce los falsos positivos de Windows
+  Defender (#162). La firma digital (SignPath) está en trámite.
+
+### Pruebas antes de publicar
+`scripts/release_check.sh v0.5.5` sobre `plaza.igz`
+(`benchmarks/results/0.5.6.json`): el visor sin cambios (pintar 9,63 → 9,99
+ms, orbitar 10,31 → 9,69 ms), abrir la plaza 4,74 → 4,72 s, arranque 0,82 →
+0,91 s (las pestañas nuevas), ningún objeto filtrado en seis reaperturas;
+suite rápida 3444 y lenta 804 correctas.
+
 ## [0.5.5] — 2026-09-28
 
 **Nada de Trimble, y lo que los usuarios pidieron.** Tras un aviso de

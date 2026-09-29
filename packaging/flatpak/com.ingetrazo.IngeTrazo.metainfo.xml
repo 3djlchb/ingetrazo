@@ -75,6 +75,26 @@
   <url type="vcs-browser">https://github.com/ingelibre/ingetrazo</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.5.6" date="2026-09-29">
+      <description>
+        <p>Render with Blender: photorealistic images of the view with the
+        Blender you already have, by day or by night with your own point
+        lights and spots, and an option that renders the view by itself
+        whenever you stop moving. The AI assistant and the MCP bridge get a
+        tab in the sidebar, and Window ▸ Panels hides the tabs you do not
+        use. From the community: command search (F3), Extension API 2, STL
+        import, Paste in Place and Zoom Selection. A typed angle is no
+        longer scaled by the document unit.</p>
+        <p xml:lang="es">Renderizar con Blender: imágenes fotorrealistas de
+        la vista con el Blender que ya tengas, de día o de noche con luces y
+        focos propios, y una opción que renderiza sola la vista cada vez que
+        te detienes. El Asistente IA y el puente MCP tienen su pestaña en la
+        barra lateral, y Ventana ▸ Paneles oculta las pestañas que no uses.
+        De la comunidad: buscador de comandos (F3), API de extensiones 2,
+        importar STL, Pegar en su lugar y Zoom a la selección. Un ángulo
+        tecleado ya no se escala con la unidad del documento.</p>
+      </description>
+    </release>
     <release version="0.5.5" date="2026-09-28">
       <description>
         <p>Nothing of Trimble's: the skp2dae converter and the .skp export
