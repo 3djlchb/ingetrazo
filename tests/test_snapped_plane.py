@@ -64,3 +64,81 @@ def test_an_arrow_lock_never_yields():
     t = _tool(plane_lock="x")
     assert t.drawing_plane() == t.work_plane
 
+
+# ---- The other planar shapes: same opening, same two midpoints ------------
+
+from tools.arc import ArcTool, CenterArcTool, ThreePointArcTool
+from tools.circle import CircleTool, PolygonTool
+
+
+def _on_jamb(tool):
+    tool.start_point = QVector3D(ABAJO_DCHA)
+    tool.work_plane = (QVector3D(JAMBA[0]), QVector3D(JAMBA[1]))
+    tool.hover_point = None
+    return tool
+
+
+def _on_wall_middle(pts):
+    return all(abs(p.y() - 0.10) < 1e-6 for p in pts)
+
+
+def test_a_circle_turns_to_the_snapped_rim():
+    for cls in (CircleTool, PolygonTool):
+        t = _on_jamb(cls())
+        t.hover_point = QVector3D(ARRIBA_IZQ)
+        pts = t._points(t.start_point, t.hover_point)
+        assert _on_wall_middle(pts)
+        assert (pts[0] - ARRIBA_IZQ).length() < 1e-6, "a vertex on the snap"
+
+
+def test_a_circle_labels_the_radius_it_draws():
+    """A true 3D diagonal keeps the plane and projects the rim: the label
+    said the straight distance (R 4.44) over a 2.46 m circle."""
+    t = _on_jamb(CircleTool())
+    t.hover_point = V(0.27, 0.60, 3.31)
+    pts = t._points(t.start_point, t.hover_point)
+    r = (pts[0] - t.start_point).length()
+    assert t.drawing_plane() == t.work_plane
+    assert t.value_label()[0].startswith("R 2.46"), "√(0.5² + 2.41²)"
+    assert abs(r - 2.461) < 1e-3
+
+
+def test_a_two_point_arc_ends_on_the_snapped_end():
+    t = _on_jamb(ArcTool())
+    t.end_point = QVector3D(ARRIBA_IZQ)
+    t.adopt_snapped_plane()
+    assert abs(t.work_plane[1].y()) > 0.999, "the bulge is read on the wall"
+    bulge = V(2.0, 0.10, 3.9)                 # free cursor, on the new plane
+    t.hover_point = bulge
+    pts = t._points(bulge)
+    assert len(pts) > 2 and _on_wall_middle(pts)
+    assert (pts[-1] - ARRIBA_IZQ).length() < 1e-6
+
+
+def test_a_three_point_arc_takes_the_plane_through_its_points():
+    t = _on_jamb(ThreePointArcTool())
+    t.mid_point = V(2.0, 0.10, 3.9)
+    t.adopt_snapped_plane()
+    t.hover_point = QVector3D(ARRIBA_IZQ)
+    pts = t._points(t.hover_point)
+    assert _on_wall_middle(pts)
+    assert (pts[-1] - ARRIBA_IZQ).length() < 1e-6
+
+
+def test_a_centre_arc_swings_its_snapped_arm():
+    t = _on_jamb(CenterArcTool())
+    t.hover_point = QVector3D(ARRIBA_IZQ)
+    assert t.value_label()[0].startswith("R 4.4")
+    t.arm_point = QVector3D(ARRIBA_IZQ)
+    t.adopt_snapped_plane()
+    pts = t._points(90.0)
+    assert _on_wall_middle(pts)
+    assert (pts[0] - ARRIBA_IZQ).length() < 1e-6
+
+
+def test_the_arrow_lock_holds_for_every_shape():
+    for cls in (CircleTool, ArcTool, ThreePointArcTool, CenterArcTool):
+        t = _on_jamb(cls())
+        t.plane_lock = "x"
+        t.hover_point = QVector3D(ARRIBA_IZQ)
+        assert t.drawing_plane() == t.work_plane
