@@ -10407,6 +10407,14 @@ class Viewport(QOpenGLWidget):
             return False          # the container and what lives inside it
         return self._owner_of(group) is not ctx
 
+    def _depth_of(self, point) -> Optional[float]:
+        """How far ``point`` lies in front of the eye, along the view
+        direction: what one pixel of pan is worth there (#184)."""
+        if point is None:
+            return None
+        cam = self.camera
+        return QVector3D.dotProduct(point - cam.eye(), cam.forward())
+
     def _orbit_pivot_at(self, x: float, y: float):
         """Where an orbit gesture that starts at pixel ``(x, y)`` turns (#164).
 
@@ -10532,6 +10540,7 @@ class Viewport(QOpenGLWidget):
             self._pan_mode = bool(ev.modifiers() & Qt.ShiftModifier)
             self._orbit_pivot = self._orbit_pivot_at(
                 ev.position().x(), ev.position().y())
+            self._pan_depth = self._depth_of(self._orbit_pivot)
             # SketchUp: while the wheel-drag lasts, the pointer becomes the
             # orbit (or pan) icon; the tool cursor comes back on release.
             from views.icons import tool_cursor
@@ -10556,6 +10565,10 @@ class Viewport(QOpenGLWidget):
             self._orbit_pivot = (
                 self._orbit_pivot_at(ev.position().x(), ev.position().y())
                 if self.nav_mode == "orbit" else None)
+            self._pan_depth = (
+                self._depth_of(self._orbit_pivot_at(
+                    ev.position().x(), ev.position().y()))
+                if self._pan_mode else None)
             # The orbit/pan icon stays through the drag (SketchUp).
             self._apply_nav_cursor()
             return
@@ -10729,7 +10742,8 @@ class Viewport(QOpenGLWidget):
             if self.nav_mode == "zoom":
                 self.camera.zoom(-dy * 0.035)        # drag up = zoom in
             elif self._pan_mode:
-                self.camera.pan(dx, dy, self.height())
+                self.camera.pan(dx, dy, self.height(),
+                                depth=getattr(self, "_pan_depth", None))
             else:
                 pivot = getattr(self, "_orbit_pivot", None)
                 ody = -dy if self._invert_orbit_y else dy

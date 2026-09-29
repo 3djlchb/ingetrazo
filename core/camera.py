@@ -238,7 +238,17 @@ class OrbitCamera:
                 axis.normalized(), math.degrees(d_pitch)) * rot_yaw
         self.target = pivot + rot.rotatedVector(self.target - pivot)
 
-    def pan(self, dx_pixels: float, dy_pixels: float, viewport_h: int) -> None:
+    def pan(self, dx_pixels: float, dy_pixels: float, viewport_h: int,
+            depth: float | None = None) -> None:
+        """Slide the view by a drag of ``(dx, dy)`` pixels.
+
+        ``depth`` is how far in front of the eye the point grabbed under
+        the cursor lies: in perspective, a pixel spans more the deeper it
+        is, so moving by that depth keeps the grabbed point under the
+        cursor, as SketchUp does. Without it the pan used the distance to
+        the orbit target, which zooming in shrinks to 2 cm: at full zoom a
+        wall metres away barely moved (Alejandro Limón, #184). Parallel
+        views scale the same at every depth and ignore it."""
         cp = math.cos(self.pitch)
         sp = math.sin(self.pitch)
         cy = math.cos(self.yaw)
@@ -249,9 +259,13 @@ class OrbitCamera:
         forward = QVector3D(-cp * cy, -cp * sy, -sp)
         right = QVector3D.crossProduct(forward, self.up_vector()).normalized()
         screen_up = QVector3D.crossProduct(right, forward).normalized()
+        span = self.distance
+        if (self.perspective and depth is not None and math.isfinite(depth)
+                and depth > 1e-6):
+            span = depth
         world_per_pixel = (
             2.0
-            * self.distance
+            * span
             * math.tan(math.radians(self.fov_deg) / 2.0)
             / max(viewport_h, 1)
         )
