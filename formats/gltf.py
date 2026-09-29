@@ -43,9 +43,33 @@ def _mime(name: str) -> str:
     return "image/png"
 
 
-def save_glb(scene, path) -> None:
-    """Write the scene as a binary glTF (``.glb``) to ``path``."""
-    materials_in, prims = collect_geometry(scene)
+def _cutout(src) -> bool:
+    """Whether an image has see-through texels (a figure, a leaf, a fence):
+    an alpha channel alone is not enough — many photos carry one that is
+    fully opaque, and masking those would only cost render time."""
+    try:
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QImage
+    except ImportError:
+        return False
+    img = QImage(str(src))
+    if img.isNull() or not img.hasAlphaChannel():
+        return False
+    small = img.scaled(128, 128, Qt.IgnoreAspectRatio,
+                       Qt.FastTransformation).convertToFormat(
+        QImage.Format.Format_Alpha8)
+    ptr = small.constBits()
+    data = bytes(ptr)[: small.sizeInBytes()]
+    return any(b < 128 for b in data)
+
+
+def save_glb(scene, path, face_me=None) -> None:
+    """Write the scene as a binary glTF (``.glb``) to ``path``.
+
+    ``face_me`` turns the face-me figures toward a camera and brings them
+    along (see :func:`formats.meshexport.world_faces`); Render with Blender
+    passes its camera (#181)."""
+    materials_in, prims = collect_geometry(scene, face_me)
 
     buf = bytearray()
     buffer_views: list[dict] = []
@@ -110,11 +134,24 @@ def save_glb(scene, path) -> None:
                     tex_idx = tex_for_image[str(src)] = len(textures) - 1
             if tex_idx is not None:
                 mat["pbrMetallicRoughness"]["baseColorTexture"] = {"index": tex_idx}
+                # A cut-out image (a face-me figure, leaves) stays cut out:
+                # without this its transparent texels rendered as a solid
+                # card (#181).
+                if _cutout(src):
+                    mat["alphaMode"] = "MASK"
+                    mat["alphaCutoff"] = 0.5
             else:  # image unreadable → fall back to white
                 mat["pbrMetallicRoughness"]["baseColorFactor"] = [1, 1, 1, 1]
         else:
             r, g, b = info["color"]
             mat["pbrMetallicRoughness"]["baseColorFactor"] = [r, g, b, 1.0]
+        op = info.get("opacity")
+        if op is not None:                     # glass and the like
+            factor = mat["pbrMetallicRoughness"].setdefault(
+                "baseColorFactor", [1.0, 1.0, 1.0, 1.0])
+            factor[3] = float(op)
+            mat["alphaMode"] = "BLEND"
+            mat.pop("alphaCutoff", None)
         mat_index[key] = len(gltf_materials)
         gltf_materials.append(mat)
 

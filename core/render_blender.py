@@ -221,7 +221,15 @@ def write_job(scene, camera, work: Path, *, engine: str = "eevee",
         raise ValueError(f"unknown engine {engine!r}")
     work.mkdir(parents=True, exist_ok=True)
     glb = work / "model.glb"
-    save_glb(scene, glb)
+
+    def toward(anchor):
+        # As the viewport turns them (views.viewport._faceme_dir): to the
+        # eye in perspective, along the view in a parallel projection.
+        if camera.perspective:
+            return camera.eye() - anchor
+        return camera.eye() - camera.target
+
+    save_glb(scene, glb, face_me=toward)
     job = {
         "glb": str(glb),
         "output": str(work / "render.png"),

@@ -17,10 +17,80 @@ from pathlib import Path
 _DEFAULT_COLOR = (0.96, 0.95, 0.925)
 
 
-def world_faces(scene):
+def _has_billboard(group) -> bool:
+    from core.group import iter_placements
+    return any(getattr(g, "billboard", False) for g, _m in iter_placements(group))
+
+
+def _turned_toward(mesh, toward):
+    """``mesh`` (world space) turned about the vertical through its feet so
+    its largest face looks along ``toward(anchor)`` — what the viewport does
+    to a face-me figure every frame (views.viewport._draw_faceme_mesh)."""
+    import math
+    from PySide6.QtGui import QMatrix4x4, QVector3D
+    from core.group import transformed_mesh
+    faces = list(mesh.faces)
+    verts = [v.position for v in mesh.vertices]
+    if not faces or not verts:
+        return mesh
+    big = max(faces, key=lambda f: f.area())
+    n = big.normal()
+    nx, ny = n.x(), n.y()
+    ln = math.hypot(nx, ny)
+    if ln < 1e-9:
+        return mesh
+    xs = [p.x() for p in verts]
+    ys = [p.y() for p in verts]
+    zs = [p.z() for p in verts]
+    anchor = QVector3D((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2,
+                       min(zs))
+    d = toward(anchor)
+    dx, dy = d.x(), d.y()
+    ld = math.hypot(dx, dy)
+    if ld < 1e-9:
+        return mesh
+    nx, ny, dx, dy = nx / ln, ny / ln, dx / ld, dy / ld
+    angle = math.degrees(math.atan2(nx * dy - ny * dx, nx * dx + ny * dy))
+    m = QMatrix4x4()
+    m.translate(anchor)
+    m.rotate(angle, 0.0, 0.0, 1.0)
+    m.translate(-anchor)
+    return transformed_mesh(mesh, m)
+
+
+def _placements_facing(group, toward):
+    """Every placement of ``group`` in world space, face-me figures (at any
+    depth) turned by :func:`_turned_toward`."""
+    from core.group import iter_placements, transformed_mesh
+    for g, m in iter_placements(group):
+        mesh = g.mesh if m is None else transformed_mesh(g.mesh, m)
+        if getattr(g, "billboard", False):
+            mesh = _turned_toward(mesh, toward)
+        yield from mesh.faces
+
+
+def world_faces(scene, face_me=None):
     """Every renderable face in WORLD space: loose mesh + groups. Component
     instances share a prototype mesh in local coordinates, so their faces come
-    from a transformed copy. Same rule as ``formats.stl`` / ``formats.obj``."""
+    from a transformed copy. Same rule as ``formats.stl`` / ``formats.obj``.
+
+    ``face_me`` — a function from a figure's feet to the direction it should
+    look (a camera) — brings the face-me figures along, turned that way, as
+    a render needs them (#181). Without it they stay out, as before: a file
+    has no camera for them to face."""
+    if face_me is not None and hasattr(scene, "render_faces"):
+        for f in scene.loose_mesh.faces:
+            if scene.entity_visible(f):
+                yield f
+        from core.group import world_mesh
+        for g in getattr(scene, "groups", []):
+            if not scene.entity_visible(g):
+                continue
+            if _has_billboard(g):
+                yield from _placements_facing(g, face_me)
+            else:
+                yield from world_mesh(g).faces
+        return
     if hasattr(scene, "render_faces"):
         groups = getattr(scene, "groups", [])
         if not any(getattr(g, "xform", None) is not None
@@ -41,7 +111,7 @@ def world_faces(scene):
         yield from scene.faces
 
 
-def collect_geometry(scene):
+def collect_geometry(scene, face_me=None):
     """Group the scene's triangles by material.
 
     Returns ``(materials, prims)`` where
@@ -60,14 +130,17 @@ def collect_geometry(scene):
 
     materials: dict[tuple, dict] = {}
     prims: dict[tuple, list] = {}
-    for face in world_faces(scene):
+    for face in world_faces(scene, face_me):
         n = face.normal()
+        op = face.attrs.get("opacity")
+        op = None if op is None or float(op) >= 0.999 else round(float(op), 3)
         tex = face.attrs.get("texture")
         if tex is not None and tex.get("path"):
             src = Path(tex["path"])
-            key = ("tex", src.name)
+            key = ("tex", src.name) if op is None else ("tex", src.name, op)
             materials.setdefault(key, {"color": (1.0, 1.0, 1.0),
-                                       "map": src.name, "src": src})
+                                       "map": src.name, "src": src,
+                                       "opacity": op})
             if face.attrs.get("mat") and "mat" not in materials[key]:
                 materials[key]["mat"] = face.attrs["mat"]
             sw = tex.get("sw", 1.0) or 1.0
@@ -81,8 +154,9 @@ def collect_geometry(scene):
                     (n, [(pts[k], (uv[k][0], uv[k][1])) for k in range(3)]))
         else:
             col = tuple(face.attrs.get("color") or _DEFAULT_COLOR)
-            key = ("color", col)
-            materials.setdefault(key, {"color": col, "map": None})
+            key = ("color", col) if op is None else ("color", col, op)
+            materials.setdefault(key, {"color": col, "map": None,
+                                       "opacity": op})
             if face.attrs.get("mat") and "mat" not in materials[key]:
                 materials[key]["mat"] = face.attrs["mat"]
             for tri in face.triangulate():
