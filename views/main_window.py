@@ -547,9 +547,8 @@ class MainWindow(QMainWindow):
             if alt:
                 seqs.append(QKeySequence(alt))
             action.setShortcuts(seqs)
-            action.setToolTip(f"{name}  ({tool.shortcut})")
-        else:
-            action.setToolTip(name)
+        from views.shortcuts import set_tooltip
+        set_tooltip(action, name)
         action.triggered.connect(lambda _c, k=key: self._activate_tool(k))
         self._tool_group.addAction(action)
         tb.addAction(action)
@@ -690,7 +689,8 @@ class MainWindow(QMainWindow):
         act_ze = QAction(tool_icon("zoom_extents"), tr("Zoom Extents"), self)
         self._icon_actions.append((act_ze, "zoom_extents"))
         act_ze.setShortcuts([QKeySequence("Shift+Z"), QKeySequence("F2")])
-        act_ze.setToolTip(f"{tr('Zoom Extents')}  (Shift+Z)")
+        from views.shortcuts import set_tooltip
+        set_tooltip(act_ze, tr("Zoom Extents"))
         act_ze.triggered.connect(self._on_zoom_extents)
         view_tb.addAction(act_ze)
         self._act_zoom_extents = act_ze
@@ -781,7 +781,8 @@ class MainWindow(QMainWindow):
             for act, key, tip in ((self._undo_action, "undo", tr("Undo")),
                                   (self._redo_action, "redo", tr("Redo"))):
                 act.setIcon(tool_icon(key))
-                act.setToolTip(f"{tip}  ({act.shortcut().toString(QKeySequence.NativeText)})")
+                from views.shortcuts import set_tooltip
+                set_tooltip(act, tip)
                 self._icon_actions.append((act, key))
             after = self._tool_actions.get("select")
             acts = main_tb.actions()
@@ -1204,7 +1205,8 @@ class MainWindow(QMainWindow):
         act.setCheckable(True)
         act.setChecked(True)
         act.setShortcut(QKeySequence("Ctrl+F5"))
-        act.setToolTip(tr("Show or hide the sidebar (Ctrl+F5)"))
+        from views.shortcuts import set_tooltip
+        set_tooltip(act, tr("Show or hide the sidebar"))
         act.toggled.connect(self._route_window_toggle(
             "_act_sidebar", self._set_sidebar_visible))
         self.addAction(act)
@@ -1423,7 +1425,8 @@ class MainWindow(QMainWindow):
                     seq = QKeySequence(tool.shortcut).toString()
                     if seq and seq not in taken:
                         action.setShortcut(QKeySequence(tool.shortcut))
-                        action.setToolTip(f"{tr(tool.name)}  ({tool.shortcut})")
+                        from views.shortcuts import set_tooltip
+                        set_tooltip(action, tr(tool.name))
                         taken.add(seq)
                     else:
                         log.warning("plugin %r wants shortcut %r, already "

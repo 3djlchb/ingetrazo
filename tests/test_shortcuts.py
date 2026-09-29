@@ -173,3 +173,22 @@ def test_la_perspectiva_se_mudo_a_mayus_p(ventana):
     _calentar(ventana)
     assert _pulsar(ventana, Qt.Key_P, Qt.ShiftModifier) == [
         "Toggle Perspective / Parallel"]
+
+
+def test_la_barra_muestra_el_atajo_configurado_y_no_el_de_fabrica(ventana):
+    """Issue #171 (@pacaeiro): «Menus show the correct new configured
+    shortcut, toolbars show the Default shortcuts.» El tooltip del botón
+    escribía la tecla UNA vez, al arrancar; ahora sigue a la acción."""
+    from PySide6.QtGui import QKeySequence
+    linea = ventana._tool_actions["line"]
+    assert linea.toolTip().endswith("(L)")
+    linea.setShortcuts([QKeySequence("Ctrl+Alt+L")])
+    assert "Ctrl+Alt+L" in linea.toolTip()
+    assert "(L)" not in linea.toolTip()
+    linea.setShortcuts([])
+    assert "(" not in linea.toolTip()                 # sin atajo, sin paréntesis
+    linea.setShortcuts([QKeySequence("L")])
+    assert linea.toolTip().endswith("(L)")
+    ze = ventana._act_zoom_extents
+    ze.setShortcuts([QKeySequence("Ctrl+E")])
+    assert "Ctrl+E" in ze.toolTip()                   # el que venía escrito a mano

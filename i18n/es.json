@@ -2110,5 +2110,6 @@
  "it types a measure in the value box": "sirve para escribir medidas en la casilla de valores",
  "«{keys}» cannot be a shortcut: {why}.": "«{keys}» no puede ser un atajo: {why}.",
  "Click here and press the keys": "Haz clic aquí y pulsa las teclas",
- "Italian translation of the interface.": "Traducción de la interfaz al italiano."
+ "Italian translation of the interface.": "Traducción de la interfaz al italiano.",
+ "Show or hide the sidebar": "Mostrar u ocultar la barra lateral"
 }

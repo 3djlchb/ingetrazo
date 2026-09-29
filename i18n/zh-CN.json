@@ -2111,5 +2111,6 @@
  "it types a measure in the value box": "它用于在数值框中输入尺寸",
  "«{keys}» cannot be a shortcut: {why}.": "「{keys}」不能作为快捷键：{why}。",
  "Click here and press the keys": "点击此处并按下按键",
- "Italian translation of the interface.": "界面意大利语翻译。"
+ "Italian translation of the interface.": "界面意大利语翻译。",
+ "Show or hide the sidebar": "显示或隐藏侧边栏"
 }
