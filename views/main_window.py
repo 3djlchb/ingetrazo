@@ -3381,6 +3381,14 @@ class MainWindow(QMainWindow):
 
     # ---- Undo / redo --------------------------------------------------------
     def _on_undo(self) -> None:
+        # A tool in the middle of something answers Ctrl+Z first: the Line
+        # steps its chain back one vertex instead of staying anchored to
+        # the end of the segment just undone (#175).
+        tool = self.viewport.active_tool
+        handler = getattr(tool, "on_undo", None)
+        if callable(handler) and handler(self.viewport):
+            self.viewport.notify_scene_changed()
+            return
         if self.viewport.history.undo():
             self.viewport.notify_scene_changed()
 

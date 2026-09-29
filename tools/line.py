@@ -117,6 +117,29 @@ class LineTool(Tool):
         self._reset()
         viewport.update()
 
+    def on_undo(self, viewport) -> bool:
+        """Ctrl+Z in the middle of a chain (@pacaeiro, #175: «the last
+        picked point is not freed»). The segment just drawn is undone and
+        the chain steps back to its previous vertex, so the rubber band
+        leaves from where the line now really ends. With only the first
+        point placed there is nothing of this chain to undo: the point is
+        let go. Idle, the ordinary undo runs."""
+        if self.start_point is None:
+            return False
+        if len(self.chain_vertices) > 1:
+            if not viewport.history.undo():
+                self._reset()
+                viewport.update()
+                return True
+            self.chain_vertices.pop()
+            self.start_point = self.chain_vertices[-1]
+            if len(self.chain_vertices) == 1:
+                self.chain_first_point = self.start_point
+        else:
+            self._reset()
+        viewport.update()
+        return True
+
     def rubber_band_lines(self):
         if self.start_point is None or self.hover_point is None:
             return []
