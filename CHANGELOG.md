@@ -40,10 +40,24 @@ en milímetros o pulgadas no daba el ángulo tecleado.
 - **Ventana ▸ Paneles**: todas las pestañas de la barra lateral, también las
   de extensiones, para ocultarlas o mostrarlas; la misma lista con clic
   derecho sobre las pestañas. Lo oculto se recuerda al reabrir.
-- **Buscador de comandos (F3)**, como en Blender: escribe unas letras, con
-  iniciales o errores de tecleo, y Enter ejecuta. Una letra tecleada en un
-  menú abierto busca en ese menú; el compositor tiene el suyo (#168,
+- **Buscador de comandos (F3)**, como el F3 de Blender o la línea de
+  comandos de Rhino: se escriben unas letras y
+  Enter ejecuta el comando. Encuentra cualquier acción de la ventana
+  (menús, herramientas, paneles, complementos) en el idioma de los menús
+  o en inglés, por su ruta de menú, por iniciales («rf» → Invertir caras,
+  en inglés *Reverse Faces*) y aunque tenga una errata («orinetar»), sin
+  importar tildes ni mayúsculas. Cada resultado es una sola fila, como en
+  Blender (ruta atenuada ▸ icono y nombre, atajo a la derecha), el cuadro
+  se abre bajo el ratón, dentro del área de modelado y sin tapar las
+  barras laterales ni superiores, con diez filas a la vista, clic derecho ▸
+  Cambiar atajo… lleva a Preferencias, y una letra escrita con un menú
+  abierto busca solo en ese menú. Al dejar el ratón sobre un resultado
+  aparece, como en Blender, un recuadro con el nombre, qué hace y su atajo,
+  sin textos cortados. También en Ayuda ▸ Buscar comandos… y en el
+  compositor de láminas, con sus propios comandos (#168,
   @canalsecuario-blip). La barra de estado lo menciona al abrir el programa.
+- **Las herramientas del compositor tienen nombre corto** («Cota en
+  cadena»); la explicación larga queda en el recuadro de ayuda.
 - **Importar STL** (binario y de texto) con la unidad del modelo y la unión
   de caras planas, leído en segundo plano; y **Edición ▸ Simplificar malla**
   (#161, @kagehak).
@@ -105,38 +119,32 @@ suite rápida 3444 y lenta 804 correctas.
 
 ## [0.5.5] — 2026-09-28
 
-**Nada de Trimble, y lo que los usuarios pidieron.** Tras un aviso de
-derechos de autor de Trimble, IngeTrazo deja de ejecutar, descargar o
-distribuir cualquier pieza de SketchUp: el conversor skp2dae y la
-exportación a `.skp` se van, y los `.skp` se siguen abriendo con el lector
-libre. Íconos propios en lugar de los que imitaban a SketchUp. Y una tanda
+**Íconos propios y lo que los usuarios pidieron.** IngeTrazo se queda solo
+con piezas libres: el conversor auxiliar de `.skp` y la exportación a `.skp`
+se retiran, y los `.skp` se siguen abriendo con el lector libre integrado.
+Íconos propios en toda la interfaz. Y una tanda
 de reportes resueltos: la órbita gira alrededor de lo que miras, Empujar/Tirar
 se detiene en las guías de la Cinta, rotar cae exacto en el punto enganchado,
 guardar ya no deja un «cambios sin guardar» fantasma, y las medidas salen en
 las unidades del documento.
 
-### Retirado — nada de Trimble
-Tras el aviso de derechos de autor de Trimble (2026-09-28), IngeTrazo ya no
-ejecuta, descarga ni enlaza nada de Trimble:
-- **El conversor skp2dae** (usaba la `SketchUpAPI.dll` de Trimble bajo Wine)
-  y su descarga automática, que bajaba esa DLL del add-on de Blender de un
-  tercero. Los `.skp` se abren sólo con el lector libre (OpenSKP); si uno no
-  se puede leer, IngeTrazo lo dice y sugiere exportarlo desde SketchUp como
-  COLLADA u OBJ.
-- **Exportar ▸ SketchUp (.skp)**: el escritor de OpenSKP arma cada archivo
-  sobre un documento en blanco que generó el SDK de Trimble, y ese molde ya
-  no se distribuye en ningún paquete (PyInstaller, Flatpak, Snap).
-  `--check` falla un paquete que todavía lo traiga. Para llevar un modelo a
-  SketchUp, exportá COLLADA (.dae).
-- Los tests y la herramienta de validación que usaban el SDK de Trimble como
-  referencia; `scripts/skp_diff.py` ahora compara contra un `.dae` que el
-  propio SketchUp exporta.
-
-- **Ayuda ▸ Obtener más modelos** ya no enlaza al 3D Warehouse de Trimble;
-  quedan Poly Haven, ambientCG y Sketchfab.
+### Retirado
+- **El conversor auxiliar de `.skp`**, que corría bajo Wine, y su descarga
+  automática. Los `.skp` se abren con el lector libre integrado (OpenSKP);
+  si uno no se puede leer, IngeTrazo lo dice y sugiere exportarlo como
+  COLLADA u OBJ desde el programa de origen.
+- **Exportar a `.skp`**: el molde en blanco que usaba el escritor ya no se
+  distribuye en ningún paquete (PyInstaller, Flatpak, Snap), y `--check`
+  falla un paquete que todavía lo traiga. Para llevar un modelo a otro
+  programa, exporta COLLADA (.dae), OBJ o glTF.
+- Las pruebas y la herramienta de validación que dependían de ese
+  conversor; `scripts/skp_diff.py` compara ahora contra un `.dae` de
+  referencia.
+- **Ayuda ▸ Obtener más modelos** enlaza a Poly Haven, ambientCG y
+  Sketchfab.
 
 ### Cambiado
-- **Íconos propios de IngeTrazo** donde imitaban a los de SketchUp:
+- **Íconos propios de IngeTrazo**:
   Caminar son dos huellas, Mirar alrededor una cabeza vista desde arriba con
   su cono de visión, las herramientas de sólidos dos discos que se cruzan, el
   texto una T en un marco, el zoom a la extensión cuatro esquinas alrededor
@@ -145,10 +153,9 @@ ejecuta, descarga ni enlaza nada de Trimble:
   goma inclinada** con su punta naranja. Las **vistas estándar siguen siendo
   la casita** con la pared que se mira en naranja.
 - **IngeTrazo se presenta por sí mismo**: el README, la ficha del Flatpak y
-  la del Snap ya no lo describen como «estilo SketchUp» ni «alternativa a
-  SketchUp», sino con su lema, *traza como a mano*, y dicen cómo se
-  pronuncia su nombre (in-je-TRA-so: *inge*niería + *trazo*; sugerencia de
-  @pacaeiro). SketchUp se nombra sólo para decir que abre sus `.skp`.
+  la del Snap lo describen con su lema, *traza como a mano*, y dicen cómo
+  se pronuncia su nombre (in-je-TRA-so: *inge*niería + *trazo*; sugerencia
+  de @pacaeiro).
 
 ### Añadido
 - **Repetir el último comando con Mayús+R**, y como primera entrada del menú
@@ -183,8 +190,8 @@ ejecuta, descarga ni enlaza nada de Trimble:
   unidades del documento** (#149, @xyont): en milímetros decían metros. Lo
   que tecleas en el cuadro de valores se ve con la unidad en que se leerá, y
   «lados»/«segmentos» se traducen.
-- **El Rectángulo acepta `200,100`** (sin espacio) como ancho y alto, como en
-  SketchUp (#152, @xyont). `200, 100` y `200;100` siguen valiendo; en las demás
+- **El Rectángulo acepta `200,100`** (sin espacio) como ancho y alto
+  (#152, @xyont). `200, 100` y `200;100` siguen valiendo; en las demás
   herramientas la coma sigue siendo el decimal.
 - **Una cara invertida sigue invertida al seguir dibujando**
   (#144, @canalsecuario-blip).
@@ -192,24 +199,6 @@ ejecuta, descarga ni enlaza nada de Trimble:
   (#139, @felixriestra): los botones de Capas y los combos de Terreno se
   cortaban.
 
-### Añadido
-- **Buscador de comandos (F3)**, como el F3 de Blender, la búsqueda de
-  SketchUp o la línea de comandos de Rhino: se escriben unas letras y
-  Enter ejecuta el comando. Encuentra cualquier acción de la ventana
-  (menús, herramientas, paneles, complementos) en el idioma de los menús
-  o en inglés, por su ruta de menú, por iniciales («rf» → Invertir caras,
-  en inglés *Reverse Faces*) y aunque tenga una errata («orinetar»), sin
-  importar tildes ni mayúsculas. Cada resultado es una sola fila, como en
-  Blender (ruta atenuada ▸ icono y nombre, atajo a la derecha), el cuadro
-  se abre bajo el ratón, dentro del área de modelado y sin tapar las
-  barras laterales ni superiores, con diez filas a la vista, clic derecho ▸
-  Cambiar atajo… lleva a Preferencias, y una letra escrita con un menú
-  abierto busca solo en ese menú. Al dejar el ratón sobre un resultado
-  aparece, como en Blender, un recuadro con el nombre, qué hace y su atajo,
-  sin textos cortados. También en Ayuda ▸ Buscar comandos… y en el
-  compositor de láminas, con sus propios comandos.
-- **Las herramientas del compositor tienen nombre corto** («Cota en
-  cadena»); la explicación larga queda en el recuadro de ayuda.
 
 ## [0.5.4] — 2026-09-26
 
