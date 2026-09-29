@@ -597,6 +597,53 @@ class Scene:
             for f in g.mesh.faces:
                 yield f, m
 
+    def selection_bounds(self) -> tuple[QVector3D, QVector3D] | tuple[None, None]:
+        """Axis-aligned bounding box of the SELECTION — what Zoom Selection
+        frames, as ``bounds()`` is what Zoom Extents frames. ``(None, None)``
+        when nothing selected has a place in space.
+
+        Loose edges and faces, whole groups (nested placements included,
+        vectorized per mesh like ``bounds()``), dimensions and reference
+        images. Not cached: it runs once per command, over the selection
+        only."""
+        import numpy as np
+        from core.group import iter_placements
+        pts: list = []
+
+        def add(p: QVector3D) -> None:
+            pts.append((p.x(), p.y(), p.z()))
+
+        for ent in self.selection:
+            if hasattr(ent, "mesh"):          # Group / component instance
+                for g, m in iter_placements(ent):
+                    verts = g.mesh.vertices
+                    if not verts:
+                        continue
+                    arr = np.array([[v.position.x(), v.position.y(),
+                                     v.position.z()] for v in verts])
+                    if m is not None:
+                        d = m.data()          # column-major
+                        rot = np.array([[d[0], d[4], d[8]],
+                                        [d[1], d[5], d[9]],
+                                        [d[2], d[6], d[10]]])
+                        arr = arr @ rot.T + np.array([d[12], d[13], d[14]])
+                    pts.append(tuple(arr.min(axis=0)))
+                    pts.append(tuple(arr.max(axis=0)))
+            elif hasattr(ent, "vertices"):    # Face
+                for v in ent.vertices:
+                    add(v)
+            elif hasattr(ent, "corners"):     # ImagePlane
+                for c in ent.corners():
+                    add(c)
+            elif hasattr(ent, "a") and hasattr(ent, "b"):    # Edge, Dimension
+                add(ent.a)
+                add(ent.b)
+        if not pts:
+            return None, None
+        arr = np.array(pts, dtype=float)
+        lo, hi = arr.min(axis=0), arr.max(axis=0)
+        return QVector3D(*lo), QVector3D(*hi)
+
     def bounds(self) -> tuple[QVector3D, QVector3D] | tuple[None, None]:
         """Axis-aligned bounding box of all geometry. ``(None, None)`` if empty.
 
