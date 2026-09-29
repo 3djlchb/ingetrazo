@@ -133,10 +133,16 @@ def setup(app):
     app.on_document_changed(refresh)      # edits, undo, New, Open
 
     # A tab in the side tray, beside Properties / BIM / Terrain. It goes
-    # back where the user left it and has a Window-menu entry; `name` tells
-    # apart several panels of one extension.
-    app.add_panel("Levels", my_widget)
+    # back where the user left it and is listed in Window ▸ Panels (the
+    # user may hide it there); `name` tells apart several panels of one
+    # extension, `panel=` puts several extensions in ONE tab.
+    dock = app.add_panel("Levels", my_widget)
     app.add_panel("Levels — help", help_widget, name="help")
+    app.add_panel("AI", chat, panel="ai", stretch=1)
+    app.show_panel(dock)                  # to the front, shown again if hidden
+
+    # An entry in the Extensions menu (a shortcut already taken is left off).
+    app.add_menu_action("Levels…", lambda: app.show_panel(dock), "Ctrl+Shift+L")
 
     # Drawn with a QPainter over every frame, whatever the active tool;
     # world points (metres) to pixels, thousands at a time:
@@ -154,6 +160,28 @@ it; a provider that raises is logged and skipped, an overlay that raises
 is logged once and removed, never breaking the frame or the cursor; the
 painter state is saved and restored around every overlay; document data
 that is not JSON-safe is dropped on save rather than failing it.
+
+### Where your interface goes
+
+The side tray is one place, not the only one. Pick by how the user works
+with it:
+
+- **A tray tab** (`add_panel`) — for what stays open *while modelling* and
+  works on the viewport: placing things with a click, settings you tweak
+  and look at the model again. Render with Blender and Levels live here.
+  Keep it narrow-friendly: controls that shrink, sections that fold
+  (`views/fold_section.py`), no fixed widths.
+- **A dialog or a window of your own** (a `QDialog`, any Qt window, from a
+  tool or a menu entry) — for what is opened, used and closed, or needs
+  room: a report, a console, an image. Model Info, the Python Console and
+  the render's image viewer do this. Parent it to `app.window`, make it
+  non-modal unless it must block, and reuse one instance.
+- **Only a menu entry or a tool** — for one-shot commands.
+- **A workspace** (below) — when the extension has a document of its own
+  that replaces the model for a while.
+
+Nothing forces the tray: an extension may mix these (Render has its tab
+and opens the image in a window).
 
 ### A document type of its own, and workspaces (API 2)
 
@@ -212,11 +240,17 @@ belong in extensions like this one, not in the core.
   diagnosis with viewport highlighting. A modeless, selection-driven
   plugin.
 - `plugins/ai_assistant.py` — the in-app AI assistant (Ctrl+Shift+A): a
-  multi-provider chat agent that models through `core.ai`. The reference
-  for dialogs with worker threads and per-provider settings.
+  multi-provider chat agent that models through `core.ai`, in the «AI»
+  tray tab. The reference for worker threads, per-provider settings and a
+  menu entry that brings a tab forward.
 - `plugins/ai_bridge.py` — the MCP bridge: a localhost TCP server that
-  lets an external agent (Claude Code/Desktop) drive the document. The
-  reference for socket servers and main-thread relays.
+  lets an external agent (Claude Code/Desktop) drive the document; a
+  section of the same «AI» tab (`panel="ai"`). The reference for socket
+  servers and main-thread relays.
+- `plugins/render_blender.py` — Render with Blender: a tray tab with
+  folding sections, lights placed with a click and drawn over the
+  viewport, document data, a child process, and the image in a window of
+  its own. The reference for a full panel extension.
 
 ## Roadmap
 
