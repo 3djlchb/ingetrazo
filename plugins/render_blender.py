@@ -38,7 +38,6 @@ from PySide6.QtWidgets import (
     QGraphicsPixmapItem,
     QGraphicsScene,
     QGraphicsView,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -48,8 +47,10 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSlider,
     QSpinBox,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -153,7 +154,7 @@ class _ZoomView(QGraphicsView):
 class ImageViewer(QDialog):
     """A larger look at a render: fit, 100 %, zoom and pan."""
 
-    def __init__(self, path: Path, save, parent=None) -> None:
+    def __init__(self, path: Path, save, parent=None, folder=None) -> None:
         super().__init__(parent)
         self.setWindowTitle(tr("Render") + f" — {path.name}")
         self.resize(1200, 800)
@@ -162,9 +163,12 @@ class ImageViewer(QDialog):
         self.view = _ZoomView(pix, self)
         lay.addWidget(self.view, 1)
         row = QHBoxLayout()
-        for label, slot in ((tr("Fit to window"), self.view.fit),
-                            (tr("100 %"), self.view.actual_size),
-                            (tr("Save image…"), save)):
+        buttons = [(tr("Fit to window"), self.view.fit),
+                   (tr("100 %"), self.view.actual_size),
+                   (tr("Save image…"), save)]
+        if folder is not None:
+            buttons.append((tr("Open folder"), folder))
+        for label, slot in buttons:
             b = QPushButton(label)
             b.clicked.connect(slot)
             row.addWidget(b)
@@ -226,6 +230,65 @@ def _make_pick_tool(prompt: str, done, cancelled):
 
 # ---- The panel ---------------------------------------------------------------------
 
+class _Section(QWidget):
+    """A titled part of the panel that folds away with a click on its title
+    (Marco: «que los campos imagen, ambiente, iluminación, renderizar se
+    puedan contraer»); whether it is open is remembered."""
+
+    def __init__(self, title: str, key: str, parent=None) -> None:
+        super().__init__(parent)
+        self._key = _SETTINGS + "open_" + key
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(2)
+        self.header = QToolButton()
+        self.header.setText(title)
+        self.header.setCheckable(True)
+        self.header.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.header.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.header.setStyleSheet("QToolButton { border: none; "
+                                  "font-weight: bold; text-align: left; "
+                                  "padding: 3px 0; }")
+        lay.addWidget(self.header)
+        self.body = QFrame()
+        self.body.setFrameShape(QFrame.StyledPanel)
+        lay.addWidget(self.body)
+        is_open = str(QSettings().value(self._key, "1")) != "0"
+        self.header.setChecked(is_open)
+        self._show(is_open)
+        self.header.toggled.connect(self._toggled)
+
+    def _toggled(self, on: bool) -> None:
+        QSettings().setValue(self._key, "1" if on else "0")
+        self._show(on)
+
+    def _show(self, on: bool) -> None:
+        self.header.setArrowType(Qt.DownArrow if on else Qt.RightArrow)
+        self.body.setVisible(on)
+
+
+def _narrow(*widgets) -> None:
+    """Let a control shrink with a narrow side tray instead of forcing the
+    panel wider than the tray (#181, Marco's capture: a horizontal scroll
+    bar and cut-off buttons with room to spare)."""
+    for w in widgets:
+        if isinstance(w, QComboBox):
+            w.setSizeAdjustPolicy(
+                QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            w.setMinimumContentsLength(6)
+        else:
+            w.setSizePolicy(QSizePolicy.Ignored, w.sizePolicy().verticalPolicy())
+            w.setMinimumWidth(40)
+
+
+def _form(parent) -> QFormLayout:
+    """A form that puts each label above its field when the tray is narrow."""
+    form = QFormLayout(parent)
+    form.setRowWrapPolicy(QFormLayout.WrapLongRows)
+    form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+    return form
+
+
 class RenderPanel(QWidget):
     """Blender, image settings, ambience, lights and the render itself —
     top to bottom, sized for the side tray."""
@@ -247,19 +310,24 @@ class RenderPanel(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
+        # Never wider than the tray: the controls shrink instead (#181).
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         outer.addWidget(scroll)
         body = QWidget()
+        body.setMinimumWidth(0)
         scroll.setWidget(body)
         lay = QVBoxLayout(body)
         lay.setContentsMargins(8, 6, 8, 8)
+        st = QSettings()
 
         # -- Blender
-        box = QGroupBox(tr("Blender"))
-        bl = QVBoxLayout(box)
+        sec = _Section(tr("Blender"), "blender")
+        bl = QVBoxLayout(sec.body)
         row = QHBoxLayout()
         self._where = QLabel()
         self._where.setWordWrap(True)
         self._where.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        _narrow(self._where)
         row.addWidget(self._where, 1)
         pick = QPushButton(tr("Choose…"))
         pick.clicked.connect(self._pick_blender)
@@ -269,12 +337,11 @@ class RenderPanel(QWidget):
         self._help.setFrameShape(QFrame.StyledPanel)
         self._help_lay = QVBoxLayout(self._help)
         bl.addWidget(self._help)
-        lay.addWidget(box)
+        lay.addWidget(sec)
 
         # -- Image
-        box = QGroupBox(tr("Image"))
-        form = QFormLayout(box)
-        st = QSettings()
+        sec = _Section(tr("Image"), "image")
+        form = _form(sec.body)
         self._engine = QComboBox()
         self._engine.addItem(tr("EEVEE — fast"), "eevee")
         self._engine.addItem(tr("Cycles — best quality"), "cycles")
@@ -293,23 +360,29 @@ class RenderPanel(QWidget):
         self._width.setValue(int(st.value(_SETTINGS + "width", 1920)))
         self._width.setSuffix(" px")
         self._width.valueChanged.connect(self._update_height)
-        form.addRow(tr("Width:"), self._width)
+        wrow = QHBoxLayout()
         self._height = QLabel()
-        self._height.setWordWrap(True)
-        form.addRow("", self._height)
+        self._height.setToolTip(tr("The height follows the view's "
+                                   "proportions"))
+        wrow.addWidget(self._width, 1)
+        wrow.addWidget(self._height)
+        form.addRow(tr("Width:"), wrow)
         self._ground = QCheckBox(tr("Ground that catches the shadows"))
         self._ground.setChecked(
             str(st.value(_SETTINGS + "ground", "1")) != "0")
         form.addRow(self._ground)
-        self._blend = QCheckBox(tr("Also keep the .blend file (to retouch "
-                                   "it in Blender)"))
+        self._blend = QCheckBox(tr("Also keep the .blend file"))
+        self._blend.setToolTip(tr("To retouch the scene in Blender "
+                                  "afterwards"))
         self._blend.setChecked(str(st.value(_SETTINGS + "blend", "0")) == "1")
         form.addRow(self._blend)
-        lay.addWidget(box)
+        _narrow(self._engine, self._quality, self._width, self._ground,
+                self._blend)
+        lay.addWidget(sec)
 
         # -- Ambience
-        box = QGroupBox(tr("Ambience"))
-        form = QFormLayout(box)
+        sec = _Section(tr("Ambience"), "ambience")
+        form = _form(sec.body)
         self._ambience = QComboBox()
         for key, label in (("day", tr("Day — the sun of the Shadows panel")),
                            ("night", tr("Night — your lights")),
@@ -322,7 +395,7 @@ class RenderPanel(QWidget):
         form.addRow(self._sun)
         # The day's sun: how strong, and — in the Shadows panel — when.
         self._sun_box = QWidget()
-        sf = QFormLayout(self._sun_box)
+        sf = _form(self._sun_box)
         sf.setContentsMargins(0, 0, 0, 0)
         srow = QHBoxLayout()
         self._sun_scale = QSlider(Qt.Horizontal)
@@ -330,7 +403,7 @@ class RenderPanel(QWidget):
         self._sun_scale.setSingleStep(5)
         self._sun_scale.setPageStep(25)
         self._sun_scale_lbl = QLabel()
-        self._sun_scale_lbl.setMinimumWidth(40)
+        self._sun_scale_lbl.setMinimumWidth(44)
         self._sun_scale.valueChanged.connect(
             lambda v: self._sun_scale_lbl.setText(f"{v} %"))
         self._sun_scale.sliderReleased.connect(self._on_sun_scale)
@@ -343,11 +416,12 @@ class RenderPanel(QWidget):
         when.clicked.connect(self._open_shadows)
         sf.addRow(when)
         form.addRow(self._sun_box)
-        lay.addWidget(box)
+        _narrow(self._ambience, self._sun, self._sun_scale, when)
+        lay.addWidget(sec)
 
         # -- Lights
-        box = QGroupBox(tr("Lights"))
-        ll = QVBoxLayout(box)
+        sec = _Section(tr("Lights"), "lights")
+        ll = QVBoxLayout(sec.body)
         self._lights = QListWidget()
         self._lights.setMinimumHeight(70)
         self._lights.setMaximumHeight(150)
@@ -361,11 +435,12 @@ class RenderPanel(QWidget):
         add_spot.clicked.connect(lambda: self._begin_pick("new", "spot"))
         self._del = QPushButton(tr("Delete"))
         self._del.clicked.connect(self._delete_light)
-        for b in (add_point, add_spot, self._del):
+        for b in (add_point, add_spot):
             row.addWidget(b)
+        _narrow(add_point, add_spot)
         ll.addLayout(row)
         self._editor = QWidget()
-        ef = QFormLayout(self._editor)
+        ef = _form(self._editor)
         ef.setContentsMargins(0, 0, 0, 0)
         # Colour as a temperature: a slider over the black-body gradient,
         # from a candle to a blue sky, with the kelvins beside it.
@@ -435,50 +510,46 @@ class RenderPanel(QWidget):
         self._aim.clicked.connect(lambda: self._begin_pick("aim"))
         row.addWidget(self._move)
         row.addWidget(self._aim)
+        row.addWidget(self._del)
         ef.addRow(row)
+        _narrow(self._kelvin, self._power, self._angle, self._heading,
+                self._tilt, self._move, self._aim, self._del,
+                self._kelvin_name)
         ll.addWidget(self._editor)
         hint = QLabel(tr("Click on the model to place a light — on a lamp "
                          "post, a ceiling, a bench. At night they are the "
                          "only light besides a faint moon."))
         hint.setWordWrap(True)
         hint.setStyleSheet("color: palette(mid);")
+        _narrow(hint)
         ll.addWidget(hint)
-        lay.addWidget(box)
+        lay.addWidget(sec)
 
-        # -- Render
-        box = QGroupBox(tr("Render"))
-        rl = QVBoxLayout(box)
-        row = QHBoxLayout()
+        # -- Render: the button, the progress and a word on how it went.
+        # The finished image opens in its own window, which has Save and
+        # Open folder (Marco: those belong with the image, not the tray);
+        # the status line keeps a link back to it.
+        sec = _Section(tr("Render"), "render")
+        rl = QVBoxLayout(sec.body)
         self._go = QPushButton(tr("Render"))
         self._go.clicked.connect(self._start)
         self._stop = QPushButton(tr("Cancel render"))
         self._stop.clicked.connect(self._cancel)
         self._stop.setVisible(False)
-        row.addWidget(self._go, 1)
-        row.addWidget(self._stop, 1)
-        rl.addLayout(row)
+        _narrow(self._go, self._stop)
+        rl.addWidget(self._go)
+        rl.addWidget(self._stop)
         self._bar = QProgressBar()
         self._bar.setRange(0, 1000)
         self._bar.setVisible(False)
         rl.addWidget(self._bar)
         self._status = QLabel()
         self._status.setWordWrap(True)
+        self._status.setTextFormat(Qt.RichText)
+        self._status.linkActivated.connect(lambda _l: self._open_viewer())
+        _narrow(self._status)
         rl.addWidget(self._status)
-        # The image opens in its own window when it is ready; the tray
-        # keeps only the way back to it (a thumbnail here was the same
-        # picture twice — Marco).
-        row = QHBoxLayout()
-        self._enlarge = QPushButton(tr("Show image"))
-        self._enlarge.clicked.connect(self._open_viewer)
-        self._save = QPushButton(tr("Save image…"))
-        self._save.clicked.connect(self._save_image)
-        self._folder = QPushButton(tr("Open folder"))
-        self._folder.clicked.connect(self._open_folder)
-        for b in (self._enlarge, self._save, self._folder):
-            b.setEnabled(False)
-            row.addWidget(b)
-        rl.addLayout(row)
-        lay.addWidget(box)
+        lay.addWidget(sec)
         lay.addStretch(1)
 
         self._update_height()
@@ -562,7 +633,7 @@ class RenderPanel(QWidget):
 
     def _update_height(self) -> None:
         h = max(2, round(self._width.value() / self._aspect()))
-        self._height.setText(tr("× {h} px (the view's proportions)", h=h))
+        self._height.setText(f"× {h} px")
 
     def showEvent(self, ev) -> None:
         super().showEvent(ev)
@@ -819,7 +890,7 @@ class RenderPanel(QWidget):
         cycles = self._engine.currentData() == "cycles"
         self._status.setText(
             tr("Blender is preparing the scene…") + (
-                "\n" + tr("The first Cycles render on a graphics card can "
+                "<br>" + tr("The first Cycles render on a graphics card can "
                           "take a few minutes while Blender prepares it; "
                           "the next ones are fast.") if cycles else ""))
         proc.start(argv[0], argv[1:])
@@ -862,16 +933,15 @@ class RenderPanel(QWidget):
         out = (self._work / "render.png") if self._work else None
         if code == 0 and out is not None and out.is_file():
             self._image = out
-            for b in (self._enlarge, self._save, self._folder):
-                b.setEnabled(True)
-            self._status.setText(tr("Done. The image is open in its own "
-                                    "window; «Show image» brings it back."))
+            self._status.setText(tr("Done.") + ' <a href="#show">'
+                                 + tr("Show image") + "</a>")
             self._open_viewer()
             return
+        import html
         tail = "\n".join(line for line in self._log[-12:] if line.strip())
-        self._status.setText(tr("Blender stopped without an image.") + (
-            "\n\n" + tail if tail else ""))
-        self._folder.setEnabled(self._work is not None)
+        self._status.setText(html.escape(
+            tr("Blender stopped without an image.")
+            + ("\n\n" + tail if tail else "")).replace("\n", "<br>"))
 
     def _open_viewer(self) -> None:
         """The image in its own window — one, reused: a second render
@@ -882,7 +952,7 @@ class RenderPanel(QWidget):
         if old is not None:
             old.close()
         self._viewer = ImageViewer(self._image, self._save_image,
-                                   self.window())
+                                   self.window(), folder=self._open_folder)
         self._viewer.setAttribute(Qt.WA_DeleteOnClose)
         self._viewer.destroyed.connect(self._forget_viewer)
         self._viewer.show()

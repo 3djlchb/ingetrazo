@@ -2217,5 +2217,8 @@
  "90° straight down, 0° level, negative upward": "90° para baixo, 0° horizontal, negativo para cima",
  "Tilt down:": "Inclinação:",
  "Show image": "Ver imagem",
- "Done. The image is open in its own window; «Show image» brings it back.": "Pronto. A imagem está aberta na sua janela; «Ver imagem» a mostra de novo."
+ "Done. The image is open in its own window; «Show image» brings it back.": "Pronto. A imagem está aberta na sua janela; «Ver imagem» a mostra de novo.",
+ "Also keep the .blend file": "Guardar também o .blend",
+ "To retouch the scene in Blender afterwards": "Para retocar a cena no Blender depois",
+ "The height follows the view's proportions": "A altura segue as proporções da vista"
 }

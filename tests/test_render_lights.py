@@ -273,3 +273,48 @@ def test_the_sun_strength_reaches_the_job(tmp_path):
     job = json.loads(rb.write_job(scene, _cam(scene), tmp_path,
                                   sun_scale=0.5).read_text())
     assert job["sun_strength"] == pytest.approx(1.5)
+
+
+# ---- The tray layout (Marco's third round) --------------------------------------
+
+def test_sections_fold_and_remember_it(window):
+    from PySide6.QtCore import QSettings
+    panel = _panel(window)
+    import importlib
+    mod = importlib.import_module(type(panel).__module__)
+    sections = {s.header.text(): s for s in panel.findChildren(mod._Section)}
+    lights = sections[mod.tr("Lights")]
+    lights.header.setChecked(False)
+    assert lights.body.isHidden()
+    assert str(QSettings().value("render/open_lights")) == "0"
+    again = mod._Section("x", "lights")                # a new panel: folded
+    assert again.body.isHidden()
+    lights.header.setChecked(True)
+    assert not lights.body.isHidden()
+
+
+def test_the_panel_never_scrolls_sideways(window):
+    panel = _panel(window)
+    from PySide6.QtWidgets import QScrollArea
+    area = panel.findChild(QScrollArea)
+    assert area.horizontalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
+    assert area.widget().minimumSizeHint().width() < 260
+
+
+def test_save_and_open_folder_live_in_the_image_window(window, tmp_path):
+    from PySide6.QtGui import QImage
+    from PySide6.QtWidgets import QPushButton
+    panel = _panel(window)
+    panel._work = tmp_path
+    img = QImage(32, 20, QImage.Format_RGB32)
+    img.fill(0x808080)
+    img.save(str(tmp_path / "render.png"))
+    panel._finished(0, None)
+    labels = {b.text() for b in panel._viewer.findChildren(QPushButton)}
+    import importlib
+    mod = importlib.import_module(type(panel).__module__)
+    assert {mod.tr("Save image…"), mod.tr("Open folder")} <= labels
+    tray = {b.text() for b in panel.findChildren(QPushButton)}
+    assert mod.tr("Save image…") not in tray and mod.tr("Open folder") not in tray
+    assert "href" in panel._status.text()            # a link back to it
+    panel._viewer.close()

@@ -2220,5 +2220,8 @@
  "90° straight down, 0° level, negative upward": "90° 垂直向下,0° 水平,负值向上",
  "Tilt down:": "下倾角:",
  "Show image": "查看图像",
- "Done. The image is open in its own window; «Show image» brings it back.": "完成。图像已在独立窗口中打开;“查看图像”可再次显示。"
+ "Done. The image is open in its own window; «Show image» brings it back.": "完成。图像已在独立窗口中打开;“查看图像”可再次显示。",
+ "Also keep the .blend file": "同时保留 .blend 文件",
+ "To retouch the scene in Blender afterwards": "以便之后在 Blender 中修改场景",
+ "The height follows the view's proportions": "高度随视图比例而定"
 }
