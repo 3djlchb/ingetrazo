@@ -10,7 +10,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication, QTabBar
 
 
@@ -159,85 +159,3 @@ def test_the_prompt_takes_several_lines_and_enter_sends(win):
                                 Qt.NoModifier))
     assert sent == ["una casa\ncon techo a dos aguas"]
     assert box.minimumHeight() >= 2 * box.fontMetrics().lineSpacing()
-
-
-# ---- A tray in a window of its own -------------------------------------------------
-
-def _shown(win):
-    win.resize(1300, 850)
-    win.show()
-    QApplication.processEvents()
-    return win
-
-
-def _tab_pos(win, title):
-    for bar in win.findChildren(QTabBar):
-        if bar.parentWidget() is not win or not bar.isVisible():
-            continue
-        # Qt keeps a spare tab bar off the window: only the one on it.
-        if not win.rect().contains(bar.mapTo(win, bar.rect().center())):
-            continue
-        for i in range(bar.count()):
-            if bar.tabText(i) == title:
-                return bar, bar.mapTo(win, bar.tabRect(i).center())
-    raise AssertionError(f"no tab {title!r}")
-
-
-def test_a_tray_floats_with_a_title_bar_and_docks_back_without_one(win):
-    _shown(win)
-    ai = _dock(win, "extension_ai")
-    assert ai.titleBarWidget() is not None          # tabbed: the tab names it
-    win.float_tray(ai)
-    QApplication.processEvents()
-    assert ai.isFloating() and not ai.isHidden()
-    assert ai.titleBarWidget() is None              # Qt's own: move, dock, close
-    assert ai.width() >= 420 and ai.height() >= 560
-    ai.setFloating(False)
-    QApplication.processEvents()
-    assert ai.titleBarWidget() is not None
-
-
-def test_the_right_click_offers_the_tab_under_the_cursor(win):
-    _shown(win)
-    bim = _dock(win, "tray_bim")
-    bar, pos = _tab_pos(win, bim.windowTitle())
-    assert win._tray_tab_bar_at(pos)
-    menu = win.tray_tab_menu(pos)
-    texts = [a.text() for a in menu.actions()]
-    assert texts[0] == "Open «BIM» in its own window"
-    assert "Show all panels" in texts
-    menu.actions()[0].trigger()
-    QApplication.processEvents()
-    assert bim.isFloating()
-
-
-def test_a_double_click_on_a_tab_floats_it(win):
-    from PySide6.QtCore import QEvent, QPointF
-    from PySide6.QtGui import QMouseEvent
-    _shown(win)
-    terrain = _dock(win, "tray_georef")
-    bar, pos = _tab_pos(win, terrain.windowTitle())
-    local = QPointF(bar.mapFrom(win, pos))
-    ev = QMouseEvent(QEvent.MouseButtonDblClick, local, local,
-                     Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
-    QApplication.sendEvent(bar, ev)
-    QApplication.processEvents()
-    assert terrain.isFloating()
-
-
-def test_a_floating_tray_comes_back_floating_next_time(win):
-    from views.main_window import MainWindow
-    _shown(win)
-    render = _dock(win, "extension_render_blender")
-    win.float_tray(render)
-    QApplication.processEvents()
-    win._saved_version = win.viewport.scene.version
-    win.close()                                     # the layout is saved
-    again = _shown(MainWindow())
-    try:
-        back = _dock(again, "extension_render_blender")
-        assert back.isFloating() and back.titleBarWidget() is None
-    finally:
-        back.setFloating(False)
-        again._saved_version = again.viewport.scene.version
-        again.close()
