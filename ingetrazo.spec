@@ -262,6 +262,16 @@ if sys.platform.startswith('linux'):
     print('spec: dropped %d bundled X libraries (issue #6)'
           % (_before - len(a.binaries)))
 
+# The DWG converter's DLLs live beside dwg2dxf.exe in vendor/libredwg/bin,
+# where Windows looks for them when the .exe starts. PyInstaller also
+# collects them into the bundle's root as dependencies of that .exe: a
+# second copy of 31 MB nobody loads (#101).
+if sys.platform == 'win32':
+    _DWG_DLLS = {'libredwg-0.dll', 'libiconv-2.dll'}
+    a.binaries = [b for b in a.binaries
+                  if not (Path(b[0]).name.lower() in _DWG_DLLS
+                          and Path(b[0]).parent == Path('.'))]
+
 pyz = PYZ(a.pure, a.zipped_data)
 
 icon = None

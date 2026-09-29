@@ -106,6 +106,8 @@ jobs:
           for f in dwg2dxf.exe libredwg-0.dll libiconv-2.dll; do
             test -f "dist/ingetrazo/_internal/vendor/libredwg/bin/$f"
           done
+          # …y sin la segunda copia de las DLL en la raíz (31 MB de sobra).
+          test ! -e dist/ingetrazo/_internal/libredwg-0.dll
           # Y el mismo --check que ya corren el tar, el AppImage y el snap
           # (release.yml), que Windows no tenía: cubre estos archivos y los
           # que se añadan después, sin que haya que acordarse de listarlos
