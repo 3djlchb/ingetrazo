@@ -457,4 +457,7 @@ class PreferencesDialog(QDialog):
         st.setValue("ia/ollama_url", self._ollama.text().strip())
         st.setValue("ia/capturas", "1" if self._shots.isChecked() else "0")
         st.sync()
+        panel = getattr(self._window, "_ai_assistant", None)
+        if panel is not None:          # the AI tab lives on: show the change
+            panel._load_settings()
         super().accept()

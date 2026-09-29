@@ -1088,24 +1088,16 @@ class MainWindow(QMainWindow):
         # Window menu (SketchUp: panels + app preferences)
         window_menu = menubar.addMenu(tr("Window"))
 
-        toggle_tray = self.tray.toggleViewAction()
-        toggle_tray.setText(tr("Properties panel"))
-        window_menu.addAction(toggle_tray)
-
-        # Every tray has its entry: a closed BIM tray had no way back
-        # (Marco, 0.5.1 Flatpak: «no veo las pestañas de terreno y BIM»).
-        toggle_bim = self.bim_tray.toggleViewAction()
-        toggle_bim.setText(tr("BIM panel"))
-        window_menu.addAction(toggle_bim)
-
-        toggle_georef = self.georef_tray.toggleViewAction()
-        toggle_georef.setText(tr("Terrain panel"))
-        window_menu.addAction(toggle_georef)
-        # Only the menu says a tray is unwanted: that choice is remembered
-        # and every other tray opens at start-up (see _show_default_trays).
-        for dock in self._sidebar_docks():
-            dock.toggleViewAction().triggered.connect(
-                lambda on, d=dock: self._remember_tray_choice(d, on))
+        # Every tray, extension tabs included, has its entry here — and the
+        # same list opens on a right-click over the tabs. Only this list
+        # says a tray is unwanted: that choice is remembered and every other
+        # tray opens at start-up (see _show_default_trays). Built when it
+        # opens: extension tabs are added after the menus.
+        panels_menu = QMenu(tr("Panels"), window_menu)
+        panels_menu.aboutToShow.connect(
+            lambda m=panels_menu: self._fill_panels_menu(m))
+        window_menu.addMenu(panels_menu)
+        self._panels_menu = panels_menu
 
         toggle_profile = self.profile_dock.toggleViewAction()
         toggle_profile.setText(tr("Terrain profile"))
@@ -1181,6 +1173,9 @@ class MainWindow(QMainWindow):
         docks = self._sidebar_docks()
         for d in docks:
             d.setVisible(d.objectName() not in hidden)
+            # Qt's own dock list (right-click on a toolbar) hides one too.
+            d.toggleViewAction().triggered.connect(
+                lambda on, dock=d: self._remember_tray_choice(dock, on))
         if not self.tray.isHidden():
             self.tray.raise_()
 
@@ -1199,6 +1194,61 @@ class MainWindow(QMainWindow):
         else:
             hidden.add(dock.objectName())
         st.setValue("ui/hidden_trays", sorted(hidden))
+
+    def _fill_panels_menu(self, menu) -> None:
+        """One checkable entry per side-tray tab (Marco, 29-09: «cuando
+        tenga demasiadas pestañas… configurar para no mostrar»)."""
+        menu.clear()
+        for dock in self._sidebar_docks():
+            act = menu.addAction(dock.windowTitle())
+            act.setCheckable(True)
+            act.setChecked(not dock.isHidden())
+            act.triggered.connect(
+                lambda on, d=dock: self.set_tray_shown(d, on))
+        menu.addSeparator()
+        every = menu.addAction(tr("Show all panels"))
+        every.triggered.connect(self._show_all_trays)
+
+    def set_tray_shown(self, dock, shown: bool) -> None:
+        """Show (in front) or hide one side-tray tab and remember it. A
+        folded sidebar unfolds first: asking for a tab means seeing it."""
+        if shown:
+            act = getattr(self, "_act_sidebar", None)
+            if act is not None and not act.isChecked():
+                act.setChecked(True)
+            dock.show()
+            dock.raise_()
+        else:
+            dock.hide()
+        self._remember_tray_choice(dock, shown)
+
+    def _show_all_trays(self) -> None:
+        for dock in self._sidebar_docks():
+            self.set_tray_shown(dock, True)
+        if not self.tray.isHidden():
+            self.tray.raise_()
+
+    def _tray_tab_bar_at(self, pos) -> bool:
+        """Whether ``pos`` (window coordinates) is on the tab bar of the
+        side trays — the tabs QMainWindow draws for tabified docks."""
+        from PySide6.QtWidgets import QTabBar
+        child = self.childAt(pos)
+        while child is not None and child is not self:
+            if isinstance(child, QTabBar):
+                return True
+            child = child.parentWidget()
+        return False
+
+    def contextMenuEvent(self, event) -> None:
+        """Right-click on the tray tabs → the Window ▸ Panels list, instead
+        of Qt's toolbar-and-dock menu."""
+        if self._tray_tab_bar_at(event.pos()):
+            menu = QMenu(self)
+            self._fill_panels_menu(menu)
+            menu.exec(event.globalPos())
+            event.accept()
+            return
+        super().contextMenuEvent(event)
 
     def _sidebar_docks(self) -> list:
         return [d for d in (getattr(self, "tray", None),
@@ -1415,6 +1465,8 @@ class MainWindow(QMainWindow):
         # ambiguity that silently disables the built-in key for both.
         taken = {a.shortcut().toString() for a in self.findChildren(QAction)
                  if not a.shortcut().isEmpty()}
+        self._ext_menu = ext_menu           # ExtensionApp.add_menu_action
+        self._ext_taken_keys = taken
 
         count = 0
         from views.extension_api import ExtensionApp

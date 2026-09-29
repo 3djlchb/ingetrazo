@@ -57,6 +57,7 @@ from PySide6.QtWidgets import (
 
 from core import render_blender as rb
 from core.i18n import tr
+from views.fold_section import FoldSection, narrow, wrapping_form
 
 _SETTINGS = "render/"
 
@@ -230,63 +231,13 @@ def _make_pick_tool(prompt: str, done, cancelled):
 
 # ---- The panel ---------------------------------------------------------------------
 
-class _Section(QWidget):
-    """A titled part of the panel that folds away with a click on its title
-    (Marco: «que los campos imagen, ambiente, iluminación, renderizar se
-    puedan contraer»); whether it is open is remembered."""
-
-    def __init__(self, title: str, key: str, parent=None) -> None:
-        super().__init__(parent)
-        self._key = _SETTINGS + "open_" + key
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(2)
-        self.header = QToolButton()
-        self.header.setText(title)
-        self.header.setCheckable(True)
-        self.header.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self.header.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.header.setStyleSheet("QToolButton { border: none; "
-                                  "font-weight: bold; text-align: left; "
-                                  "padding: 3px 0; }")
-        lay.addWidget(self.header)
-        self.body = QFrame()
-        self.body.setFrameShape(QFrame.StyledPanel)
-        lay.addWidget(self.body)
-        is_open = str(QSettings().value(self._key, "1")) != "0"
-        self.header.setChecked(is_open)
-        self._show(is_open)
-        self.header.toggled.connect(self._toggled)
-
-    def _toggled(self, on: bool) -> None:
-        QSettings().setValue(self._key, "1" if on else "0")
-        self._show(on)
-
-    def _show(self, on: bool) -> None:
-        self.header.setArrowType(Qt.DownArrow if on else Qt.RightArrow)
-        self.body.setVisible(on)
+def _Section(title: str, key: str, parent=None) -> FoldSection:
+    """A folding section whose open state is kept under ``render/``."""
+    return FoldSection(title, _SETTINGS + "open_" + key, parent)
 
 
-def _narrow(*widgets) -> None:
-    """Let a control shrink with a narrow side tray instead of forcing the
-    panel wider than the tray (#181, Marco's capture: a horizontal scroll
-    bar and cut-off buttons with room to spare)."""
-    for w in widgets:
-        if isinstance(w, QComboBox):
-            w.setSizeAdjustPolicy(
-                QComboBox.AdjustToMinimumContentsLengthWithIcon)
-            w.setMinimumContentsLength(6)
-        else:
-            w.setSizePolicy(QSizePolicy.Ignored, w.sizePolicy().verticalPolicy())
-            w.setMinimumWidth(40)
-
-
-def _form(parent) -> QFormLayout:
-    """A form that puts each label above its field when the tray is narrow."""
-    form = QFormLayout(parent)
-    form.setRowWrapPolicy(QFormLayout.WrapLongRows)
-    form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
-    return form
+_narrow = narrow
+_form = wrapping_form
 
 
 class RenderPanel(QWidget):

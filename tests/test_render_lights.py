@@ -282,7 +282,7 @@ def test_sections_fold_and_remember_it(window):
     panel = _panel(window)
     import importlib
     mod = importlib.import_module(type(panel).__module__)
-    sections = {s.header.text(): s for s in panel.findChildren(mod._Section)}
+    sections = {s.header.text(): s for s in panel.findChildren(mod.FoldSection)}
     lights = sections[mod.tr("Lights")]
     lights.header.setChecked(False)
     assert lights.body.isHidden()

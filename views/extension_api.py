@@ -77,14 +77,34 @@ class ExtensionApp:
         self.viewport.sceneVersionChanged.connect(lambda _v: fn())
 
     # ---- Side panel ----------------------------------------------------------
-    def add_panel(self, title: str, widget):
+    def add_panel(self, title: str, widget, *, panel: str | None = None,
+                  stretch: int = 0):
         """Put ``widget`` in the side tray as a tab of its own, beside
-        Properties / BIM / Terrain. Returns the dock."""
+        Properties / BIM / Terrain. Returns the dock.
+
+        With ``panel`` several extensions share ONE tab: the first call
+        creates it (named ``title``), the next ones stack their widget
+        under the previous (``stretch`` as in ``QBoxLayout.addWidget``) —
+        the assistant and the MCP bridge both live in the «AI» tab."""
         from PySide6.QtCore import Qt
-        from PySide6.QtWidgets import QDockWidget, QWidget
+        from PySide6.QtWidgets import QDockWidget, QVBoxLayout, QWidget
         win = self._window
+        shared = getattr(win, "_shared_panels", None)
+        if shared is None:
+            shared = win._shared_panels = {}
+        if panel is not None and panel in shared:
+            dock, box = shared[panel]
+            box.addWidget(widget, stretch)
+            return dock
+        if panel is not None:
+            holder = QWidget()
+            box = QVBoxLayout(holder)
+            box.setContentsMargins(0, 0, 0, 0)
+            box.setSpacing(4)
+            box.addWidget(widget, stretch)
+            widget = holder
         dock = QDockWidget(title, win)
-        dock.setObjectName(f"extension_{self.key}")
+        dock.setObjectName(f"extension_{panel or self.key}")
         dock.setWidget(widget)
         dock.setTitleBarWidget(QWidget(dock))   # the tab already names it
         win.addDockWidget(Qt.RightDockWidgetArea, dock)
@@ -93,10 +113,37 @@ class ExtensionApp:
         if anchor is not None:
             win.tabifyDockWidget(anchor, dock)
         win._extension_docks.append(dock)
+        if panel is not None:
+            shared[panel] = (dock, box)
         tray = getattr(win, "tray", None)
         if tray is not None:
             tray.raise_()                   # Properties stays the one in front
         return dock
+
+    def show_panel(self, dock) -> None:
+        """Bring a tab from :meth:`add_panel` to the front — shown again
+        if the user hid it from Window ▸ Panels."""
+        self._window.set_tray_shown(dock, True)
+
+    def add_menu_action(self, text: str, fn, shortcut: str | None = None):
+        """An entry in the Extensions menu that calls ``fn()``; a
+        ``shortcut`` already taken by the app is left off. Returns the
+        QAction (``None`` outside a window with that menu)."""
+        from PySide6.QtGui import QAction, QKeySequence
+        win = self._window
+        menu = getattr(win, "_ext_menu", None)
+        if menu is None:
+            return None
+        action = QAction(text, win)
+        if shortcut:
+            seq = QKeySequence(shortcut).toString()
+            taken = getattr(win, "_ext_taken_keys", set())
+            if seq and seq not in taken:
+                action.setShortcut(QKeySequence(shortcut))
+                taken.add(seq)
+        action.triggered.connect(lambda _c=False: fn())
+        menu.addAction(action)
+        return action
 
     # ---- Viewport ------------------------------------------------------------
     def add_overlay(self, fn) -> None:

@@ -2223,5 +2223,16 @@
  "Done. The image is open in its own window; «Show image» brings it back.": "完成。图像已在独立窗口中打开;“查看图像”可再次显示。",
  "Also keep the .blend file": "同时保留 .blend 文件",
  "To retouch the scene in Blender afterwards": "以便之后在 Blender 中修改场景",
- "The height follows the view's proportions": "高度随视图比例而定"
+ "The height follows the view's proportions": "高度随视图比例而定",
+ "Show all panels": "显示所有面板",
+ "AI": "AI",
+ "AI Assistant — connection": "AI 助手 — 连接",
+ "Server:": "服务器：",
+ "AI bridge (MCP)": "AI 网桥 (MCP)",
+ "Copy the connection instructions": "复制连接说明",
+ "Stop bridge": "停止网桥",
+ "Start bridge": "启动网桥",
+ "Listening on 127.0.0.1:{port} — connect your MCP client with the lines below.": "正在监听 127.0.0.1:{port} — 用下面的内容连接你的 MCP 客户端。",
+ "Off. Start it to let an AI agent (Claude, Cursor, Antigravity…) model in this document over MCP.": "已关闭。启动后，AI 代理（Claude、Cursor、Antigravity…）可通过 MCP 在此文档中建模。",
+ "Copied": "已复制"
 }

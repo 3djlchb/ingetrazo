@@ -2220,5 +2220,16 @@
  "Done. The image is open in its own window; «Show image» brings it back.": "Fatto. L'immagine è aperta nella sua finestra; «Mostra immagine» la riporta.",
  "Also keep the .blend file": "Conserva anche il .blend",
  "To retouch the scene in Blender afterwards": "Per ritoccare la scena in Blender in seguito",
- "The height follows the view's proportions": "L'altezza segue le proporzioni della vista"
+ "The height follows the view's proportions": "L'altezza segue le proporzioni della vista",
+ "Show all panels": "Mostra tutti i pannelli",
+ "AI": "IA",
+ "AI Assistant — connection": "Assistente IA — connessione",
+ "Server:": "Server:",
+ "AI bridge (MCP)": "Bridge IA (MCP)",
+ "Copy the connection instructions": "Copia le istruzioni di connessione",
+ "Stop bridge": "Ferma il bridge",
+ "Start bridge": "Avvia il bridge",
+ "Listening on 127.0.0.1:{port} — connect your MCP client with the lines below.": "In ascolto su 127.0.0.1:{port} — collega il tuo client MCP con le righe qui sotto.",
+ "Off. Start it to let an AI agent (Claude, Cursor, Antigravity…) model in this document over MCP.": "Spento. Avvialo perché un agente IA (Claude, Cursor, Antigravity…) modelli in questo documento via MCP.",
+ "Copied": "Copiato"
 }
