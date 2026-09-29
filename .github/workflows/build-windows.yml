@@ -44,8 +44,9 @@ jobs:
           # el run 36505183570: «wheel» en 0,06 s). Hay que compilarlo con
           # waf dentro del sdist y luego instalar ESE árbol.
           pip download --no-binary pyinstaller --no-deps pyinstaller -d "$RUNNER_TEMP/pyi"
-          tar -xzf "$RUNNER_TEMP"/pyi/pyinstaller-*.tar.gz -C "$RUNNER_TEMP/pyi"
-          PYI_SRC="$(ls -d "$RUNNER_TEMP"/pyi/pyinstaller-*/)"
+          # tar de Git Bash toma «D:\...» por un host remoto: extraer con Python.
+          PYI_SRC="$(python -c "import glob, os, sys, tarfile; d = os.path.join(os.environ['RUNNER_TEMP'], 'pyi'); t = tarfile.open(glob.glob(os.path.join(d, 'pyinstaller-*.tar.gz'))[0]); t.extractall(d, filter='data'); print(os.path.join(d, t.getnames()[0].split('/')[0]))")"
+          PYI_SRC="$(cygpath -u "$PYI_SRC")"
           rm -f "$PYI_SRC"/PyInstaller/bootloader/Windows-64bit-intel/*.exe
           (cd "$PYI_SRC/bootloader" && python ./waf all --target-arch=64bit)
           # Sin los .exe recién compilados, fallar: nunca publicar con el viejo.
