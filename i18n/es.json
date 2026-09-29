@@ -2233,5 +2233,6 @@
  "Start bridge": "Encender puente",
  "Listening on 127.0.0.1:{port} — connect your MCP client with the lines below.": "Escuchando en 127.0.0.1:{port} — conecta tu cliente MCP con las líneas de abajo.",
  "Off. Start it to let an AI agent (Claude, Cursor, Antigravity…) model in this document over MCP.": "Apagado. Enciéndelo para que un agente de IA (Claude, Cursor, Antigravity…) modele en este documento por MCP.",
- "Copied": "Copiado"
+ "Copied": "Copiado",
+ "Render with Blender…": "Renderizar con Blender…"
 }

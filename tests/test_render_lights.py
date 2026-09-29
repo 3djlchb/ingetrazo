@@ -109,12 +109,16 @@ def _panel(win):
     raise AssertionError("no Render tab in the side tray")
 
 
-def test_render_is_a_side_tray_tab_and_not_a_menu_entry(window):
+def test_the_extensions_entry_brings_back_the_render_tab(window):
+    # The tab is the tool; Extensions only brings it forward, even hidden
+    # (Marco: «no aparece en el menú Extensiones»).
     panel = _panel(window)
-    assert panel is not None
-    names = [a.text() for a in window.menuBar().findChildren(
-        type(window.menuBar().actions()[0])) if a.text()]
-    assert not any("Blender" in n for n in names)
+    dock = next(d for d in window._extension_docks if d.widget() is panel)
+    window.set_tray_shown(dock, False)
+    entry = next(a for a in window._ext_menu.actions()
+                 if "Blender" in a.text())
+    entry.trigger()
+    assert not dock.isHidden()
 
 
 def test_a_light_clicked_onto_the_model_is_kept_and_undone(window, tmp_path):

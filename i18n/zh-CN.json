@@ -2234,5 +2234,6 @@
  "Start bridge": "启动网桥",
  "Listening on 127.0.0.1:{port} — connect your MCP client with the lines below.": "正在监听 127.0.0.1:{port} — 用下面的内容连接你的 MCP 客户端。",
  "Off. Start it to let an AI agent (Claude, Cursor, Antigravity…) model in this document over MCP.": "已关闭。启动后，AI 代理（Claude、Cursor、Antigravity…）可通过 MCP 在此文档中建模。",
- "Copied": "已复制"
+ "Copied": "已复制",
+ "Render with Blender…": "用 Blender 渲染…"
 }
