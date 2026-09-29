@@ -932,6 +932,32 @@ class SetFaceMaterialTagCommand(Command):
         scene.version += 1
 
 
+class SetMaterialFinishCommand(Command):
+    """Choose how a named material answers light in a render (core.finish;
+    ``None`` = guess it from the name again). Only the registry entry
+    changes — the viewport draws the same — so undo is exact and cheap."""
+
+    def __init__(self, name, finish) -> None:
+        self._name = name
+        self._finish = finish
+        self._old = None
+
+    def do(self, scene) -> None:
+        mat = scene.materials.get(self._name)
+        if mat is None:
+            return
+        self._old = mat.finish
+        mat.finish = self._finish
+        scene.version += 1
+
+    def undo(self, scene) -> None:
+        mat = scene.materials.get(self._name)
+        if mat is None:
+            return
+        mat.finish = self._old
+        scene.version += 1
+
+
 class RestampMaterialCommand(Command):
     """Edit a registry material and RESTAMP every face that wears it.
 

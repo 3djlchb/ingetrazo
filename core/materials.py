@@ -46,6 +46,9 @@ class Material:
     #: 0–1 translucency, or ``None`` for opaque (the attrs convention:
     #: the key is simply absent on opaque faces).
     opacity: Optional[float] = None
+    #: How the surface answers light in a render (core.finish): one of
+    #: ``core.finish.FINISHES``, or ``None`` = guessed from the name.
+    finish: Optional[str] = None
 
     def face_attrs(self) -> dict:
         """The attrs this material stamps on a face (its own name included)."""
@@ -67,6 +70,8 @@ class Material:
             entry["texture"] = dict(self.texture)
         if self.opacity is not None:
             entry["opacity"] = float(self.opacity)
+        if self.finish is not None:
+            entry["finish"] = self.finish
         return entry
 
     @classmethod
@@ -77,6 +82,7 @@ class Material:
             color=tuple(color) if color is not None else None,
             texture=dict(raw["texture"]) if raw.get("texture") else None,
             opacity=raw.get("opacity"),
+            finish=raw.get("finish") or None,
         )
 
 

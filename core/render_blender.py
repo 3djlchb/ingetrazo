@@ -124,7 +124,71 @@ def find_blender(saved: str | None = None) -> Optional[BlenderFound]:
     for cand in _platform_candidates():
         if Path(cand).is_file():
             return BlenderFound([cand], cand)
+    # Blender installed from Flathub, on a system where IngeTrazo itself is
+    # not a Flatpak (the AppImage, the tarball): `flatpak run` it.
+    flatpak = shutil.which("flatpak")
+    if flatpak and sys.platform.startswith("linux"):
+        try:
+            r = subprocess.run([flatpak, "info", BLENDER_FLATPAK_ID],
+                               capture_output=True, timeout=10)
+        except (OSError, subprocess.TimeoutExpired):
+            r = None
+        if r is not None and r.returncode == 0:
+            return BlenderFound([flatpak, "run", "--filesystem=home",
+                                 BLENDER_FLATPAK_ID],
+                                f"Flatpak {BLENDER_FLATPAK_ID}")
     return None
+
+
+# ---- How to install it, for the package the user has ---------------------------
+
+DOWNLOAD_URL = "https://www.blender.org/download/"
+FLATPAK_PERMISSION = ("flatpak override --user "
+                      "--talk-name=org.freedesktop.Flatpak "
+                      "com.ingetrazo.IngeTrazo")
+
+
+def package_kind() -> str:
+    """Which IngeTrazo this is: snap, flatpak, windows, macos, or linux
+    (AppImage, tarball or source — all can run a system Blender)."""
+    if in_snap():
+        return "snap"
+    if in_flatpak():
+        return "flatpak"
+    if sys.platform == "win32":
+        return "windows"
+    if sys.platform == "darwin":
+        return "macos"
+    return "linux"
+
+
+def install_steps(kind: str | None = None,
+                  host_allowed: bool | None = None) -> list:
+    """What to do when no Blender is found, for this package: a list of
+    ``(English text, command or None)``, commands ready to copy."""
+    kind = kind or package_kind()
+    if kind == "windows":
+        return [("Download Blender from blender.org and install it, or run "
+                 "in a terminal:", "winget install --id BlenderFoundation.Blender -e")]
+    if kind == "macos":
+        return [("Download Blender from blender.org, open the .dmg and drag "
+                 "Blender to Applications.", None)]
+    if kind == "flatpak":
+        if host_allowed is None:
+            host_allowed = flatpak_host_allowed()
+        steps = [("Install Blender from Flathub (skip it if you already have "
+                  "Blender):", f"flatpak install flathub {BLENDER_FLATPAK_ID}")]
+        if not host_allowed:
+            steps.append(("Let IngeTrazo start it (the Flatpak cannot see "
+                          "other programs on its own), once:",
+                          FLATPAK_PERMISSION))
+        return steps
+    if kind == "snap":
+        return [("The Snap package cannot start other programs. To render "
+                 "with Blender, use IngeTrazo's AppImage or Flatpak.", None)]
+    return [("Install Blender, for example with Snap (current version):",
+             "sudo snap install blender --classic"),
+            ("or with Flatpak:", f"flatpak install flathub {BLENDER_FLATPAK_ID}")]
 
 
 def flatpak_host_allowed() -> bool:

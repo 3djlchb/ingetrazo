@@ -42,6 +42,86 @@ def import_model(path):
     return objs
 
 
+def _set(bsdf, names, value):
+    """Set the first of ``names`` this Blender's Principled BSDF has
+    (inputs were renamed in 4.0: Transmission → Transmission Weight…)."""
+    for n in names:
+        sock = bsdf.inputs.get(n)
+        if sock is not None:
+            try:
+                sock.default_value = value
+            except (TypeError, ValueError):
+                continue
+            for link in list(sock.links):      # a fixed value, not a map
+                sock.id_data.links.remove(link)
+            return True
+    return False
+
+
+def _ripples(mat, bsdf, scale=6.0, strength=0.12):
+    """Small waves for water: noise → bump → the BSDF's normal."""
+    nodes, links = mat.node_tree.nodes, mat.node_tree.links
+    noise = nodes.new("ShaderNodeTexNoise")
+    noise.inputs["Scale"].default_value = scale
+    if "Detail" in noise.inputs:
+        noise.inputs["Detail"].default_value = 6.0
+    bump = nodes.new("ShaderNodeBump")
+    bump.inputs["Strength"].default_value = strength
+    if "Distance" in bump.inputs:
+        bump.inputs["Distance"].default_value = 0.02
+    links.new(noise.outputs["Fac"], bump.inputs["Height"])
+    links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
+
+
+def apply_finishes():
+    """Turn IngeTrazo's finish (glTF extras, core.finish) into a real
+    material: the importer keeps extras as custom properties."""
+    counts = {}
+    for mat in bpy.data.materials:
+        finish = mat.get("ingetrazo_finish")
+        if not finish or not mat.node_tree:
+            continue
+        bsdf = next((n for n in mat.node_tree.nodes
+                     if n.type == "BSDF_PRINCIPLED"), None)
+        if bsdf is None:
+            continue
+        counts[finish] = counts.get(finish, 0) + 1
+        spec = ("Specular IOR Level", "Specular")
+        if finish == "matte":
+            _set(bsdf, ("Roughness",), 0.9)
+            _set(bsdf, spec, 0.3)
+        elif finish == "satin":
+            _set(bsdf, ("Roughness",), 0.45)
+        elif finish == "gloss":
+            _set(bsdf, ("Roughness",), 0.1)
+            _set(bsdf, ("Coat Weight", "Clearcoat"), 0.5)
+            _set(bsdf, ("Coat Roughness", "Clearcoat Roughness"), 0.03)
+        elif finish == "metal":
+            _set(bsdf, ("Metallic",), 1.0)
+            _set(bsdf, ("Roughness",), 0.28)
+        elif finish in ("glass", "water"):
+            glass = finish == "glass"
+            _set(bsdf, ("Roughness",), 0.0 if glass else 0.02)
+            _set(bsdf, ("IOR",), 1.45 if glass else 1.33)
+            _set(bsdf, spec, 1.0)
+            if glass:
+                # Real refraction instead of a see-through alpha.
+                _set(bsdf, ("Transmission Weight", "Transmission"), 1.0)
+                _set(bsdf, ("Alpha",), 1.0)
+                for attr, value in (("blend_method", "OPAQUE"),
+                                    ("use_raytrace_refraction", True),
+                                    ("use_screen_refraction", True)):
+                    if hasattr(mat, attr):
+                        try:
+                            setattr(mat, attr, value)
+                        except (TypeError, ValueError):
+                            pass
+            else:
+                _ripples(mat, bsdf)
+    if counts:
+        say("finishes", ", ".join(f"{k} {v}" for k, v in sorted(counts.items())))
+
+
 def set_camera(scene, cam_cfg, width, height):
     data = bpy.data.cameras.new("IngeTrazo")
     cam = bpy.data.objects.new("IngeTrazo camera", data)
@@ -170,7 +250,8 @@ def set_engine(scene, engine, samples):
         eevee = scene.eevee
         if hasattr(eevee, "taa_render_samples"):
             eevee.taa_render_samples = samples
-        for flag in ("use_shadows", "use_raytracing", "use_gtao"):
+        for flag in ("use_shadows", "use_raytracing", "use_gtao",
+                     "use_ssr", "use_ssr_refraction"):
             if hasattr(eevee, flag):
                 setattr(eevee, flag, True)
     say("engine", scene.render.engine)
@@ -181,6 +262,7 @@ def main():
     bpy.ops.wm.read_factory_settings(use_empty=True)
     scene = bpy.context.scene
     import_model(job["glb"])
+    apply_finishes()
     w, h = int(job["width"]), int(job["height"])
     set_camera(scene, job["camera"], w, h)
     sun_dir = job.get("sun")

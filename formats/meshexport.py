@@ -209,7 +209,20 @@ def collect_geometry(scene, face_me=None):
                 pts = list(tri)
                 prims.setdefault(key, []).append(
                     (n, [(pts[k], None) for k in range(3)]))
+    _resolve_finishes(scene, materials)
     return materials, prims
+
+
+def _resolve_finishes(scene, materials) -> None:
+    """Each material's finish (core.finish): the one chosen for its named
+    material in the document, or guessed from its name and picture."""
+    from core.finish import resolve
+    registry = getattr(scene, "materials", None) or {}
+    for info in materials.values():
+        name = info.get("mat")
+        chosen = getattr(registry.get(name), "finish", None) if name else None
+        info["finish"] = resolve(chosen, name, info.get("map"),
+                                 info.get("opacity"))
 
 
 def export_names(materials) -> dict:

@@ -17,21 +17,29 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QProcess, QProcessEnvironment, QSettings, Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QPixmap
+from PySide6.QtCore import (QEvent, QProcess, QProcessEnvironment, QSettings,
+                            Qt, QUrl)
+from PySide6.QtGui import QDesktopServices, QPainter, QPixmap
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
     QFileDialog,
     QFormLayout,
+    QFrame,
+    QGraphicsPixmapItem,
+    QGraphicsScene,
+    QGraphicsView,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QProgressBar,
     QPushButton,
     QSpinBox,
     QVBoxLayout,
+    QWidget,
 )
 
 from core import render_blender as rb
@@ -47,6 +55,65 @@ def _work_dir() -> Path:
         QStandardPaths.StandardLocation.GenericCacheLocation)
     stamp = time.strftime("%Y%m%d-%H%M%S")
     return Path(base) / "IngeTrazo" / "render" / stamp
+
+
+class _ZoomView(QGraphicsView):
+    """The finished image: the wheel zooms around the cursor, a drag pans."""
+
+    def __init__(self, pixmap: QPixmap, parent=None) -> None:
+        super().__init__(parent)
+        self.setScene(QGraphicsScene(self))
+        self._item = QGraphicsPixmapItem(pixmap)
+        self._item.setTransformationMode(Qt.SmoothTransformation)
+        self.scene().addItem(self._item)
+        self.setDragMode(QGraphicsView.ScrollHandDrag)
+        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        self.setRenderHint(QPainter.SmoothPixmapTransform)
+        self.setBackgroundBrush(Qt.darkGray)
+
+    def fit(self) -> None:
+        self.fitInView(self._item, Qt.KeepAspectRatio)
+
+    def actual_size(self) -> None:
+        self.resetTransform()
+
+    def wheelEvent(self, ev) -> None:
+        step = 1.25 if ev.angleDelta().y() > 0 else 0.8
+        scale = self.transform().m11() * step
+        if 0.02 < scale < 16.0:
+            self.scale(step, step)
+
+
+class ImageViewer(QDialog):
+    """A larger look at a render: fit, 100 %, zoom and pan."""
+
+    def __init__(self, path: Path, save, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(tr("Render") + f" — {path.name}")
+        self.resize(1200, 800)
+        pix = QPixmap(str(path))
+        lay = QVBoxLayout(self)
+        self.view = _ZoomView(pix, self)
+        lay.addWidget(self.view, 1)
+        row = QHBoxLayout()
+        for label, slot in ((tr("Fit to window"), self.view.fit),
+                            (tr("100 %"), self.view.actual_size),
+                            (tr("Save image…"), save)):
+            b = QPushButton(label)
+            b.clicked.connect(slot)
+            row.addWidget(b)
+        row.addStretch(1)
+        hint = QLabel(tr("Wheel: zoom · drag: move · {w} × {h} px",
+                         w=pix.width(), h=pix.height()))
+        row.addWidget(hint)
+        close = QPushButton(tr("Close"))
+        close.clicked.connect(self.close)
+        row.addWidget(close)
+        lay.addLayout(row)
+
+    def showEvent(self, ev) -> None:
+        super().showEvent(ev)
+        self.view.fit()
 
 
 class RenderDialog(QDialog):
@@ -111,6 +178,12 @@ class RenderDialog(QDialog):
         self._sun.setWordWrap(True)
         form.addRow(tr("Sun:"), self._sun)
 
+        # What to do when there is no Blender, for THIS package.
+        self._help = QFrame()
+        self._help.setFrameShape(QFrame.StyledPanel)
+        self._help_lay = QVBoxLayout(self._help)
+        lay.addWidget(self._help)
+
         self._bar = QProgressBar()
         self._bar.setRange(0, 1000)
         self._bar.setVisible(False)
@@ -121,6 +194,9 @@ class RenderDialog(QDialog):
         self._preview = QLabel()
         self._preview.setAlignment(Qt.AlignCenter)
         self._preview.setVisible(False)
+        self._preview.setCursor(Qt.PointingHandCursor)
+        self._preview.setToolTip(tr("Double-click to enlarge"))
+        self._preview.installEventFilter(self)
         lay.addWidget(self._preview, 1)
 
         buttons = QHBoxLayout()
@@ -133,12 +209,16 @@ class RenderDialog(QDialog):
         self._save = QPushButton(tr("Save image…"))
         self._save.clicked.connect(self._save_image)
         self._save.setEnabled(False)
+        self._enlarge = QPushButton(tr("Enlarge…"))
+        self._enlarge.clicked.connect(self._open_viewer)
+        self._enlarge.setEnabled(False)
         self._folder = QPushButton(tr("Open folder"))
         self._folder.clicked.connect(self._open_folder)
         self._folder.setEnabled(False)
         close = QPushButton(tr("Close"))
         close.clicked.connect(self.close)
-        for b in (self._go, self._stop, self._save, self._folder):
+        for b in (self._go, self._stop, self._enlarge, self._save,
+                  self._folder):
             buttons.addWidget(b)
         buttons.addStretch(1)
         buttons.addWidget(close)
@@ -158,28 +238,65 @@ class RenderDialog(QDialog):
         self._height.setText(tr("× {h} px (the view's proportions)", h=h))
 
     def _update_where(self) -> None:
-        if rb.in_snap():
-            self._where.setText(tr(
-                "The Snap package cannot start other programs. Use the "
-                "AppImage or the Flatpak to render with Blender."))
-            self._go.setEnabled(False)
-            return
-        if self._found is not None:
+        kind = rb.package_kind()
+        if self._found is not None and kind != "snap":
             self._where.setText(self._found.where)
             self._go.setEnabled(True)
+            self._help.setVisible(False)
             return
-        if rb.in_flatpak() and not rb.flatpak_host_allowed():
-            self._where.setText(tr(
-                "The Flatpak cannot see programs installed on the system. To "
-                "let IngeTrazo start your Blender, run once in a terminal:"
-                "\n\nflatpak override --user --talk-name=org.freedesktop."
-                "Flatpak com.ingetrazo.IngeTrazo\n\nand open this window "
-                "again."))
-        else:
-            self._where.setText(tr(
-                "Blender was not found. Install it (free, from "
-                "blender.org/download) or pick where it is with Choose…"))
         self._go.setEnabled(False)
+        self._where.setText(tr("Blender is not installed, or IngeTrazo "
+                               "cannot reach it."))
+        self._fill_help(kind)
+
+    def _fill_help(self, kind: str) -> None:
+        """The steps for this package, each command ready to copy."""
+        while self._help_lay.count():
+            w = self._help_lay.takeAt(0).widget()
+            if w is not None:
+                w.deleteLater()
+        title = QLabel("<b>" + tr("How to render with Blender") + "</b>")
+        self._help_lay.addWidget(title)
+        for text, cmd in rb.install_steps(kind):
+            lbl = QLabel(tr(text))
+            lbl.setWordWrap(True)
+            self._help_lay.addWidget(lbl)
+            if cmd:
+                row = QWidget()
+                h = QHBoxLayout(row)
+                h.setContentsMargins(0, 0, 0, 0)
+                field = QLineEdit(cmd)
+                field.setReadOnly(True)
+                field.setCursorPosition(0)
+                copy = QPushButton(tr("Copy"))
+                copy.clicked.connect(
+                    lambda _=False, c=cmd: QApplication.clipboard().setText(c))
+                h.addWidget(field, 1)
+                h.addWidget(copy)
+                self._help_lay.addWidget(row)
+        if kind != "snap":
+            row = QWidget()
+            h = QHBoxLayout(row)
+            h.setContentsMargins(0, 0, 0, 0)
+            web = QPushButton(tr("Open blender.org"))
+            web.clicked.connect(lambda: QDesktopServices.openUrl(
+                QUrl(rb.DOWNLOAD_URL)))
+            again = QPushButton(tr("Search again"))
+            again.clicked.connect(self._search_again)
+            h.addWidget(web)
+            h.addWidget(again)
+            h.addStretch(1)
+            self._help_lay.addWidget(row)
+        self._help.setVisible(True)
+
+    def _search_again(self) -> None:
+        self._found = rb.find_blender(self._saved or None)
+        self._update_where()
+        if self._found is None:
+            self._status.setText(tr("Still no Blender. When it is installed, "
+                                    "press Search again."))
+        else:
+            self._status.setText(tr("Blender found."))
 
     def _update_sun(self) -> None:
         sh = getattr(self.viewport.scene, "shadows", None)
@@ -284,14 +401,27 @@ class RenderDialog(QDialog):
                 760, 460, Qt.KeepAspectRatio, Qt.SmoothTransformation))
             self._preview.setVisible(True)
             self._save.setEnabled(True)
+            self._enlarge.setEnabled(True)
             self._folder.setEnabled(True)
-            self._status.setText(tr("Done."))
+            self._status.setText(tr("Done. Double-click the image to "
+                                    "enlarge it."))
             self.adjustSize()
             return
         tail = "\n".join(line for line in self._log[-12:] if line.strip())
         self._status.setText(tr("Blender stopped without an image.") + (
             "\n\n" + tail if tail else ""))
         self._folder.setEnabled(self._work is not None)
+
+    def _open_viewer(self) -> None:
+        if self._image is not None:
+            ImageViewer(self._image, self._save_image, self).show()
+
+    def eventFilter(self, obj, ev) -> bool:
+        if (obj is self._preview and ev.type() == QEvent.MouseButtonDblClick
+                and self._image is not None):
+            self._open_viewer()
+            return True
+        return super().eventFilter(obj, ev)
 
     def _cancel(self) -> None:
         if self._proc is not None:

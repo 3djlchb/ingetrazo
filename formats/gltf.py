@@ -43,26 +43,6 @@ def _mime(name: str) -> str:
     return "image/png"
 
 
-def _cutout(src) -> bool:
-    """Whether an image has see-through texels (a figure, a leaf, a fence):
-    an alpha channel alone is not enough — many photos carry one that is
-    fully opaque, and masking those would only cost render time."""
-    try:
-        from PySide6.QtCore import Qt
-        from PySide6.QtGui import QImage
-    except ImportError:
-        return False
-    img = QImage(str(src))
-    if img.isNull() or not img.hasAlphaChannel():
-        return False
-    small = img.scaled(128, 128, Qt.IgnoreAspectRatio,
-                       Qt.FastTransformation).convertToFormat(
-        QImage.Format.Format_Alpha8)
-    ptr = small.constBits()
-    data = bytes(ptr)[: small.sizeInBytes()]
-    return any(b < 128 for b in data)
-
-
 def save_glb(scene, path, face_me=None) -> None:
     """Write the scene as a binary glTF (``.glb``) to ``path``.
 
@@ -105,6 +85,7 @@ def save_glb(scene, path, face_me=None) -> None:
     tex_for_image: dict[str, int] = {}
 
     names = export_names(materials_in)
+    used_ext: set = set()
     for key in keys:
         info = materials_in[key]
         mat: dict = {"name": names[key],
@@ -137,7 +118,8 @@ def save_glb(scene, path, face_me=None) -> None:
                 # A cut-out image (a face-me figure, leaves) stays cut out:
                 # without this its transparent texels rendered as a solid
                 # card (#181).
-                if _cutout(src):
+                from core.texture import image_has_cutout
+                if image_has_cutout(str(src)):
                     mat["alphaMode"] = "MASK"
                     mat["alphaCutoff"] = 0.5
             else:  # image unreadable → fall back to white
@@ -145,6 +127,24 @@ def save_glb(scene, path, face_me=None) -> None:
         else:
             r, g, b = info["color"]
             mat["pbrMetallicRoughness"]["baseColorFactor"] = [r, g, b, 1.0]
+        # The finish (core.finish): plain glTF for every program, and the
+        # name in extras for Render with Blender's full materials.
+        finish = info.get("finish")
+        if finish:
+            from core.finish import PBR
+            rough, metal, trans, ior = PBR[finish]
+            pbr = mat["pbrMetallicRoughness"]
+            pbr["roughnessFactor"], pbr["metallicFactor"] = rough, metal
+            mat["extras"] = {"ingetrazo_finish": finish}
+            ext = {}
+            if trans:
+                ext["KHR_materials_transmission"] = {
+                    "transmissionFactor": trans}
+            if ior != 1.5:
+                ext["KHR_materials_ior"] = {"ior": ior}
+            if ext:
+                mat["extensions"] = ext
+                used_ext.update(ext)
         op = info.get("opacity")
         if op is not None:                     # glass and the like
             factor = mat["pbrMetallicRoughness"].setdefault(
@@ -230,6 +230,8 @@ def save_glb(scene, path, face_me=None) -> None:
         gltf["buffers"] = [{"byteLength": len(buf)}]
     if gltf_materials:
         gltf["materials"] = gltf_materials
+    if used_ext:
+        gltf["extensionsUsed"] = sorted(used_ext)
     if images:
         gltf["images"] = images
         gltf["textures"] = textures
