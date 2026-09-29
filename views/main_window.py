@@ -5239,6 +5239,15 @@ class MainWindow(QMainWindow):
             QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
             self)
         box.setOption(QMessageBox.Option.DontUseNativeDialog, True)
+        # main.py installs a Qt translator that already names the standard
+        # buttons in the app language, but only when the qtbase_<lang>.qm
+        # file is found, and «Don't Save» is worded differently per
+        # platform: name all three through our own catalog so they read
+        # the same everywhere.
+        for button, text in ((QMessageBox.Save, "Save"),
+                             (QMessageBox.Discard, "Don't Save"),
+                             (QMessageBox.Cancel, "Cancel")):
+            box.button(button).setText(tr(text))
         box.setDefaultButton(QMessageBox.Save)
         answer = box.exec()
         if answer == QMessageBox.Save:

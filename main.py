@@ -33,7 +33,8 @@ elif sys.stderr is not None:
 # if the ghost bothers you: run with QT_QPA_PLATFORM=xcb. Re-test the ghost
 # when Mutter/Qt update; no app-side workaround cured it (see CLAUDE.md).
 
-from PySide6.QtCore import QEvent, QLocale, QSettings, Qt
+from PySide6.QtCore import (QEvent, QLibraryInfo, QLocale, QSettings, Qt,
+                            QTranslator)
 from PySide6.QtGui import QSurfaceFormat
 from PySide6.QtWidgets import QApplication
 
@@ -59,6 +60,56 @@ def _init_language() -> None:
         else:
             saved = "en"
     i18n.set_language(str(saved))
+    _install_qt_translator(str(saved))
+
+
+class _ButtonsOnlyTranslator(QTranslator):
+    """Qt's own catalog, limited to the standard button texts.
+
+    ``qtbase_<lang>.qm`` also names the keys — «Control+Mayúsculas+Re Pág»
+    for Ctrl+Shift+PgUp in menus, tooltips and the shortcut editor — and
+    the shortcuts stay in English on purpose. The button texts live in
+    these contexts; everything else is left untranslated."""
+
+    _CONTEXTS = frozenset({"QPlatformTheme", "QMessageBox",
+                           "QDialogButtonBox"})
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._qt = QTranslator()
+
+    def load_qt(self, lang: str) -> bool:
+        folder = QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)
+        return self._qt.load(f"qtbase_{lang.replace('-', '_')}", folder)
+
+    def isEmpty(self) -> bool:
+        return self._qt.isEmpty()
+
+    def translate(self, context, source, disambiguation=None, n=-1):
+        if context not in self._CONTEXTS:
+            return None                   # not ours: Qt keeps its text
+        return self._qt.translate(context, source, disambiguation, n)
+
+
+#: Kept alive for the whole session: Qt drops a translator that is freed.
+_qt_translator: QTranslator | None = None
+
+
+def _install_qt_translator(lang: str) -> None:
+    """Let Qt name its standard buttons in ``lang`` too.
+
+    Our catalog only covers ``tr()`` strings; the standard buttons of
+    QMessageBox and QDialogButtonBox (OK, Cancel, Yes, No…) come from
+    Qt's own ``qtbase_<lang>.qm``, which PySide6 ships. Without it they
+    stayed in English under every language. A missing file just leaves
+    them in English, as before."""
+    global _qt_translator
+    if lang == "en":
+        return
+    translator = _ButtonsOnlyTranslator()
+    if translator.load_qt(lang):
+        QApplication.installTranslator(translator)
+        _qt_translator = translator
 
 from views.main_window import MainWindow
 
@@ -224,6 +275,18 @@ def _self_check() -> int:
     print(f"  manifold3d     : {'found' if ok else 'MISSING'}  {where}")
     if not ok:
         problems.append("manifold3d")
+
+    # Qt's own catalog for the standard buttons (see _install_qt_translator).
+    # Optional: without the file the buttons stay in English, as before, so
+    # it is reported but never fails the check.
+    try:
+        from PySide6.QtCore import QLibraryInfo
+        folder = Path(QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath))
+        have = sorted(f.stem[len("qtbase_"):] for f in folder.glob("qtbase_*.qm"))
+        where = f"{len(have)} languages, es {'yes' if 'es' in have else 'NO'}  {folder}"
+    except Exception as exc:  # noqa: BLE001
+        where = f"({exc})"
+    print(f"  Qt buttons (opt): {where}")
 
     if problems:
         print(f"\nNOT OK — missing: {', '.join(problems)}")
