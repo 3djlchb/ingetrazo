@@ -2275,5 +2275,6 @@
  "Chain dimension": "Cota em cadeia",
  "Baseline dimension": "Cota por linha de base",
  "Angular dimension": "Cota angular",
- "Radius dimension": "Cota de raio"
+ "Radius dimension": "Cota de raio",
+ "Shift = add/remove, Ctrl = add. Double-click a group to edit it. F3 = search commands.": "Shift = adicionar/remover, Ctrl = adicionar. Clique duplo em um grupo para editá-lo. F3 = buscar comandos."
 }

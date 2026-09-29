@@ -15,7 +15,7 @@ from core.i18n import tr
 
 #: Tool key → hint per phase. A plain string is the same hint always.
 HINTS: dict = {
-    "select": "Shift = add/remove, Ctrl = add. Double-click a group to edit it.",
+    "select": "Shift = add/remove, Ctrl = add. Double-click a group to edit it. F3 = search commands.",
     "change_axes": ("Click the new origin.",
                     "Click the red direction, then the green one."),
     "outer_shell": ("Click a solid group or component (1).",

@@ -2278,5 +2278,6 @@
  "Chain dimension": "连锁尺寸",
  "Baseline dimension": "基线尺寸",
  "Angular dimension": "角度尺寸",
- "Radius dimension": "半径尺寸"
+ "Radius dimension": "半径尺寸",
+ "Shift = add/remove, Ctrl = add. Double-click a group to edit it. F3 = search commands.": "Shift = 添加/移除，Ctrl = 添加。双击组进行编辑。F3 = 搜索命令。"
 }

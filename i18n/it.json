@@ -2277,5 +2277,6 @@
  "Simplified mesh: removed {count} faces": "Mesh semplificata: rimosse {count} facce",
  "No faces could be simplified": "Nessuna faccia è stata semplificata",
  "STL mesh (*.stl)…": "Mesh STL (*.stl)…",
- "STL mesh (*.stl);;All files (*)": "Mesh STL (*.stl);;Tutti i file (*)"
+ "STL mesh (*.stl);;All files (*)": "Mesh STL (*.stl);;Tutti i file (*)",
+ "Shift = add/remove, Ctrl = add. Double-click a group to edit it. F3 = search commands.": "Maiusc = aggiungi/rimuovi, Ctrl = aggiungi. Doppio clic su un gruppo per modificarlo. F3 = cerca comandi."
 }
