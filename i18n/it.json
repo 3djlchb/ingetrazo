@@ -2202,5 +2202,19 @@
  "Spot": "Faretto",
  "Point light": "Punto luce",
  "Esc cancels": "Esc annulla",
- "No sun: an even grey sky, soft shadows.": "Niente sole: cielo grigio uniforme, ombre morbide."
+ "No sun: an even grey sky, soft shadows.": "Niente sole: cielo grigio uniforme, ombre morbide.",
+ "Cool — a blue sky": "Fredda — un cielo azzurro",
+ "Candle, fire": "Candela, fuoco",
+ "Warm — a house, a street lamp": "Calda — una casa, un lampione",
+ "Neutral white": "Bianco neutro",
+ "Daylight": "Luce diurna",
+ "Sun strength:": "Intensità del sole:",
+ "Change date and time…": "Cambia data e ora…",
+ "The Shadows panel: with the sun low, the sky turns to a sunset": "Il pannello Ombre: con il sole basso, il cielo diventa un tramonto",
+ "0° north (green axis), 90° east (red axis)": "0° nord (asse verde), 90° est (asse rosso)",
+ "Heading:": "Direzione:",
+ "90° straight down, 0° level, negative upward": "90° verso il basso, 0° orizzontale, negativo verso l'alto",
+ "Tilt down:": "Inclinazione:",
+ "Show image": "Mostra immagine",
+ "Done. The image is open in its own window; «Show image» brings it back.": "Fatto. L'immagine è aperta nella sua finestra; «Mostra immagine» la riporta."
 }

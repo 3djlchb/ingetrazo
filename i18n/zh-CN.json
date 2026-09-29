@@ -2203,5 +2203,19 @@
  "Spot": "聚光灯",
  "Point light": "点光源",
  "Esc cancels": "Esc 取消",
- "No sun: an even grey sky, soft shadows.": "无太阳:均匀的灰色天空,柔和的阴影。"
+ "No sun: an even grey sky, soft shadows.": "无太阳:均匀的灰色天空,柔和的阴影。",
+ "Cool — a blue sky": "冷光 — 蓝天",
+ "Candle, fire": "烛光、火光",
+ "Warm — a house, a street lamp": "暖光 — 住宅、路灯",
+ "Neutral white": "中性白",
+ "Daylight": "日光",
+ "Sun strength:": "太阳强度:",
+ "Change date and time…": "更改日期和时间…",
+ "The Shadows panel: with the sun low, the sky turns to a sunset": "“阴影”面板:太阳低时,天空变为日落",
+ "0° north (green axis), 90° east (red axis)": "0° 北(绿轴),90° 东(红轴)",
+ "Heading:": "方位:",
+ "90° straight down, 0° level, negative upward": "90° 垂直向下,0° 水平,负值向上",
+ "Tilt down:": "下倾角:",
+ "Show image": "查看图像",
+ "Done. The image is open in its own window; «Show image» brings it back.": "完成。图像已在独立窗口中打开;“查看图像”可再次显示。"
 }

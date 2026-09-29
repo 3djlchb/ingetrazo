@@ -22,7 +22,7 @@ import math
 import time
 from pathlib import Path
 
-from PySide6.QtCore import (QEvent, QPointF, QProcess, QProcessEnvironment,
+from PySide6.QtCore import (QPointF, QProcess, QProcessEnvironment,
                             QSettings, Qt, QUrl)
 from PySide6.QtGui import (QColor, QDesktopServices, QFont, QPainter, QPen,
                            QPixmap, QVector3D)
@@ -48,6 +48,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
+    QSlider,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -70,19 +71,54 @@ def _work_dir() -> Path:
 # ---- The document's lights and ambience ---------------------------------------
 
 def _state(app) -> dict:
-    """``{"ambience": str, "lights": [...]}`` from the document, cleaned."""
+    """``{"ambience", "sun_scale", "lights"}`` from the document, cleaned."""
     raw = app.document_data({}) or {}
     if not isinstance(raw, dict):
         raw = {}
     amb = raw.get("ambience", "day")
+    try:
+        sun = max(0.1, min(2.0, float(raw.get("sun_scale", 1.0))))
+    except (TypeError, ValueError):
+        sun = 1.0
     return {"ambience": amb if amb in rb.AMBIENCES else "day",
+            "sun_scale": sun,
             "lights": rb.clean_lights(raw.get("lights", []))}
 
 
 def _store(app, st: dict) -> None:
     """Write back — one undo step, the document becomes unsaved."""
     app.set_document_data({"ambience": st["ambience"],
+                           "sun_scale": st["sun_scale"],
                            "lights": st["lights"]})
+
+
+def _kelvin_groove() -> str:
+    """The temperature slider's groove painted with the colours it picks."""
+    stops = []
+    for i in range(9):
+        k = rb.MIN_KELVIN + (rb.MAX_KELVIN - rb.MIN_KELVIN) * i / 8
+        r, g, b = rb.kelvin_to_rgb(k)
+        stops.append(f"stop:{i / 8:.3f} rgb({int(r * 255)},{int(g * 255)},"
+                     f"{int(b * 255)})")
+    return ("QSlider::groove:horizontal { height: 8px; border-radius: 4px; "
+            "border: 1px solid palette(mid); background: qlineargradient("
+            "x1:0, y1:0, x2:1, y2:0, " + ", ".join(stops) + "); }"
+            "QSlider::handle:horizontal { width: 12px; margin: -5px 0; "
+            "border-radius: 6px; background: palette(button); "
+            "border: 1px solid palette(dark); }")
+
+
+def _kelvin_name(k: int) -> str:
+    """What a temperature looks like, in words."""
+    if k < 2200:
+        return tr("Candle, fire")
+    if k < 3200:
+        return tr("Warm — a house, a street lamp")
+    if k < 4500:
+        return tr("Neutral white")
+    if k < 7000:
+        return tr("Daylight")
+    return tr("Cool — a blue sky")
 
 
 # ---- A larger look at the image -------------------------------------------------
@@ -200,7 +236,7 @@ class RenderPanel(QWidget):
         self._proc: QProcess | None = None
         self._work: Path | None = None
         self._image: Path | None = None
-        self._pixmap: QPixmap | None = None
+        self._viewer = None
         self._log: list = []
         self._picking = None            # what the next click is for
         self._saved = str(QSettings().value(rb.SETTINGS_KEY, "") or "")
@@ -284,6 +320,29 @@ class RenderPanel(QWidget):
         self._sun = QLabel()
         self._sun.setWordWrap(True)
         form.addRow(self._sun)
+        # The day's sun: how strong, and — in the Shadows panel — when.
+        self._sun_box = QWidget()
+        sf = QFormLayout(self._sun_box)
+        sf.setContentsMargins(0, 0, 0, 0)
+        srow = QHBoxLayout()
+        self._sun_scale = QSlider(Qt.Horizontal)
+        self._sun_scale.setRange(10, 200)
+        self._sun_scale.setSingleStep(5)
+        self._sun_scale.setPageStep(25)
+        self._sun_scale_lbl = QLabel()
+        self._sun_scale_lbl.setMinimumWidth(40)
+        self._sun_scale.valueChanged.connect(
+            lambda v: self._sun_scale_lbl.setText(f"{v} %"))
+        self._sun_scale.sliderReleased.connect(self._on_sun_scale)
+        srow.addWidget(self._sun_scale, 1)
+        srow.addWidget(self._sun_scale_lbl)
+        sf.addRow(tr("Sun strength:"), srow)
+        when = QPushButton(tr("Change date and time…"))
+        when.setToolTip(tr("The Shadows panel: with the sun low, the sky "
+                           "turns to a sunset"))
+        when.clicked.connect(self._open_shadows)
+        sf.addRow(when)
+        form.addRow(self._sun_box)
         lay.addWidget(box)
 
         # -- Lights
@@ -308,13 +367,29 @@ class RenderPanel(QWidget):
         self._editor = QWidget()
         ef = QFormLayout(self._editor)
         ef.setContentsMargins(0, 0, 0, 0)
-        self._color = QComboBox()
-        for key, label in (("warm", tr("Warm (2 700 K)")),
-                           ("neutral", tr("Neutral (4 000 K)")),
-                           ("cool", tr("Cool (6 500 K)"))):
-            self._color.addItem(label, key)
-        self._color.activated.connect(self._on_light_edited)
-        ef.addRow(tr("Colour:"), self._color)
+        # Colour as a temperature: a slider over the black-body gradient,
+        # from a candle to a blue sky, with the kelvins beside it.
+        krow = QHBoxLayout()
+        self._kelvin = QSlider(Qt.Horizontal)
+        self._kelvin.setRange(rb.MIN_KELVIN, rb.MAX_KELVIN)
+        self._kelvin.setSingleStep(100)
+        self._kelvin.setPageStep(500)
+        self._kelvin.setStyleSheet(_kelvin_groove())
+        self._kelvin_spin = QSpinBox()
+        self._kelvin_spin.setRange(rb.MIN_KELVIN, rb.MAX_KELVIN)
+        self._kelvin_spin.setSingleStep(100)
+        self._kelvin_spin.setSuffix(" K")
+        self._kelvin.valueChanged.connect(self._kelvin_spin.setValue)
+        self._kelvin_spin.valueChanged.connect(self._kelvin.setValue)
+        self._kelvin_spin.valueChanged.connect(self._name_kelvin)
+        self._kelvin.sliderReleased.connect(self._on_light_edited)
+        self._kelvin_spin.editingFinished.connect(self._on_light_edited)
+        krow.addWidget(self._kelvin, 1)
+        krow.addWidget(self._kelvin_spin)
+        ef.addRow(tr("Colour:"), krow)
+        self._kelvin_name = QLabel()
+        self._kelvin_name.setStyleSheet("color: palette(mid);")
+        ef.addRow("", self._kelvin_name)
         self._power = QDoubleSpinBox()
         self._power.setRange(1.0, 100000.0)
         self._power.setDecimals(0)
@@ -329,6 +404,29 @@ class RenderPanel(QWidget):
         self._angle.editingFinished.connect(self._on_light_edited)
         self._angle_label = QLabel(tr("Opening:"))
         ef.addRow(self._angle_label, self._angle)
+        # A spot's aim in numbers: its compass heading and how far it
+        # tilts down (90° = straight down); Aim… does it with a click.
+        self._heading = QDoubleSpinBox()
+        self._heading.setRange(0.0, 359.0)
+        self._heading.setDecimals(0)
+        self._heading.setSingleStep(15.0)
+        self._heading.setWrapping(True)
+        self._heading.setSuffix(" °")
+        self._heading.setToolTip(tr("0° north (green axis), 90° east (red "
+                                    "axis)"))
+        self._heading.editingFinished.connect(self._on_aim_edited)
+        self._heading_label = QLabel(tr("Heading:"))
+        ef.addRow(self._heading_label, self._heading)
+        self._tilt = QDoubleSpinBox()
+        self._tilt.setRange(-90.0, 90.0)
+        self._tilt.setDecimals(0)
+        self._tilt.setSingleStep(15.0)
+        self._tilt.setSuffix(" °")
+        self._tilt.setToolTip(tr("90° straight down, 0° level, negative "
+                                 "upward"))
+        self._tilt.editingFinished.connect(self._on_aim_edited)
+        self._tilt_label = QLabel(tr("Tilt down:"))
+        ef.addRow(self._tilt_label, self._tilt)
         row = QHBoxLayout()
         self._move = QPushButton(tr("Place again"))
         self._move.clicked.connect(lambda: self._begin_pick("move"))
@@ -366,15 +464,11 @@ class RenderPanel(QWidget):
         self._status = QLabel()
         self._status.setWordWrap(True)
         rl.addWidget(self._status)
-        self._preview = QLabel()
-        self._preview.setAlignment(Qt.AlignCenter)
-        self._preview.setVisible(False)
-        self._preview.setCursor(Qt.PointingHandCursor)
-        self._preview.setToolTip(tr("Double-click to enlarge"))
-        self._preview.installEventFilter(self)
-        rl.addWidget(self._preview)
+        # The image opens in its own window when it is ready; the tray
+        # keeps only the way back to it (a thumbnail here was the same
+        # picture twice — Marco).
         row = QHBoxLayout()
-        self._enlarge = QPushButton(tr("Enlarge…"))
+        self._enlarge = QPushButton(tr("Show image"))
         self._enlarge.clicked.connect(self._open_viewer)
         self._save = QPushButton(tr("Save image…"))
         self._save.clicked.connect(self._save_image)
@@ -492,9 +586,31 @@ class RenderPanel(QWidget):
         _store(self.app, st)
         self._update_sun()
 
+    def _on_sun_scale(self) -> None:
+        st = _state(self.app)
+        value = self._sun_scale.value() / 100.0
+        if abs(st["sun_scale"] - value) > 1e-6:
+            st["sun_scale"] = value
+            _store(self.app, st)
+
+    def _open_shadows(self) -> None:
+        """Drop the Shadows panel down from its toolbar button, where the
+        date and the time of the sun are set."""
+        from PySide6.QtWidgets import QToolButton
+        for btn in self.app.window.findChildren(QToolButton):
+            if btn.toolTip() == tr("Shadows") and btn.menu() is not None:
+                btn.showMenu()
+                return
+
     def _update_sun(self) -> None:
         amb = self._ambience.currentData()
         sh = getattr(self.app.scene, "shadows", None)
+        self._sun_box.setVisible(amb == "day")
+        scale = int(round(_state(self.app)["sun_scale"] * 100))
+        self._sun_scale.blockSignals(True)
+        self._sun_scale.setValue(scale)
+        self._sun_scale.blockSignals(False)
+        self._sun_scale_lbl.setText(f"{scale} %")
         if amb == "night":
             n = sum(1 for lt in _state(self.app)["lights"] if lt["on"])
             self._sun.setText(tr("No sun: a dark sky, a faint moon and your "
@@ -548,17 +664,39 @@ class RenderPanel(QWidget):
             self.app.viewport.update()
             return
         lt = lights[row]
-        rgb = tuple(round(c, 3) for c in lt["color"])
-        key = next((k for k, v in rb.LIGHT_COLORS.items()
-                    if tuple(round(c, 3) for c in v) == rgb), "warm")
-        self._color.setCurrentIndex(self._color.findData(key))
+        k = lt["kelvin"] if lt["kelvin"] is not None else rb.DEFAULT_KELVIN
+        for w in (self._kelvin, self._kelvin_spin):
+            w.blockSignals(True)
+        self._kelvin.setValue(k)
+        self._kelvin_spin.setValue(k)
+        for w in (self._kelvin, self._kelvin_spin):
+            w.blockSignals(False)
+        self._name_kelvin(k)
         self._power.setValue(lt["power"])
         self._angle.setValue(lt["angle"])
+        heading, tilt = rb.angles_from_aim(lt["dir"])
+        self._heading.setValue(heading)
+        self._tilt.setValue(tilt)
         spot = lt["kind"] == "spot"
-        self._angle.setVisible(spot)
-        self._angle_label.setVisible(spot)
-        self._aim.setVisible(spot)
+        for w in (self._angle, self._angle_label, self._aim, self._heading,
+                  self._heading_label, self._tilt, self._tilt_label):
+            w.setVisible(spot)
         self.app.viewport.update()
+
+    def _name_kelvin(self, k: int) -> None:
+        self._kelvin_name.setText(_kelvin_name(int(k)))
+
+    def _on_aim_edited(self) -> None:
+        i = self.selected_index()
+        st = _state(self.app)
+        if i is None or i >= len(st["lights"]):
+            return
+        d = rb.aim_from_angles(self._heading.value(), self._tilt.value())
+        lt = st["lights"][i]
+        if any(abs(a - b) > 1e-6 for a, b in zip(
+                d, [c / (math.hypot(*lt["dir"]) or 1.0) for c in lt["dir"]])):
+            lt["dir"] = d
+            _store(self.app, st)
 
     def _on_light_checked(self, item) -> None:
         row = self._lights.row(item)
@@ -573,7 +711,8 @@ class RenderPanel(QWidget):
         if i is None or i >= len(st["lights"]):
             return
         lt = st["lights"][i]
-        new = dict(lt, color=list(rb.LIGHT_COLORS[self._color.currentData()]),
+        k = int(self._kelvin_spin.value())
+        new = dict(lt, kelvin=k, color=list(rb.kelvin_to_rgb(k)),
                    power=float(self._power.value()),
                    angle=float(self._angle.value()))
         if new != lt:
@@ -595,7 +734,7 @@ class RenderPanel(QWidget):
                                                   and kind == "point" else 0.0)]
         st["lights"].append({
             "kind": kind, "pos": pos, "dir": [0.0, 0.0, -1.0],
-            "color": list(rb.LIGHT_COLORS["warm"]),
+            "kelvin": rb.DEFAULT_KELVIN,
             "power": rb.DEFAULT_POWER[kind], "angle": 60.0, "on": True,
             "name": ""})
         _store(self.app, st)
@@ -658,7 +797,8 @@ class RenderPanel(QWidget):
                 height=max(2, round(self._width.value() / self._aspect())),
                 ground=self._ground.isChecked(),
                 keep_blend=self._blend.isChecked(),
-                ambience=st["ambience"], lights=st["lights"])
+                ambience=st["ambience"], lights=st["lights"],
+                sun_scale=st["sun_scale"])
         except Exception as exc:  # noqa: BLE001 - say it, do not crash
             QMessageBox.critical(self, tr("Render with Blender"), str(exc))
             return
@@ -722,41 +862,34 @@ class RenderPanel(QWidget):
         out = (self._work / "render.png") if self._work else None
         if code == 0 and out is not None and out.is_file():
             self._image = out
-            self._pixmap = QPixmap(str(out))
-            self._show_preview()
             for b in (self._enlarge, self._save, self._folder):
                 b.setEnabled(True)
-            self._status.setText(tr("Done. Double-click the image to "
-                                    "enlarge it."))
+            self._status.setText(tr("Done. The image is open in its own "
+                                    "window; «Show image» brings it back."))
+            self._open_viewer()
             return
         tail = "\n".join(line for line in self._log[-12:] if line.strip())
         self._status.setText(tr("Blender stopped without an image.") + (
             "\n\n" + tail if tail else ""))
         self._folder.setEnabled(self._work is not None)
 
-    def _show_preview(self) -> None:
-        if self._pixmap is None or self._pixmap.isNull():
-            return
-        w = max(120, self._preview.parentWidget().width() - 24)
-        self._preview.setPixmap(self._pixmap.scaledToWidth(
-            w, Qt.SmoothTransformation))
-        self._preview.setVisible(True)
-
-    def resizeEvent(self, ev) -> None:
-        super().resizeEvent(ev)
-        if self._pixmap is not None:
-            self._show_preview()
-
     def _open_viewer(self) -> None:
-        if self._image is not None:
-            ImageViewer(self._image, self._save_image, self.window()).show()
+        """The image in its own window — one, reused: a second render
+        replaces the picture instead of piling up windows."""
+        if self._image is None:
+            return
+        old = self._viewer
+        if old is not None:
+            old.close()
+        self._viewer = ImageViewer(self._image, self._save_image,
+                                   self.window())
+        self._viewer.setAttribute(Qt.WA_DeleteOnClose)
+        self._viewer.destroyed.connect(self._forget_viewer)
+        self._viewer.show()
+        self._viewer.raise_()
 
-    def eventFilter(self, obj, ev) -> bool:
-        if (obj is self._preview and ev.type() == QEvent.MouseButtonDblClick
-                and self._image is not None):
-            self._open_viewer()
-            return True
-        return super().eventFilter(obj, ev)
+    def _forget_viewer(self, *_a) -> None:
+        self._viewer = None
 
     def _cancel(self) -> None:
         if self._proc is not None:

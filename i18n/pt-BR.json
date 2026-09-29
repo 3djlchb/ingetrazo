@@ -2200,5 +2200,19 @@
  "Spot": "Refletor",
  "Point light": "Ponto de luz",
  "Esc cancels": "Esc cancela",
- "No sun: an even grey sky, soft shadows.": "Sem sol: céu cinza uniforme, sombras suaves."
+ "No sun: an even grey sky, soft shadows.": "Sem sol: céu cinza uniforme, sombras suaves.",
+ "Cool — a blue sky": "Fria — um céu azul",
+ "Candle, fire": "Vela, fogo",
+ "Warm — a house, a street lamp": "Quente — uma casa, um poste",
+ "Neutral white": "Branco neutro",
+ "Daylight": "Luz do dia",
+ "Sun strength:": "Intensidade do sol:",
+ "Change date and time…": "Alterar data e hora…",
+ "The Shadows panel: with the sun low, the sky turns to a sunset": "O painel Sombras: com o sol baixo, o céu vira pôr do sol",
+ "0° north (green axis), 90° east (red axis)": "0° norte (eixo verde), 90° leste (eixo vermelho)",
+ "Heading:": "Rumo:",
+ "90° straight down, 0° level, negative upward": "90° para baixo, 0° horizontal, negativo para cima",
+ "Tilt down:": "Inclinação:",
+ "Show image": "Ver imagem",
+ "Done. The image is open in its own window; «Show image» brings it back.": "Pronto. A imagem está aberta na sua janela; «Ver imagem» a mostra de novo."
 }

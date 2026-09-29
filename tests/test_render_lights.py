@@ -209,3 +209,67 @@ def test_the_lights_are_drawn_over_the_viewport(window):
     px = vp._world_to_pixel(V(0, 0, 1))
     assert px is not None
     assert img.pixelColor(int(px[0]), int(px[1])).alpha() > 0
+
+
+# ---- Temperature, aim, the sun, the image window (Marco's second round) ------
+
+def test_temperature_is_a_range_and_old_names_still_read():
+    warm, day, sky = (rb.kelvin_to_rgb(k) for k in (2700, 6500, 10000))
+    assert warm[0] == 1.0 and warm[2] < 0.5          # orange
+    assert min(day) > 0.95                           # almost white
+    assert sky[2] == 1.0 and sky[0] < 0.85           # bluish
+    old = rb.clean_lights([{"kind": "point", "pos": [0, 0, 0],
+                            "color": "neutral"}])[0]
+    assert old["kelvin"] == 4000
+    new = rb.clean_lights([{"kind": "point", "pos": [0, 0, 0],
+                            "kelvin": 99999}])[0]
+    assert new["kelvin"] == rb.MAX_KELVIN            # clamped
+
+
+@pytest.mark.parametrize("heading, tilt", [(0, 90), (90, 45), (225, 30),
+                                           (310, -20)])
+def test_a_spot_aims_by_heading_and_tilt(heading, tilt):
+    d = rb.aim_from_angles(heading, tilt)
+    h, t = rb.angles_from_aim(d)
+    assert t == pytest.approx(tilt, abs=0.1)
+    if tilt != 90:
+        assert h == pytest.approx(heading, abs=0.1)
+
+
+def test_the_panel_sets_temperature_aim_and_sun(window):
+    panel = _panel(window)
+    panel.add_light("spot", V(0, 0, 4))
+    panel._lights.setCurrentRow(0)
+    panel._kelvin_spin.setValue(5000)
+    panel._on_light_edited()
+    panel._heading.setValue(90)
+    panel._tilt.setValue(45)
+    panel._on_aim_edited()
+    lt = panel.app.document_data({})["lights"][0]
+    assert lt["kelvin"] == 5000
+    assert lt["dir"] == pytest.approx(rb.aim_from_angles(90, 45))
+    panel._sun_scale.setValue(150)
+    panel._on_sun_scale()
+    assert panel.app.document_data({})["sun_scale"] == 1.5
+
+
+def test_a_finished_render_opens_its_own_window(window, tmp_path):
+    from PySide6.QtGui import QImage
+    panel = _panel(window)
+    panel._work = tmp_path
+    img = QImage(64, 40, QImage.Format_RGB32)
+    img.fill(0x336699)
+    img.save(str(tmp_path / "render.png"))
+    panel._finished(0, None)
+    assert panel._viewer is not None and panel._viewer.isVisible()
+    first = panel._viewer
+    panel._finished(0, None)                         # a second render…
+    assert panel._viewer is not first                # …reuses one window
+    panel._viewer.close()
+
+
+def test_the_sun_strength_reaches_the_job(tmp_path):
+    scene = _box()
+    job = json.loads(rb.write_job(scene, _cam(scene), tmp_path,
+                                  sun_scale=0.5).read_text())
+    assert job["sun_strength"] == pytest.approx(1.5)

@@ -286,12 +286,54 @@ AMBIENCES = ("day", "night", "overcast")
 EXPOSURE = {"day": -0.6, "night": 0.0, "overcast": -0.3}
 
 LIGHT_KINDS = ("point", "spot")
-#: Light colours by temperature: warm ≈ 2 700 K (a street or house lamp),
-#: neutral ≈ 4 000 K, cool ≈ 6 500 K (daylight LED).
-LIGHT_COLORS = {"warm": (1.0, 0.72, 0.45), "neutral": (1.0, 0.88, 0.76),
-                "cool": (0.82, 0.89, 1.0)}
+#: A light's colour is its temperature, from a candle to a blue sky.
+MIN_KELVIN, MAX_KELVIN = 1800, 10000
+#: The three names the first version stored (and still reads): warm ≈ a
+#: street or house lamp, neutral, cool ≈ a daylight LED.
+NAMED_KELVIN = {"warm": 2700, "neutral": 4000, "cool": 6500}
+DEFAULT_KELVIN = 2700
 #: Watts in Blender's terms, a sensible start for each kind.
 DEFAULT_POWER = {"point": 400.0, "spot": 1500.0}
+
+
+def kelvin_to_rgb(kelvin: float) -> tuple:
+    """The colour of a light at ``kelvin`` (black-body, Tanner Helland's
+    fit), scaled so its brightest channel is 1 — the power sets how much."""
+    t = max(1000.0, min(40000.0, float(kelvin))) / 100.0
+    if t <= 66:
+        r = 255.0
+        g = 99.4708025861 * math.log(t) - 161.1195681661
+        b = 0.0 if t <= 19 else 138.5177312231 * math.log(t - 10) - 305.0447927307
+    else:
+        r = 329.698727446 * (t - 60) ** -0.1332047592
+        g = 288.1221695283 * (t - 60) ** -0.0755148492
+        b = 255.0
+    rgb = [max(0.0, min(255.0, c)) / 255.0 for c in (r, g, b)]
+    top = max(rgb) or 1.0
+    return tuple(round(c / top, 4) for c in rgb)
+
+
+#: Light colours by name, kept for the first version's files and tests.
+LIGHT_COLORS = {k: kelvin_to_rgb(v) for k, v in NAMED_KELVIN.items()}
+
+
+def aim_from_angles(heading_deg: float, tilt_deg: float) -> list:
+    """A spot's direction from its heading (0° = north, +Y, clockwise, like
+    a compass) and its tilt below the horizon (90° = straight down)."""
+    h, t = math.radians(heading_deg), math.radians(tilt_deg)
+    return [math.cos(t) * math.sin(h), math.cos(t) * math.cos(h),
+            -math.sin(t)]
+
+
+def angles_from_aim(d) -> tuple:
+    """``(heading, tilt)`` in degrees for a direction — the inverse of
+    :func:`aim_from_angles`; a spot aiming straight down keeps heading 0."""
+    x, y, z = (float(v) for v in d)
+    n = math.sqrt(x * x + y * y + z * z) or 1.0
+    tilt = math.degrees(math.asin(max(-1.0, min(1.0, -z / n))))
+    heading = (math.degrees(math.atan2(x, y)) % 360.0
+               if math.hypot(x, y) > 1e-9 else 0.0)
+    return round(heading, 1), round(tilt, 1)
 
 
 def clean_lights(raw) -> list:
@@ -313,12 +355,28 @@ def clean_lights(raw) -> list:
             continue
         if math.hypot(*d) < 1e-9:
             d = [0.0, 0.0, -1.0]
-        color = lt.get("color", "warm")
-        rgb = (LIGHT_COLORS.get(color) if isinstance(color, str)
-               else tuple(float(c) for c in color[:3]))
+        # The temperature is what the panel sets; a colour name (the first
+        # version) maps to one, and a plain RGB from a hand-edited file is
+        # kept as it is.
+        kelvin = lt.get("kelvin")
+        color = lt.get("color")
+        rgb = None
+        try:
+            if kelvin is not None:
+                kelvin = int(max(MIN_KELVIN, min(MAX_KELVIN, float(kelvin))))
+            elif isinstance(color, str) or color is None:
+                kelvin = NAMED_KELVIN.get(color or "warm", DEFAULT_KELVIN)
+            else:
+                rgb = tuple(max(0.0, min(1.0, float(c))) for c in color[:3])
+                if len(rgb) != 3:
+                    rgb, kelvin = None, DEFAULT_KELVIN
+        except (TypeError, ValueError):
+            rgb, kelvin = None, DEFAULT_KELVIN
+        if rgb is None:
+            rgb = kelvin_to_rgb(kelvin)
         out.append({
-            "kind": kind, "pos": pos, "dir": d,
-            "color": list(rgb or LIGHT_COLORS["warm"]),
+            "kind": kind, "pos": pos, "dir": d, "kelvin": kelvin,
+            "color": list(rgb),
             "power": max(0.0, min(power, 1e6)),
             "angle": max(1.0, min(angle, 179.0)),
             "on": bool(lt.get("on", True)),
@@ -330,10 +388,12 @@ def clean_lights(raw) -> list:
 def write_job(scene, camera, work: Path, *, engine: str = "eevee",
               quality: int = 1, width: int = 1600, height: int = 900,
               ground: bool = True, keep_blend: bool = False,
-              ambience: str = "day", lights=()) -> Path:
+              ambience: str = "day", lights=(),
+              sun_scale: float = 1.0) -> Path:
     """Export the model and write ``job.json`` in ``work``; returns its path.
     ``lights`` are the document's (:func:`clean_lights`); the ones switched
-    off stay out."""
+    off stay out. ``sun_scale`` brightens or dims the day's sun (1 = as
+    measured for a clear day)."""
     from formats.gltf import save_glb
     if engine not in ENGINES:
         raise ValueError(f"unknown engine {engine!r}")
@@ -361,7 +421,7 @@ def write_job(scene, camera, work: Path, *, engine: str = "eevee",
         "ambience": ambience,
         "exposure": EXPOSURE[ambience],
         "sun": sun_toward(scene) if ambience == "day" else None,
-        "sun_strength": 3.0,
+        "sun_strength": 3.0 * max(0.0, min(float(sun_scale), 4.0)),
         "lights": [lt for lt in clean_lights(list(lights)) if lt["on"]],
         "ground": ground_dict(scene) if ground else None,
     }

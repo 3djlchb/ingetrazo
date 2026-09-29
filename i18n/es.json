@@ -2202,5 +2202,19 @@
  "Spot": "Foco",
  "Point light": "Punto de luz",
  "Esc cancels": "Esc cancela",
- "No sun: an even grey sky, soft shadows.": "Sin sol: cielo gris uniforme, sombras suaves."
+ "No sun: an even grey sky, soft shadows.": "Sin sol: cielo gris uniforme, sombras suaves.",
+ "Cool — a blue sky": "Fría — un cielo azul",
+ "Candle, fire": "Vela, fuego",
+ "Warm — a house, a street lamp": "Cálida — una casa, un farol",
+ "Neutral white": "Blanco neutro",
+ "Daylight": "Luz de día",
+ "Sun strength:": "Intensidad del sol:",
+ "Change date and time…": "Cambiar fecha y hora…",
+ "The Shadows panel: with the sun low, the sky turns to a sunset": "El panel Sombras: con el sol bajo, el cielo se vuelve atardecer",
+ "0° north (green axis), 90° east (red axis)": "0° norte (eje verde), 90° este (eje rojo)",
+ "Heading:": "Rumbo:",
+ "90° straight down, 0° level, negative upward": "90° hacia abajo, 0° horizontal, negativo hacia arriba",
+ "Tilt down:": "Inclinación:",
+ "Show image": "Ver imagen",
+ "Done. The image is open in its own window; «Show image» brings it back.": "Listo. La imagen está abierta en su ventana; «Ver imagen» la vuelve a mostrar."
 }
