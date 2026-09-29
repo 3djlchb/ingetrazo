@@ -77,6 +77,8 @@ class RectangleTool(PlaneLock, Tool):
         # The viewport reads this to keep the opposite corner coplanar.
         self.work_plane: tuple[QVector3D, QVector3D] | None = None
         self._viewport = None
+        self._shift_square_lock = False
+        self._arrow_square_lock = False
 
     # ---- Lifecycle ----------------------------------------------------------
     def on_activate(self, viewport) -> None:
@@ -145,6 +147,13 @@ class RectangleTool(PlaneLock, Tool):
     def on_hover(self, ctx: ToolContext) -> None:
         self.note_plane(ctx.viewport)
         self._viewport = ctx.viewport
+        square_inference = (self.start_point is not None
+                            and self._square_corner(
+                                self.start_point, ctx.world)[1])
+        if not (ctx.modifiers & Qt.ShiftModifier):
+            self._shift_square_lock = False
+        elif square_inference:
+            self._shift_square_lock = True
         self.hover_point = ctx.world
         self.wireframe_color = self.lock_color()
         ctx.viewport.update()
@@ -224,7 +233,8 @@ class RectangleTool(PlaneLock, Tool):
         mirror instead (holding it fixed while the cursor moved) grew the
         wrong side, so a 4.00 x 4.10 m rectangle came out labelled
         "Cuadrado"."""
-        far, _sq = self._square_corner(self.start_point, cursor)
+        far, _sq = self._square_corner(
+            self.start_point, cursor, force=self._square_locked())
         if self._from_center:
             return self.start_point * 2.0 - far, far
         return self.start_point, far
@@ -270,7 +280,8 @@ class RectangleTool(PlaneLock, Tool):
         delta = b - a
         return QVector3D.dotProduct(delta, u), QVector3D.dotProduct(delta, v)
 
-    def _square_corner(self, a: QVector3D, b: QVector3D) -> tuple[QVector3D, bool]:
+    def _square_corner(self, a: QVector3D, b: QVector3D,
+                       force: bool = False) -> tuple[QVector3D, bool]:
         """If the rectangle spanning ``a``–``b`` is within ``SQUARE_TOL`` of being
         square, return the opposite corner nudged to a perfect square plus
         ``True``; otherwise return ``b`` unchanged plus ``False``. The square
@@ -281,7 +292,7 @@ class RectangleTool(PlaneLock, Tool):
         adu, adv = abs(du), abs(dv)
         if adu < 1e-6 or adv < 1e-6:
             return b, False
-        if abs(adu - adv) <= self.SQUARE_TOL * max(adu, adv):
+        if force or abs(adu - adv) <= self.SQUARE_TOL * max(adu, adv):
             side = max(adu, adv)
             far = a + u * math.copysign(side, du) + v * math.copysign(side, dv)
             return far, True
@@ -328,6 +339,17 @@ class RectangleTool(PlaneLock, Tool):
             if callable(hint):
                 hint()
             return True
+        if key == Qt.Key_Down and self.start_point is not None:
+            if self._arrow_square_lock:
+                self._arrow_square_lock = False
+                viewport.update()
+                return True
+            if (self.hover_point is not None
+                    and self._square_corner(self.start_point,
+                                            self.hover_point)[1]):
+                self._arrow_square_lock = True
+                viewport.update()
+                return True
         return self.plane_lock_key(viewport, key)
 
     def _reset(self) -> None:
@@ -336,4 +358,9 @@ class RectangleTool(PlaneLock, Tool):
         self.work_plane = None
         self.hover_plane = None
         self.wireframe_color = None
+        self._shift_square_lock = False
+        self._arrow_square_lock = False
         self.clear_plane_lock()
+
+    def _square_locked(self) -> bool:
+        return self._shift_square_lock or self._arrow_square_lock

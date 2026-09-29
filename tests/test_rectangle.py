@@ -183,3 +183,50 @@ def test_committing_a_square_from_the_centre_builds_real_square_corners():
     sides = [(corners[(i + 1) % 4] - corners[i]).length() for i in range(4)]
     assert max(sides) - min(sides) < 1e-9
     assert all(abs(s - 4.0) < 1e-9 for s in sides)
+
+
+def test_shift_locks_square_inference_while_held():
+    from PySide6.QtCore import QPointF, Qt
+    from tools.base import ToolContext
+
+    vp = _Stub()
+    t = RectangleTool()
+    t.start_point = V(0, 0)
+
+    def hover(x, y, modifiers):
+        t.on_hover(ToolContext(viewport=vp, world=V(x, y), screen=QPointF(0, 0),
+                               modifiers=modifiers, snap=None))
+
+    hover(4.0, 3.9, Qt.ShiftModifier)
+    assert t._square_locked()
+    hover(6.0, 2.0, Qt.ShiftModifier)
+    _, far = t._span(t.hover_point)
+    assert t._dimensions(t.start_point, far) == (6.0, 6.0)
+
+    hover(6.0, 2.0, Qt.NoModifier)
+    assert not t._square_locked()
+    _, far = t._span(t.hover_point)
+    assert t._dimensions(t.start_point, far) == (6.0, 2.0)
+
+
+def test_down_toggles_square_lock_after_square_inference():
+    from PySide6.QtCore import QPointF, Qt
+    from tools.base import ToolContext
+
+    vp = _Stub()
+    t = RectangleTool()
+    t.start_point = V(0, 0)
+    t.on_hover(ToolContext(viewport=vp, world=V(4.0, 3.9), screen=QPointF(0, 0),
+                           modifiers=Qt.NoModifier, snap=None))
+
+    assert t.on_key(vp, Qt.Key_Down, Qt.NoModifier) is True
+    t.on_hover(ToolContext(viewport=vp, world=V(6.0, 2.0), screen=QPointF(0, 0),
+                           modifiers=Qt.NoModifier, snap=None))
+    _, far = t._span(t.hover_point)
+    assert t._dimensions(t.start_point, far) == (6.0, 6.0)
+
+    assert t.on_key(vp, Qt.Key_Down, Qt.NoModifier) is True
+    t.on_hover(ToolContext(viewport=vp, world=V(6.0, 2.0), screen=QPointF(0, 0),
+                           modifiers=Qt.NoModifier, snap=None))
+    _, far = t._span(t.hover_point)
+    assert t._dimensions(t.start_point, far) == (6.0, 2.0)
