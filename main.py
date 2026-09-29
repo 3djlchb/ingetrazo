@@ -246,10 +246,9 @@ def _self_check() -> int:
     if not ok:
         problems.append("AI recipe book")
 
-    # openskp ships a blank .skp template made with Trimble's SketchUp SDK
-    # (its writer builds files on top of it). IngeTrazo does not distribute
-    # it since Trimble's notice of 2026-09-28 and has no SketchUp export:
-    # a bundle that still carries it is a packaging regression.
+    # openskp ships a blank .skp template that its writer builds files on
+    # top of. IngeTrazo does not distribute it and has no .skp export: a
+    # bundle that still carries it is a packaging regression.
     try:
         from importlib import resources
 
@@ -259,7 +258,7 @@ def _self_check() -> int:
         shipped = False
     print(f"  skp template   : {'SHIPPED (remove it)' if shipped else 'not shipped'}")
     if shipped and getattr(sys, "frozen", False):
-        problems.append("SketchUp SDK template shipped")
+        problems.append(".skp writer template shipped")
 
     # openskp 1.3.0 triangulates with mapbox_earcut, a NATIVE extension that
     # ``import openskp`` needs before it will load at all. Reported on its

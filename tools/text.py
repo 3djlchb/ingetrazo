@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Marco Sumari Tellez and IngeTrazo contributors.
-"""Text tool (X): place a leader-text annotation, SketchUp-style.
+"""Text tool (X): place a leader-text annotation.
 
 Two clicks: (1) the anchor on the model (snapped), (2) where the label
-floats — then type the text. The default text describes what was clicked,
-like SketchUp: an edge offers its length, a face its area, anything else
+floats — then type the text. The default text describes what was clicked:
+an edge offers its length, a face its area, anything else
 the point's coordinates.
 """
 from __future__ import annotations
@@ -66,7 +66,7 @@ class TextTool(AxisMagnet, Tool):
         ctx.viewport.update()
 
     def _describe(self, ctx: ToolContext) -> str:
-        """SketchUp's default label: what did the anchor click land on?"""
+        """The default label: what did the anchor click land on?"""
         viewport = ctx.viewport
         sx, sy = ctx.screen.x(), ctx.screen.y()
         try:

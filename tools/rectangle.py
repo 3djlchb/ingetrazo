@@ -57,16 +57,16 @@ class RectangleTool(PlaneLock, Tool):
     shortcut = "R"
     vcb_label = "Dimensions"
     # Only a width AND a height mean something here, so "200,100" is two
-    # values (SketchUp's list comma, #152), not the decimal 200.1.
+    # values (the list comma, #152), not the decimal 200.1.
     vcb_comma_lists = True
     # Within this fraction of the longer side, the two sides count as equal and
-    # the rectangle snaps to a perfect square ("Cuadrado"), SketchUp-style.
+    # the rectangle snaps to a perfect square ("Cuadrado").
     SQUARE_TOL = 0.04
 
     def __init__(self) -> None:
         self.start_point: QVector3D | None = None
         self.hover_point: QVector3D | None = None
-        #: Ctrl toggles SketchUp's other way of drawing a rectangle: the
+        #: Ctrl toggles the other classic way of drawing a rectangle: the
         #: first click is the CENTRE and the second a corner (issue #39,
         #: @pacaeiro). The cursor badge says which way is on.
         self._from_center: bool = False
@@ -101,7 +101,7 @@ class RectangleTool(PlaneLock, Tool):
         du, dv = self._dimensions(anchor, far)
         if abs(du) < 1e-6 or abs(dv) < 1e-6:
             # A side of zero (the second corner on the first's row or
-            # column, an edge snap along one axis): SketchUp draws nothing.
+            # column, an edge snap along one axis): nothing is drawn.
             # Committing it raised a degenerate-edge error deep in the
             # history (Marco's log, 2026-09-14) and rolled back noisily.
             flash = getattr(ctx.viewport, "flash_status", None)
@@ -202,13 +202,13 @@ class RectangleTool(PlaneLock, Tool):
             (c[2], c[3]),
             (c[3], c[0]),
         ]
-        # A diagonal across the square is SketchUp's "Square" cue (preview only).
+        # A diagonal across the square is the "Square" cue (preview only).
         if is_square:
             lines.append((c[0], c[2]))
         return lines
 
     def value_label(self):
-        """Floating ``width × height`` readout while dragging (SketchUp's VCB
+        """Floating ``width × height`` readout while dragging (the VCB
         dimensions). The viewport draws it near the rectangle's centre. When the
         sides are equal it reads "Cuadrado"."""
         if self.start_point is None or self.hover_point is None:
@@ -250,7 +250,7 @@ class RectangleTool(PlaneLock, Tool):
 
     # ---- Internals ----------------------------------------------------------
     def _cursor_preview(self):
-        """SketchUp's little square on the cursor before the first corner,
+        """The little square on the cursor before the first corner,
         lying on the plane the rectangle would take (an arrow-key lock in
         its axis colour, a face under the cursor, or the view's plane)."""
         vp = self._viewport

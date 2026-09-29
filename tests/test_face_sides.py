@@ -4,7 +4,7 @@
 
 «Si a una cara le aplico un color o textura, también se aplica a su revés,
 lo cual no debería; solo en el caso de una malla o cristal o agua» (Marco,
-2026-09-11). Es la regla de SketchUp: el cubo pinta el lado bajo el cursor,
+2026-09-11). Es la regla habitual: el cubo pinta el lado bajo el cursor,
 el otro conserva el color de reverso del estilo, y un material translúcido
 se ve igual por los dos lados. ``attrs["back"]``: ausente = reverso por
 defecto, ``True`` = cara de dos lados (el reverso copia al frente), dict =

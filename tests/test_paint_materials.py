@@ -194,7 +194,7 @@ def test_restamp_from_texture_to_colour_drops_the_texture():
 
 
 def test_eyedropper_carries_a_positioned_texture_only_within_its_plane():
-    """SketchUp's eyedropper reproduces the MATERIAL on the next face. An
+    """The eyedropper reproduces the MATERIAL on the next face. An
     explicit world->UV map says where the image sits in the world, so it only
     means the same thing on the plane it was fitted for: handing it to a
     perpendicular face put the ``v`` axis along that face's normal and smeared
@@ -228,7 +228,7 @@ def test_eyedropper_carries_a_positioned_texture_only_within_its_plane():
 
 
 def test_the_eyedropper_button_arms_one_sample_and_pops_out():
-    """SketchUp keeps a pipette beside the material: arm it, the next click
+    """The usual panel keeps a pipette beside the material: arm it, the next click
     samples (no Alt needed), and the button releases itself so what you see
     is the state you are in."""
     vp = _FakeViewport()

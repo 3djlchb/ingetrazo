@@ -159,16 +159,14 @@ hiddenimports += [
 # plus its PACKAGE DATA: create.py loads ``_scaffold/blank_v17.skp`` via
 # importlib.resources and PyInstaller never bundles non-Python files on its
 # own. Without this every PyInstaller build (Windows exe, AppImage, tar)
-# died on Export ▸ SketchUp with "[Errno 2] No such file or directory:
+# died on the .skp export with "[Errno 2] No such file or directory:
 # …\\_internal\\openskp\\_scaffold\\blank_v17.skp" (reported from Windows,
 # 0.4.1). The Flatpak was fine because it ships the whole site-packages.
 from PyInstaller.utils.hooks import collect_data_files
 hiddenimports += collect_submodules('openskp')
-# ...except _scaffold/blank_v17.skp: a blank document written by Trimble's
-# SketchUp SDK (openskp's writer builds its files on top of it). IngeTrazo
-# does not distribute it since Trimble's copyright notice of 2026-09-28,
-# and has no SketchUp export without it; main.py --check fails a frozen
-# bundle that still carries it.
+# ...except _scaffold/blank_v17.skp, the blank document openskp's writer
+# builds its files on top of. IngeTrazo does not distribute it and has no
+# .skp export; main.py --check fails a frozen bundle that still carries it.
 datas += [(src, dst) for src, dst in collect_data_files('openskp')
           if '_scaffold' not in src.replace('\\', '/')]
 # openskp 1.3.0 triangulates with mapbox_earcut instead of Shapely, so the
@@ -187,7 +185,7 @@ hiddenimports += collect_submodules('mapbox_earcut')
 # so the .pyd travelled without its dependencies and the bundle died with
 # «DLL load failed while importing _core: The specified module could not
 # be found» — which, because openskp imports it at module level, means no
-# SketchUp import or export at all. Caught by ``--check`` on the v0.4.3
+# .skp import or export at all. Caught by ``--check`` on the v0.4.3
 # tag, which is what that check is for.
 #
 # The DLLs go to the bundle root: PyInstaller puts sys._MEIPASS on the DLL
@@ -380,7 +378,7 @@ if sys.platform == 'darwin':
                     'LSHandlerRank': 'Owner',
                 },
                 {
-                    'CFBundleTypeName': 'SketchUp document',
+                    'CFBundleTypeName': 'SKP document',
                     'CFBundleTypeExtensions': ['skp'],
                     'CFBundleTypeRole': 'Editor',
                     'LSHandlerRank': 'Alternate',

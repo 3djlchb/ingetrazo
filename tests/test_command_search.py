@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Marco Sumari Tellez and IngeTrazo contributors.
 """Command search (F3): a box that filters the window's own actions and
-runs the one picked — Blender's F3, SketchUp's Search, Rhino's prompt."""
+runs the one picked — Blender's F3, Rhino's prompt."""
 from __future__ import annotations
 
 import os

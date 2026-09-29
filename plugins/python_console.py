@@ -3,7 +3,7 @@
 # Copyright (C) 2026 Marco Sumari Tellez and IngeTrazo contributors.
 """Python Console plugin — a live REPL over the open document.
 
-The SketchUp Ruby Console equivalent: inspect the model, script geometry,
+The classic scripting console: inspect the model, script geometry,
 prototype the next plugin — against the running application, no restart.
 
 What makes this one a good citizen of IngeTrazo (and where it differs from

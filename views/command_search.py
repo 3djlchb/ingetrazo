@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Marco Sumari Tellez and IngeTrazo contributors.
 """Command search: type a few letters, press Enter, the command runs.
 
-Blender's F3 menu search, SketchUp's Search box, Rhino's command line: a
+Blender's F3 menu search, Rhino's command line: a
 single box that filters every action the window already has — menus,
 tools, trays, plugins — so nobody has to remember in which menu «Orient
 Faces» lives. Nothing is registered twice: the list is the window's own

@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Marco Sumari Tellez and IngeTrazo contributors.
-"""Flip tool — SketchUp 2023+'s Flip (mirror).
+"""Flip tool — Flip (mirror).
 
-Official flow (help.sketchup.com "Flipping, Mirroring, Rotating and
-Arrays"): with a selection, three semi-transparent planes appear over it —
+Flow: with a selection, three semi-transparent planes appear over it —
 red, green and blue, one per axis. Hovering highlights a plane; ONE CLICK
 flips the selection about it. The arrow keys pick a plane (Right = red,
 Left = green, Up = blue); tapping Ctrl toggles COPY mode, which leaves the
@@ -126,7 +125,7 @@ class FlipTool(Tool):
             return
         viewport.history.execute(
             cmds[0] if len(cmds) == 1 else CompoundCommand(cmds))
-        self._copy = False           # the modifier arms ONE flip (SketchUp)
+        self._copy = False           # the modifier arms ONE flip
         viewport.update()
 
     def on_cancel(self, viewport) -> None:
@@ -136,7 +135,7 @@ class FlipTool(Tool):
     # ---- Overlay ------------------------------------------------------------
     def draw_overlay(self, viewport, painter) -> None:
         """The three semi-transparent axis planes over the selection; the
-        hovered / arrow-locked one highlights (SketchUp)."""
+        hovered / arrow-locked one highlights."""
         ok, _g, _p, _f, _e, centre = self._targets(viewport, full=True)
         if not ok:
             return
