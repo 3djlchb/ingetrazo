@@ -695,6 +695,16 @@ class MainWindow(QMainWindow):
         view_tb.addAction(act_ze)
         self._act_zoom_extents = act_ze
 
+        # Zoom Selection: the same framing over the selection alone. With
+        # nothing selected it does nothing (Zoom Extents is one key away).
+        act_zs = QAction(tool_icon("zoom_selection"), tr("Zoom Selection"), self)
+        self._icon_actions.append((act_zs, "zoom_selection"))
+        act_zs.setShortcut(QKeySequence("Ctrl+Alt+Z"))
+        set_tooltip(act_zs, tr("Zoom Selection"))
+        act_zs.triggered.connect(self._on_zoom_selection)
+        view_tb.addAction(act_zs)
+        self._act_zoom_selection = act_zs
+
         # Standard-views toolbar: one-shot camera orientations, icon-only.
         views_tb = self._new_toolbar(tr("Standard Views"), "views")
         self.toolbars["views"] = views_tb
@@ -914,6 +924,7 @@ class MainWindow(QMainWindow):
             standard_menu.addAction(action)
 
         camera_menu.addAction(self._act_zoom_extents)   # la MISMA del botón
+        camera_menu.addAction(self._act_zoom_selection)
 
         camera_menu.addSeparator()
 
@@ -2627,6 +2638,7 @@ class MainWindow(QMainWindow):
             menu.addAction(tr("Cut"), lambda: self.viewport.cut_selection())
             menu.addAction(tr("Copy"), lambda: self.viewport.copy_selection())
         if sel:
+            menu.addAction(tr("Zoom Selection"), self._on_zoom_selection)
             menu.addAction(tr("Delete"), self._on_delete_selection)
             act_clear = menu.addAction(tr("Clear selection"),
                                        self.viewport.scene.clear_selection)
@@ -3088,6 +3100,15 @@ class MainWindow(QMainWindow):
             if bounds[0] is None:
                 return
         self.viewport.camera.fit_box(bounds[0], bounds[1])
+        self.viewport.update()
+
+    def _on_zoom_selection(self) -> None:
+        """Zoom Extents over the selection. Nothing selected: nothing."""
+        lo, hi = self.viewport.scene.selection_bounds()
+        if lo is None:
+            self.statusBar().showMessage(tr("Nothing selected"), 2500)
+            return
+        self.viewport.camera.fit_box(lo, hi)
         self.viewport.update()
 
     def _figure_bounds(self):

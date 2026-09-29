@@ -939,6 +939,23 @@ def _zoom_extents(p, ink):
     _magnifier(p, ink, 22.0, 22.0, 7.5)
 
 
+def _zoom_selection(p, ink):
+    # Zoom Selection: Zoom Extents' four corner brackets, closing on a
+    # solid square in place of the magnifier — the selection alone fills
+    # the view.
+    p.save()
+    p.setPen(_rpen(_accent(), 3.4))
+    p.setBrush(Qt.NoBrush)
+    a, b, arm = 7.0, 41.0, 8.0
+    for x, y, dx, dy in ((a, a, 1, 1), (b, a, -1, 1), (a, b, 1, -1), (b, b, -1, -1)):
+        p.drawLine(QPointF(x, y), QPointF(x + dx * arm, y))
+        p.drawLine(QPointF(x, y), QPointF(x, y + dy * arm))
+    p.setPen(_rpen(ink, 2.6))
+    p.setBrush(_accent())
+    p.drawRect(QRectF(17.0, 17.0, 14.0, 14.0))
+    p.restore()
+
+
 # ---- Standard-view icons: a little house drawn from each viewpoint ----------
 # Each orthographic view shows IngeTrazo's own little house from that
 # direction — ONE gable house, consistently, no windows: the door on the
@@ -1772,7 +1789,8 @@ _DRAW = {
     "zoom": _zoom, "zoom_window": _zoom_window,
     "position_camera": _position_camera, "walk": _walk,
     "look_around": _look_around, "first_person": _first_person,
-    "zoom_extents": _zoom_extents, "view_iso": _view_iso,
+    "zoom_extents": _zoom_extents, "zoom_selection": _zoom_selection,
+    "view_iso": _view_iso,
     # Standard views — the cube with the viewed face highlighted.
     "view_top": _view_top,
     "view_bottom": _view_bottom,
