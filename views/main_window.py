@@ -767,6 +767,10 @@ class MainWindow(QMainWindow):
 
         # Edit menu
         edit_menu = menubar.addMenu(tr("Edit"))
+        self._act_simplify_mesh = QAction(tr("Simplify Mesh…"), self)
+        self._act_simplify_mesh.setToolTip(tr(
+            "Simplify Mesh — merge coplanar and near-coplanar faces"))
+        self._act_simplify_mesh.triggered.connect(self._on_simplify_mesh)
 
         self._undo_action = QAction(tr("Undo"), self)
         self._undo_action.setShortcut(QKeySequence.Undo)
@@ -877,6 +881,8 @@ class MainWindow(QMainWindow):
         split_action = QAction(tr("Split into Pieces"), self)
         split_action.triggered.connect(self._on_split_into_pieces)
         edit_menu.addAction(split_action)
+
+        edit_menu.addAction(self._act_simplify_mesh)
 
         convert_path_action = QAction(tr("Convert Path to Geometry"), self)
         convert_path_action.triggered.connect(self._on_convert_geopath)
@@ -1799,6 +1805,7 @@ class MainWindow(QMainWindow):
             (tr("COLLADA (.dae)…"), self._on_import_dae),
             (tr("glTF/GLB (.glb)…"), self._on_import_glb),
             (tr("Wavefront OBJ (.obj)…"), self._on_import_obj),
+            (tr("STL mesh (*.stl)…"), self._on_import_stl),
             (tr("Image (PNG / JPG)…"), self._on_import_image),
             (tr("Orthomosaic (GeoTIFF)…"), self._on_import_orthophoto),
             (tr("AutoCAD DWG (.dwg)…"), self._on_import_dwg),
@@ -2339,6 +2346,42 @@ class MainWindow(QMainWindow):
             self.viewport.history.execute(ExplodeGroupCommand(g))
         if groups:
             self.viewport.update()
+
+    def _on_simplify_mesh(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+        from core.history import SimplifyMeshCommand
+
+        scene = self.viewport.scene
+        if not scene.mesh.faces:
+            if scene.groups:
+                self.viewport.flash_status(tr(
+                    "Explode the imported group first, then simplify the mesh"))
+            else:
+                self.viewport.flash_status(tr("There is no mesh to simplify"))
+            return
+
+        angle, ok = QInputDialog.getDouble(
+            self, tr("Simplify Mesh"),
+            tr("Maximum facet angle in degrees "
+               "(0 = coplanar only; higher values may change rounded geometry):"),
+            1.0, 0.0, 5.0, 2)
+        if not ok:
+            return
+
+        self.viewport.history.execute(SimplifyMeshCommand(angle))
+        error = self.viewport.history.last_error
+        if error:
+            QMessageBox.warning(self, tr("Simplify Mesh failed"), error)
+            return
+        command = self.viewport.history.undo_stack[-1]
+        removed = getattr(command, "faces_removed", 0)
+        if removed:
+            self.viewport.flash_status(
+                tr("Simplified mesh: removed {count} faces", count=removed),
+                5000)
+        else:
+            self.viewport.flash_status(tr("No faces could be simplified"))
+        self.viewport.update()
 
     @_repeatable("Convert Path to Geometry")
     def _on_convert_geopath(self) -> None:
@@ -4481,6 +4524,51 @@ class MainWindow(QMainWindow):
         relay.deleteLater()
         return result.get("payload"), result.get("exc")
 
+    def _parse_stl_threaded(self, path, scale, simplify_mode, cb):
+        """Parse an STL on a worker while delivering progress on the UI thread."""
+        from PySide6.QtCore import QEventLoop, QObject, QThread, Qt, Signal
+        from formats import stl as stl_format
+
+        class _Worker(QObject):
+            progressed = Signal(float, str)
+            finished = Signal(object, object)
+
+            def run(self):
+                try:
+                    mesh = stl_format.parse_stl(
+                        path, progress=lambda f, t: self.progressed.emit(f, t),
+                        scale=scale, simplify_mode=simplify_mode)
+                    self.finished.emit(mesh, None)
+                except Exception as exc:  # noqa: BLE001 — reported to caller
+                    self.finished.emit(None, exc)
+
+        thread = QThread(self)
+        worker = _Worker()
+        worker.moveToThread(thread)
+        result = {}
+        loop = QEventLoop()
+
+        class _Relay(QObject):
+            def on_progress(self, fraction, text):
+                cb(fraction, text)
+
+            def on_finished(self, mesh, exc):
+                result["mesh"] = mesh
+                result["exc"] = exc
+                loop.quit()
+
+        relay = _Relay(self)
+        worker.progressed.connect(relay.on_progress, Qt.QueuedConnection)
+        worker.finished.connect(relay.on_finished, Qt.QueuedConnection)
+        thread.started.connect(worker.run)
+        thread.start()
+        loop.exec()
+        thread.quit()
+        thread.wait()
+        worker.deleteLater()
+        relay.deleteLater()
+        return result.get("mesh"), result.get("exc")
+
     def _prepare_import_display(self, cmd, cb) -> None:
         """Pre-build the render/pick caches of freshly imported groups while
         the progress dialog is still up — otherwise the first orbit after a
@@ -4736,6 +4824,79 @@ class MainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001
             dlg.close()
             QMessageBox.critical(self, tr("Import OBJ failed"), str(exc))
+            return
+        self._prepare_import_display(cmd, cb)
+        dlg.close()
+        self.viewport.update()
+        self._import_name = path.name
+        self._update_title()
+        self.statusBar().showMessage(tr("Imported {name}", name=path.name), 3000)
+
+    def _on_import_stl(self) -> None:
+        from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox,
+                                       QFormLayout)
+
+        path_str, _ = file_dialogs.getOpenFileName(
+            self, tr("Import STL"), "",
+            tr("STL mesh (*.stl);;All files (*)"))
+        if not path_str:
+            return
+        path = Path(path_str)
+        keys = ["m", "cm", "mm", "in", "ft"]
+        labels = [tr("Metres"), tr("Centimetres"), tr("Millimetres"),
+                  tr("Inches"), tr("Feet")]
+        settings = QSettings()
+        guess = str(settings.value("import/stl_unit", "mm") or "mm")
+        idx = keys.index(guess) if guess in keys else keys.index("mm")
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(tr("Import STL"))
+        form = QFormLayout(dialog)
+        units = QComboBox(dialog)
+        units.addItems(labels)
+        units.setCurrentIndex(idx)
+        form.addRow(
+            tr("An STL file does not record its unit. What is this model in?"),
+            units)
+        simplify = QComboBox(dialog)
+        simplify.addItem(tr("No mesh simplification"), "none")
+        simplify.addItem(
+            tr("Merge coplanar triangles on XY, XZ and YZ planes"),
+            "principal")
+        simplify.addItem(
+            tr("Advanced: merge all coplanar surfaces"), "all")
+        simplify_mode = str(
+            settings.value("import/stl_simplify_mode", "principal"))
+        simplify_index = simplify.findData(simplify_mode)
+        simplify.setCurrentIndex(simplify_index if simplify_index >= 0 else 1)
+        form.addRow(tr("Mesh simplification"), simplify)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        unit = keys[units.currentIndex()]
+        scale = stl_format.STL_UNITS[unit]
+        simplify_mode = simplify.currentData()
+        settings.setValue("import/stl_unit", unit)
+        settings.setValue("import/stl_simplify_mode", simplify_mode)
+        dlg, cb = self._import_progress(
+            tr("Importing {name}…", name=path.name))
+        target, exc = self._parse_stl_threaded(
+            path, scale, simplify_mode, cb)
+        if exc is not None:
+            dlg.close()
+            QMessageBox.critical(self, tr("Import STL failed"), str(exc))
+            return
+        cmd = SnapshotImport(
+            lambda scene: stl_format.add_stl_mesh(scene, path, target))
+        try:
+            self.viewport.history.execute(cmd)
+        except Exception as exc:  # noqa: BLE001
+            dlg.close()
+            QMessageBox.critical(self, tr("Import STL failed"), str(exc))
             return
         self._prepare_import_display(cmd, cb)
         dlg.close()

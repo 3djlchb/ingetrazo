@@ -137,8 +137,10 @@ welcome arch with all its rebar (also attached to every release as
   IngeTrazo stopped distributing after Trimble's copyright notice
   (2026-09-28). To take a model to SketchUp, export COLLADA `.dae`.
 - **Files** — native `.igz` save/open (self-contained: textures travel inside
-  the document), **import OBJ, COLLADA `.dae`, DXF and DWG**, **export STL,
-  OBJ, COLLADA, glTF/GLB and the current view as DXF** (glTF with PBR materials and geolocation; STL
+the document), **import STL (with principal-plane or advanced all-surface
+  coplanar merging), OBJ
+  and COLLADA `.dae`**, **export STL, OBJ,
+  COLLADA and glTF/GLB** (glTF with PBR materials and geolocation; STL
   goes to a slicer as is — dedicated 3D-printing tools are planned for the
   future).
 - **Layers & Scenes** — visibility/lock tags (plans emerge from one model)

@@ -18,6 +18,8 @@ ever merges what it can prove clean.
 """
 from __future__ import annotations
 
+import math
+
 from PySide6.QtGui import QVector3D
 
 
@@ -36,9 +38,24 @@ def _newell(pts) -> QVector3D:
     return n
 
 
+def _freeze_attr(value):
+    if isinstance(value, dict):
+        return tuple(sorted((key, _freeze_attr(item))
+                            for key, item in value.items()))
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_attr(item) for item in value)
+    if isinstance(value, set):
+        return tuple(sorted((_freeze_attr(item) for item in value), key=repr))
+    try:
+        hash(value)
+    except TypeError:
+        return repr(value)
+    return value
+
+
 def _attrs_sig(attrs):
     if not attrs:
-        return None
+        return (None, None, ())
     c = attrs.get("color")
     t = attrs.get("texture")
     tsig = None
@@ -49,7 +66,10 @@ def _attrs_sig(attrs):
         # while keeping differently-mapped faces apart.
         tsig = (t.get("path"), t.get("sw"), t.get("sh"), t.get("rot", 0),
                 None if not uvw else tuple(round(x, 4) for x in uvw))
-    return (None if c is None else tuple(c), tsig)
+    extras = tuple(sorted(
+        (key, _freeze_attr(value)) for key, value in attrs.items()
+        if key not in ("color", "texture")))
+    return (None if c is None else tuple(c), tsig, extras)
 
 
 def _sig_rank(sig) -> int:
@@ -75,7 +95,7 @@ def _sig_compatible(a, b) -> bool:
     origin) differ by a large fraction of a tile and stay separate."""
     if a == b:
         return True
-    if not a or not b or a[0] != b[0]:
+    if not a or not b or a[0] != b[0] or a[2] != b[2]:
         return False
     ta, tb = a[1], b[1]
     if not ta or not tb or ta[0] != tb[0]:
@@ -84,7 +104,8 @@ def _sig_compatible(a, b) -> bool:
     return bool(ua and ub and _uvw_close(ua, ub))
 
 
-def fuse_coplanar_loops(loops, cos_tol: float = 0.99999):
+def fuse_coplanar_loops(loops, cos_tol: float = 0.99999,
+                        principal_planes: bool = False):
     """``loops``: list of ``(pts, attrs_dict_or_None)`` polygons (triangles or
     n-gons). Returns a list of ``(outer_pts, holes, attrs, originals)`` —
     coplanar same-material connected regions merged into one polygon (holes
@@ -140,11 +161,19 @@ def fuse_coplanar_loops(loops, cos_tol: float = 0.99999):
             if len(e) == 2:
                 edge_map.setdefault(e, []).append(i)
 
+    def on_principal_plane(normal):
+        return max(abs(normal.x()), abs(normal.y()),
+                   abs(normal.z())) >= 1.0 - 1e-7
+
     root_sig = [f[3] for f in faces]
     for idxs in edge_map.values():
         if len(idxs) != 2:
             continue                      # boundary or non-manifold junction
         i, j = idxs
+        if principal_planes and not (
+                on_principal_plane(faces[i][2])
+                and on_principal_plane(faces[j][2])):
+            continue
         if not _sig_compatible(faces[i][3], faces[j][3]):
             continue                      # different material / UV mapping
         if abs(QVector3D.dotProduct(faces[i][2], faces[j][2])) < cos_tol:
@@ -170,6 +199,79 @@ def fuse_coplanar_loops(loops, cos_tol: float = 0.99999):
         else:
             out.extend((pts, [], attrs, [pts]) for pts, attrs, _n in region)
     return out
+
+
+def simplify_mesh(mesh, max_angle_degrees: float = 0.0,
+                  principal_planes: bool = False) -> int:
+    """Merge connected near-coplanar faces in-place and return faces removed.
+
+    A small nonzero angle tolerance allows gently curved triangulated patches
+    (such as rounded corners) to merge in locally planar regions. It can alter
+    the represented surface slightly, so callers should expose this tradeoff.
+    Faces with holes are kept intact.
+    """
+    if (not math.isfinite(max_angle_degrees)
+            or not 0.0 <= max_angle_degrees <= 5.0):
+        raise ValueError("Simplification angle must be between 0 and 5 degrees")
+    if not mesh.faces:
+        return 0
+
+    from core.mesh import Mesh, edge_flags, stamp_edge_flags
+
+    original_count = len(mesh.faces)
+    loops = []
+    holed_faces = []
+    for face in mesh.faces:
+        if face.holes or face.interior:
+            holed_faces.append(face)
+        else:
+            loops.append((face.vertices, face.attrs or None))
+
+    tolerance = max(math.radians(max_angle_degrees), 0.00045)
+    cos_tol = math.cos(tolerance)
+    fused = fuse_coplanar_loops(
+        loops, cos_tol=cos_tol, principal_planes=principal_planes)
+    simplified = Mesh()
+    for outer, holes, attrs, originals in fused:
+        try:
+            face = simplified.add_face(outer, holes or None)
+            if attrs:
+                face.attrs.update(attrs)
+        except Exception:  # noqa: BLE001 — preserve irregular source regions
+            for points in originals:
+                try:
+                    face = simplified.add_face(points)
+                    if attrs:
+                        face.attrs.update(attrs)
+                except Exception:  # noqa: BLE001
+                    continue
+    for face in holed_faces:
+        rebuilt = simplified.add_face(face.vertices, face.holes)
+        rebuilt.attrs.update(face.attrs)
+        rebuilt.interior = face.interior
+
+    def edge_key(edge):
+        return frozenset((_key(edge.a), _key(edge.b)))
+
+    original_flags = {edge_key(edge): edge_flags(edge) for edge in mesh.edges}
+    for edge in simplified.edges:
+        flags = original_flags.get(edge_key(edge))
+        if flags is not None:
+            stamp_edge_flags(edge, flags)
+
+    while True:
+        collapsed = False
+        for vertex in list(simplified.vertices):
+            if simplified.collapsible_vertex(vertex):
+                simplified.collapse_vertex(vertex)
+                collapsed = True
+                break
+        if not collapsed:
+            break
+
+    soften_smooth_edges(simplified)
+    mesh.restore_state(simplified.capture_state())
+    return max(original_count - len(mesh.faces), 0)
 
 
 def _trace_region(loops):
