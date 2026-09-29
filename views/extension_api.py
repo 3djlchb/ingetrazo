@@ -10,7 +10,10 @@ is enough to build a whole feature outside the core (the Levels plugin is
 the worked example), which is the point: what only some users need lives
 in an extension they choose, not in everyone's IngeTrazo.
 
-Contract (``API_VERSION`` 1; still 0.x — see docs/plugins.md):
+Contract (``API_VERSION`` 2; still 0.x — see docs/plugins.md). Version 2
+adds, without changing anything version 1 did: named panels that keep
+their place and have a Window-menu entry, the projection an overlay needs,
+opening an extension's own file type, and workspaces.
 
 - **Document data** is ONE JSON-safe value per extension (its key: the
   plugin's file name). It is saved in the .igz, reset by New/Open, and every
@@ -20,12 +23,34 @@ Contract (``API_VERSION`` 1; still 0.x — see docs/plugins.md):
 - **Snap providers** see the snap engine's answer and may return another
   :class:`core.snap.SnapResult` (with a ``label``) — but never over a named
   point (endpoint, midpoint, centre, intersection…), which the user aimed at.
-- A provider or overlay that raises is logged and skipped: an extension
-  cannot break painting or the cursor.
+- A provider that raises is logged and skipped; an overlay that raises is
+  logged once and removed: an extension cannot break painting or the
+  cursor.
+- **Panels** have a stable object name (``extension_<key>`` or
+  ``extension_<key>_<name>``), so the window layout remembers where the
+  user put them.
+- **File openers** take a suffix for the extension: a document of that
+  type opened from Open Recent, the command line or a double-click goes to
+  the extension, never to the .igz reader. A core suffix, or one another
+  extension already claimed, is refused (logged, not raised).
+- A **workspace** shows the extension's own document instead of the model,
+  which waits untouched ("parked") until the workspace is left.
 """
 from __future__ import annotations
 
-API_VERSION = 1
+import logging
+
+log = logging.getLogger("ingetrazo.plugins")
+
+API_VERSION = 2
+
+#: Suffixes the core itself reads (natively, or as an import): an extension
+#: claiming one would never actually see it, since ``open_path`` consults
+#: ``file_openers`` first — it's the extension's own opener that would
+#: silently steal Open Recent / CLI / double-click from the core reader.
+CORE_FILE_SUFFIXES = frozenset({
+    ".igz", ".dae", ".skp", ".dxf", ".dwg", ".obj", ".stl", ".glb",
+})
 
 
 class ExtensionApp:
@@ -77,16 +102,24 @@ class ExtensionApp:
         self.viewport.sceneVersionChanged.connect(lambda _v: fn())
 
     # ---- Side panel ----------------------------------------------------------
-    def add_panel(self, title: str, widget, *, panel: str | None = None,
-                  stretch: int = 0):
+    def add_panel(self, title: str, widget, name: str | None = None, *,
+                  panel: str | None = None, stretch: int = 0):
         """Put ``widget`` in the side tray as a tab of its own, beside
         Properties / BIM / Terrain. Returns the dock.
 
-        With ``panel`` several extensions share ONE tab: the first call
-        creates it (named ``title``), the next ones stack their widget
-        under the previous (``stretch`` as in ``QBoxLayout.addWidget``) —
-        the assistant and the MCP bridge both live in the «AI» tab."""
-        from PySide6.QtCore import Qt
+        ``name`` tells apart several panels of one extension; the dock's
+        object name (``extension_<key>`` or ``extension_<key>_<name>``) is
+        what the window layout remembers it by, so keep it stable. The panel
+        goes back where the user left it last session and is listed in
+        Window ▸ Panels. Asking again for a panel that exists returns it
+        (the new ``widget`` is not used), so an extension may call this
+        whenever its tool runs.
+
+        With ``panel`` several extensions share ONE tab (object name
+        ``extension_<panel>``): the first call creates it, named ``title``;
+        the next ones stack their widget under the previous (``stretch`` as
+        in ``QBoxLayout.addWidget``) — the assistant and the MCP bridge both
+        live in the «AI» tab."""
         from PySide6.QtWidgets import QDockWidget, QVBoxLayout, QWidget
         win = self._window
         shared = getattr(win, "_shared_panels", None)
@@ -97,6 +130,13 @@ class ExtensionApp:
             box.addWidget(widget, stretch)
             return dock
         if panel is not None:
+            object_name = f"extension_{panel}"
+        else:
+            object_name = f"extension_{self.key}" + (f"_{name}" if name else "")
+            existing = win.extension_panels().get(object_name)
+            if existing is not None:
+                return existing
+        if panel is not None:
             holder = QWidget()
             box = QVBoxLayout(holder)
             box.setContentsMargins(0, 0, 0, 0)
@@ -104,15 +144,10 @@ class ExtensionApp:
             box.addWidget(widget, stretch)
             widget = holder
         dock = QDockWidget(title, win)
-        dock.setObjectName(f"extension_{panel or self.key}")
+        dock.setObjectName(object_name)
         dock.setWidget(widget)
         dock.setTitleBarWidget(QWidget(dock))   # the tab already names it
-        win.addDockWidget(Qt.RightDockWidgetArea, dock)
-        anchor = next((d for d in reversed(win._sidebar_docks())
-                       if d is not dock), None)
-        if anchor is not None:
-            win.tabifyDockWidget(anchor, dock)
-        win._extension_docks.append(dock)
+        win._register_extension_dock(dock)
         if panel is not None:
             shared[panel] = (dock, box)
         tray = getattr(win, "tray", None)
@@ -147,11 +182,71 @@ class ExtensionApp:
 
     # ---- Viewport ------------------------------------------------------------
     def add_overlay(self, fn) -> None:
-        """``fn(viewport, painter)`` draws over every frame."""
+        """``fn(viewport, painter)`` draws over every frame, in the widget's
+        logical pixels (project world points with :meth:`world_to_pixels`).
+        The painter state is saved and restored around each call."""
         self.viewport._ext_overlays.append(fn)
         self.viewport.update()
+
+    def world_to_pixels(self, points):
+        """World points (metres; anything shaped ``(N, 3)``) → ``(px, py,
+        in_front)`` NumPy arrays: one call for thousands of points, the same
+        projection the viewport's own overlays use. Skip the points whose
+        ``in_front`` is False (behind the camera)."""
+        return self.viewport.world_to_pixels(points)
 
     def add_snap_provider(self, fn) -> None:
         """``fn(viewport, snap, px, py)`` → a ``SnapResult`` to use instead,
         or ``None`` to leave the engine's answer."""
         self.viewport._ext_snap_providers.append(fn)
+
+    # ---- Documents of the extension's own -----------------------------------------
+    def add_file_opener(self, suffix: str, fn) -> None:
+        """Documents ending in ``suffix`` (``".xyz"``) are the extension's:
+        opened from Open Recent, the command line or a double-click (once
+        the system associates the type with IngeTrazo), they go to
+        ``fn(path)``, which returns True when it opened the document.
+
+        Refused, with a warning logged, for one of the core's own suffixes
+        (:data:`CORE_FILE_SUFFIXES` — ``.igz``, ``.dae``, ``.skp``, ``.dxf``,
+        ``.dwg``, ``.obj``, ``.stl``, ``.glb``) or one an earlier extension
+        already claimed: :meth:`views.main_window.MainWindow.open_path`
+        consults ``file_openers`` before anything else, so a claim that
+        went through would silently steal that suffix from its rightful
+        reader instead of just failing to be read itself."""
+        suffix = suffix.lower()
+        if not suffix.startswith("."):
+            suffix = "." + suffix
+        if suffix in CORE_FILE_SUFFIXES:
+            log.warning("extension %r may not claim %r: a core format",
+                        self.key, suffix)
+            return
+        openers = self._window.file_openers
+        if suffix in openers:
+            log.warning("extension %r's claim on %r ignored: already "
+                        "taken", self.key, suffix)
+            return
+        openers[suffix] = fn
+
+    def enter_workspace(self, workspace) -> bool:
+        """Show the extension's own document instead of the model, which is
+        parked untouched — its scene, undo history, camera, file and saved
+        state — until :meth:`leave_workspace`. Meanwhile New / Open / Save /
+        Save As, the title, the unsaved-changes prompts and quitting go to
+        ``workspace``, the model's autosave pauses, and only the tools in
+        ``workspace.allowed_tools`` (None = all) can be picked.
+
+        ``workspace`` provides ``scene``, ``history``, ``title()``,
+        ``is_dirty()``, ``save()``, ``save_as()`` and ``confirm_leave()``;
+        optionally ``new()``, ``open()``, ``allowed_tools``, ``camera`` and
+        ``left()``. False when a workspace is shown already."""
+        return self._window.enter_workspace(workspace)
+
+    def leave_workspace(self) -> bool:
+        """Back to the parked model; False when the workspace would not go
+        (its user cancelled the unsaved-changes prompt)."""
+        return self._window.leave_workspace()
+
+    def workspace(self):
+        """The workspace shown instead of the model, or None."""
+        return self._window.workspace()
