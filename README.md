@@ -103,7 +103,9 @@ welcome arch with all its rebar (also attached to every release as
 - **Section planes** — live cuts with section fill.
 - **Groups & components** — isolate geometry, move / explode / edit as a
   unit, and **copy/paste** with a solid, textured preview under the cursor;
-  pasted component copies share their definition.
+  pasted component copies share their definition. **Paste in Place**
+  (Ctrl+Alt+V) drops the copy exactly where it was taken — the way to move
+  things into and out of groups without shifting them.
 - **Rotate & Protractor** — plane inference with
   axis-coloured disc, 15° tick snapping near it, slope input as rise:run
   (`3:12`), rotate-a-copy (Ctrl), fold-axis by dragging, and angled guide
