@@ -838,16 +838,15 @@ def _extension_snap(
 def _from_point_snap(
     scene, start_point, draw_dir, cx, cy, world_to_pixel, threshold_px,
     is_occluded, extra_point=None, axis_deg: float = 10.0,
-    hovered_refs: bool = False,
+    hovered_refs: bool = False, line_dir: Optional[QVector3D] = None,
 ) -> Optional[SnapResult]:
     """'From point' inference ("Desde el punto"), the single clean version.
 
-    Fires **only when the draw runs along an axis** (within ``axis_deg``), the
-    way SketchUp lights up the red/green/blue axis line. For every corner (and
-    midpoint) it snaps to the *fixed* foot of that point on the axis-aligned draw
-    line — the corner's coordinate along the draw, the start's other coords. So
-    the green point pins one spot (lined up with the corner) instead of sliding
-    along the projection or scattering when the draw wanders off-axis.
+    Without ``line_dir``, fires only when the draw runs along an axis (within
+    ``axis_deg``), the way SketchUp lights up the red/green/blue axis line. Under
+    an explicit directional lock, ``line_dir`` supplies that locked direction
+    instead. For every corner (and midpoint) it snaps to the fixed foot of that
+    point on the draw line, pinning one spot instead of sliding or scattering.
 
     Corners → green 'from point' with an axis-coloured guide; midpoints → cyan.
 
@@ -859,17 +858,22 @@ def _from_point_snap(
     04:20: «cuando pulso la flechita para subir no me hace el snap»)."""
     if start_point is None or draw_dir.length() < 1e-6:
         return None
-    u = draw_dir.normalized()
-    # The draw must be along an axis; orient that axis along the draw direction.
-    adir = None
-    cos_axis = math.cos(math.radians(axis_deg))
-    for a in _AXIS_VECTORS.values():
-        dp = QVector3D.dotProduct(u, a)
-        if abs(dp) >= cos_axis:
-            adir = a if dp > 0 else -a
-            break
-    if adir is None:
-        return None  # diagonal draw — no clean 'from point'
+    if line_dir is not None:
+        if line_dir.length() < 1e-6:
+            return None
+        adir = QVector3D(line_dir).normalized()
+    else:
+        u = draw_dir.normalized()
+        # The draw must be along an axis; orient that axis along the draw direction.
+        adir = None
+        cos_axis = math.cos(math.radians(axis_deg))
+        for a in _AXIS_VECTORS.values():
+            dp = QVector3D.dotProduct(u, a)
+            if abs(dp) >= cos_axis:
+                adir = a if dp > 0 else -a
+                break
+        if adir is None:
+            return None  # diagonal draw — no clean 'from point'
 
     refs = []
     if extra_point is not None:
@@ -1136,7 +1140,7 @@ def _lock_line_snaps(
     return _from_point_snap(
         scene, start_point, line_dir, cx, cy, world_to_pixel,
         threshold_px, is_occluded, extra_point=acquired_point,
-        hovered_refs=True,
+        hovered_refs=True, line_dir=line_dir,
     )
 
 
@@ -1259,6 +1263,15 @@ def compute_snap(
                                          work_plane_normal)
         if direction is not None:
             locked = project_onto_line(start_point, direction)
+            if QVector3D.dotProduct(locked - start_point, direction) < 0:
+                direction = -direction
+            hit = _lock_line_snaps(
+                scene, start_point, direction, candidate_pixel[0],
+                candidate_pixel[1], world_to_pixel, threshold_px,
+                is_occluded, acquired_point, chain_first_point,
+            )
+            if hit is not None:
+                return hit
             return SnapResult(locked, "reference", COLOR_REFERENCE)
 
     # 3. Shift held + auto axis inference → lock to that axis. This is the
