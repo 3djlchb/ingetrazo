@@ -165,9 +165,14 @@ class RectangleTool(PlaneLock, Tool):
         the second along its vertical axis."""
         if self.start_point is None or self.hover_point is None:
             return False
-        if not (isinstance(value, tuple) and len(value) == 2):
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            if not self._square_locked():
+                return False
+            w = h = value
+        elif isinstance(value, tuple) and len(value) == 2:
+            w, h = value
+        else:
             return False
-        w, h = value
         if w <= 0.0 or h <= 0.0:
             return False
         u, v = self._axes()
