@@ -142,13 +142,14 @@ def test_a_real_render_through_the_users_blender(tmp_path):
     assert _png_size(tmp_path / "render.png") == (160, 90)
 
 
-def test_the_dialog_opens_and_knows_where_blender_is(monkeypatch, tmp_path):
+def test_the_panel_knows_where_blender_is(monkeypatch, tmp_path):
     from core import extensions
     monkeypatch.setattr(extensions, "plugin_dirs", lambda: [tmp_path])
     from views.main_window import MainWindow
     win = MainWindow()
     try:
         import importlib.util
+        from views.extension_api import ExtensionApp
         spec = importlib.util.spec_from_file_location(
             "_rb_plugin", rb.render_script().parents[2] / "plugins"
             / "render_blender.py")
@@ -158,13 +159,14 @@ def test_the_dialog_opens_and_knows_where_blender_is(monkeypatch, tmp_path):
                             lambda saved=None: rb.BlenderFound(["/x/blender"],
                                                                "/x/blender"))
         monkeypatch.setattr(rb, "in_snap", lambda: False)
-        dlg = mod.RenderDialog(win.viewport)
-        assert dlg._where.text() == "/x/blender" and dlg._go.isEnabled()
+        app = ExtensionApp(win, "render_blender_test")
+        panel = mod.RenderPanel(app)
+        assert panel._where.text() == "/x/blender" and panel._go.isEnabled()
         monkeypatch.setattr(rb, "in_snap", lambda: True)
-        dlg2 = mod.RenderDialog(win.viewport)
-        assert not dlg2._go.isEnabled()                # Snap: says why
-        dlg.deleteLater()
-        dlg2.deleteLater()
+        panel2 = mod.RenderPanel(app)
+        assert not panel2._go.isEnabled()              # Snap: says why
+        panel.deleteLater()
+        panel2.deleteLater()
     finally:
         win._saved_version = win.viewport.scene.version
         win.close()

@@ -202,6 +202,56 @@ def set_world(scene, sun_dir):
     say("sky", chosen)
 
 
+def set_plain_world(scene, color, strength, name):
+    """A sky of one colour: the dark blue of a night, the grey of an
+    overcast day (the whole sky lights the scene evenly)."""
+    world = bpy.data.worlds.new(f"IngeTrazo {name}")
+    scene.world = world
+    if hasattr(world, "use_nodes"):
+        world.use_nodes = True
+    bg = (world.node_tree.nodes.get("Background")
+          or world.node_tree.nodes.new("ShaderNodeBackground"))
+    bg.inputs["Color"].default_value = (*color, 1.0)
+    bg.inputs["Strength"].default_value = strength
+    say("sky", name)
+
+
+def add_moon(scene):
+    """A faint cold key light from high up, so a night still has shape."""
+    light = bpy.data.lights.new("IngeTrazo moon", type="SUN")
+    light.energy = 0.08
+    light.color = (0.7, 0.8, 1.0)
+    light.angle = math.radians(1.0)
+    moon = bpy.data.objects.new("IngeTrazo moon", light)
+    scene.collection.objects.link(moon)
+    moon.rotation_euler = Vector((0.3, -0.4, 0.86)).normalized().to_track_quat(
+        "Z", "Y").to_euler()
+
+
+def add_lights(scene, lights):
+    """The lights placed in IngeTrazo's Render panel: point lights (a bulb,
+    a lantern) and spots (a lamp post head, a reflector) in real watts."""
+    for i, lt in enumerate(lights):
+        kind = "SPOT" if lt["kind"] == "spot" else "POINT"
+        data = bpy.data.lights.new(f"IngeTrazo light {i + 1}", type=kind)
+        data.energy = float(lt["power"])
+        data.color = tuple(lt["color"])
+        if hasattr(data, "shadow_soft_size"):
+            data.shadow_soft_size = 0.08          # a lamp, not a point
+        if kind == "SPOT":
+            data.spot_size = math.radians(float(lt["angle"]))
+            data.spot_blend = 0.35
+        obj = bpy.data.objects.new(lt.get("name") or data.name, data)
+        scene.collection.objects.link(obj)
+        obj.location = Vector(lt["pos"])
+        if kind == "SPOT":
+            # A spot shines along its local -Z.
+            d = Vector(lt["dir"]).normalized()
+            obj.rotation_euler = d.to_track_quat("-Z", "Y").to_euler()
+    if lights:
+        say("lights", len(lights))
+
+
 def add_ground(scene, z, size, color):
     bpy.ops.mesh.primitive_plane_add(size=size, location=(0.0, 0.0, z))
     ground = bpy.context.active_object
@@ -265,10 +315,18 @@ def main():
     apply_finishes()
     w, h = int(job["width"]), int(job["height"])
     set_camera(scene, job["camera"], w, h)
-    sun_dir = job.get("sun")
-    if sun_dir is not None:
-        add_sun(scene, sun_dir, float(job.get("sun_strength", 4.0)))
-    set_world(scene, sun_dir)
+    ambience = job.get("ambience", "day")
+    sun_dir = job.get("sun") if ambience == "day" else None
+    if ambience == "night":
+        set_plain_world(scene, (0.010, 0.016, 0.035), 1.0, "night")
+        add_moon(scene)
+    elif ambience == "overcast":
+        set_plain_world(scene, (0.62, 0.66, 0.70), 1.0, "overcast")
+    else:
+        if sun_dir is not None:
+            add_sun(scene, sun_dir, float(job.get("sun_strength", 4.0)))
+        set_world(scene, sun_dir)
+    add_lights(scene, job.get("lights") or [])
     ground = job.get("ground")
     if ground:
         add_ground(scene, ground["z"], ground["size"], ground["color"])

@@ -276,13 +276,69 @@ def ground_dict(scene) -> Optional[dict]:
             "color": [0.42, 0.42, 0.40]}
 
 
+# ---- Ambience and lights --------------------------------------------------------
+
+#: Day = the sun of the Shadows panel; night = no sun, a dark sky and the
+#: user's lights; overcast = no sun, a bright even sky, soft shadows.
+AMBIENCES = ("day", "night", "overcast")
+#: Exposure per ambience: a daylit scene washes out under AgX at 0, a night
+#: lit by lamps does not.
+EXPOSURE = {"day": -0.6, "night": 0.0, "overcast": -0.3}
+
+LIGHT_KINDS = ("point", "spot")
+#: Light colours by temperature: warm ≈ 2 700 K (a street or house lamp),
+#: neutral ≈ 4 000 K, cool ≈ 6 500 K (daylight LED).
+LIGHT_COLORS = {"warm": (1.0, 0.72, 0.45), "neutral": (1.0, 0.88, 0.76),
+                "cool": (0.82, 0.89, 1.0)}
+#: Watts in Blender's terms, a sensible start for each kind.
+DEFAULT_POWER = {"point": 400.0, "spot": 1500.0}
+
+
+def clean_lights(raw) -> list:
+    """The document's lights, validated: whatever a hand-edited or older
+    file holds, only well-formed entries reach the job."""
+    out = []
+    for lt in raw if isinstance(raw, list) else []:
+        try:
+            kind = lt.get("kind", "point")
+            if kind not in LIGHT_KINDS:
+                continue
+            pos = [float(v) for v in lt["pos"]][:3]
+            d = [float(v) for v in lt.get("dir", (0.0, 0.0, -1.0))][:3]
+            power = float(lt.get("power", DEFAULT_POWER[kind]))
+            angle = float(lt.get("angle", 60.0))
+        except (AttributeError, KeyError, TypeError, ValueError):
+            continue
+        if len(pos) != 3 or not all(math.isfinite(v) for v in pos + d):
+            continue
+        if math.hypot(*d) < 1e-9:
+            d = [0.0, 0.0, -1.0]
+        color = lt.get("color", "warm")
+        rgb = (LIGHT_COLORS.get(color) if isinstance(color, str)
+               else tuple(float(c) for c in color[:3]))
+        out.append({
+            "kind": kind, "pos": pos, "dir": d,
+            "color": list(rgb or LIGHT_COLORS["warm"]),
+            "power": max(0.0, min(power, 1e6)),
+            "angle": max(1.0, min(angle, 179.0)),
+            "on": bool(lt.get("on", True)),
+            "name": str(lt.get("name", "")),
+        })
+    return out
+
+
 def write_job(scene, camera, work: Path, *, engine: str = "eevee",
               quality: int = 1, width: int = 1600, height: int = 900,
-              ground: bool = True, keep_blend: bool = False) -> Path:
-    """Export the model and write ``job.json`` in ``work``; returns its path."""
+              ground: bool = True, keep_blend: bool = False,
+              ambience: str = "day", lights=()) -> Path:
+    """Export the model and write ``job.json`` in ``work``; returns its path.
+    ``lights`` are the document's (:func:`clean_lights`); the ones switched
+    off stay out."""
     from formats.gltf import save_glb
     if engine not in ENGINES:
         raise ValueError(f"unknown engine {engine!r}")
+    if ambience not in AMBIENCES:
+        raise ValueError(f"unknown ambience {ambience!r}")
     work.mkdir(parents=True, exist_ok=True)
     glb = work / "model.glb"
 
@@ -302,8 +358,11 @@ def write_job(scene, camera, work: Path, *, engine: str = "eevee",
         "engine": engine,
         "samples": SAMPLES[engine][max(0, min(2, int(quality)))],
         "camera": camera_dict(camera),
-        "sun": sun_toward(scene),
+        "ambience": ambience,
+        "exposure": EXPOSURE[ambience],
+        "sun": sun_toward(scene) if ambience == "day" else None,
         "sun_strength": 3.0,
+        "lights": [lt for lt in clean_lights(list(lights)) if lt["on"]],
         "ground": ground_dict(scene) if ground else None,
     }
     path = work / "job.json"
