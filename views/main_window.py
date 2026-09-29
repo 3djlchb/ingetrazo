@@ -12,7 +12,7 @@ from views import prompts as _prompts
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt, QSettings, QEvent, QCoreApplication, QTimer
+from PySide6.QtCore import Qt, QSettings, QEvent, QCoreApplication, QObject, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QVector3D
 from PySide6.QtWidgets import (
     QApplication,
@@ -119,6 +119,25 @@ def _obj_parts(temp):
     for kid in group.children:
         soften_smooth_edges(kid.mesh, cos_threshold=0.55)
     return group
+
+class _TrayTabWatcher(QObject):
+    """Double-click on a tab of the side trays → that tray in a window of
+    its own (MainWindow.float_tray)."""
+
+    def __init__(self, window) -> None:
+        super().__init__(window)
+        self._window = window
+
+    def eventFilter(self, bar, event) -> bool:
+        if event.type() == QEvent.Type.MouseButtonDblClick:
+            win = self._window
+            pos = bar.mapTo(win, event.position().toPoint())
+            dock = win._tray_tab_dock_at(pos)
+            if dock is not None:
+                win.float_tray(dock)
+                return True
+        return False
+
 
 class MainWindow(QMainWindow):
     """Top-level IngeTrazo window."""
@@ -465,7 +484,7 @@ class MainWindow(QMainWindow):
         # it. An empty title-bar widget removes the duplicate (SketchUp-tray
         # look); panels are toggled from the View menu, not dragged around.
         for dock in (self.tray, self.bim_tray, self.georef_tray):
-            dock.setTitleBarWidget(QWidget(dock))
+            self._make_floatable(dock)
         self.tray.raise_()
         self._build_sidebar_handle()
         self.viewport.sceneVersionChanged.connect(
@@ -1209,6 +1228,10 @@ class MainWindow(QMainWindow):
         menu = getattr(self, "_panels_menu", None)
         if menu is not None:
             self._fill_panels_menu(menu)
+        for d in docks:                  # a tray left floating last session
+            self._make_floatable(d)
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, self._watch_tray_tabs)
 
     @staticmethod
     def _hidden_tray_names(st) -> set:
@@ -1226,10 +1249,11 @@ class MainWindow(QMainWindow):
             hidden.add(dock.objectName())
         st.setValue("ui/hidden_trays", sorted(hidden))
 
-    def _fill_panels_menu(self, menu) -> None:
+    def _fill_panels_menu(self, menu, clear: bool = True) -> None:
         """One checkable entry per side-tray tab (Marco, 29-09: «cuando
         tenga demasiadas pestañas… configurar para no mostrar»)."""
-        menu.clear()
+        if clear:
+            menu.clear()
         for dock in self._sidebar_docks():
             act = menu.addAction(dock.windowTitle())
             act.setCheckable(True)
@@ -1271,15 +1295,95 @@ class MainWindow(QMainWindow):
         return False
 
     def contextMenuEvent(self, event) -> None:
-        """Right-click on the tray tabs → the Window ▸ Panels list, instead
-        of Qt's toolbar-and-dock menu."""
+        """Right-click on the tray tabs → «Open in its own window» for the
+        tab under the cursor, then the Window ▸ Panels list, instead of Qt's
+        toolbar-and-dock menu."""
         if self._tray_tab_bar_at(event.pos()):
-            menu = QMenu(self)
-            self._fill_panels_menu(menu)
-            menu.exec(event.globalPos())
+            self.tray_tab_menu(event.pos()).exec(event.globalPos())
             event.accept()
             return
         super().contextMenuEvent(event)
+
+    def tray_tab_menu(self, pos) -> QMenu:
+        """The right-click menu of the tray tabs at ``pos`` (window
+        coordinates)."""
+        menu = QMenu(self)
+        dock = self._tray_tab_dock_at(pos)
+        if dock is not None:
+            act = menu.addAction(tr("Open «{name}» in its own window",
+                                    name=dock.windowTitle()))
+            act.triggered.connect(lambda _c=False, d=dock: self.float_tray(d))
+            menu.addSeparator()
+        self._fill_panels_menu(menu, clear=False)
+        return menu
+
+    # ---- Trays in a window of their own ---------------------------------
+    def _make_floatable(self, dock) -> None:
+        """A tabbed tray shows no title bar (the tab names it); taken out to
+        a window of its own it gets Qt's back — its name, a button to dock
+        it again and one to close it — so it can be moved and put back
+        (Marco, 29-09: the AI chat wants more room than the sidebar)."""
+        if getattr(dock, "_floatable_hooked", False):
+            self._fit_title_bar(dock)
+            return
+        dock._floatable_hooked = True
+        dock.topLevelChanged.connect(
+            lambda _floating, d=dock: self._fit_title_bar(d))
+        self._fit_title_bar(dock)
+
+    @staticmethod
+    def _fit_title_bar(dock) -> None:
+        if dock.isFloating():
+            if dock.titleBarWidget() is not None:
+                dock.setTitleBarWidget(None)       # Qt's own title bar
+        elif dock.titleBarWidget() is None:
+            dock.setTitleBarWidget(QWidget(dock))  # the tab already names it
+
+    def float_tray(self, dock) -> None:
+        """Take a tray tab out to its own window, a comfortable size, near
+        the sidebar; double-clicking its title (or its dock button) puts it
+        back."""
+        if not dock.isVisible():
+            self.set_tray_shown(dock, True)
+        dock.setFloating(True)
+        self._fit_title_bar(dock)
+        w = max(dock.width(), 420)
+        h = max(dock.height(), 560)
+        top_right = self.mapToGlobal(self.rect().topRight())
+        dock.setGeometry(max(0, top_right.x() - w - 80),
+                         top_right.y() + 80, w, h)
+        dock.show()
+        dock.raise_()
+        dock.activateWindow()
+
+    def _tray_tab_dock_at(self, pos):
+        """The tray whose tab is under ``pos`` (window coordinates)."""
+        from PySide6.QtWidgets import QTabBar
+        child = self.childAt(pos)
+        while child is not None and not isinstance(child, QTabBar):
+            child = child.parentWidget()
+        if child is None:
+            return None
+        index = child.tabAt(child.mapFrom(self, pos))
+        if index < 0:
+            return None
+        title = child.tabText(index)
+        return next((d for d in self._sidebar_docks()
+                     if d.windowTitle() == title and not d.isFloating()), None)
+
+    def _watch_tray_tabs(self) -> None:
+        """Double-click on a tray tab floats it. Qt makes the tab bars
+        itself, when docks are tabbed, so they are looked for again
+        whenever a tray moves or shows."""
+        from PySide6.QtWidgets import QTabBar
+        watcher = getattr(self, "_tab_watcher", None)
+        if watcher is None:
+            watcher = self._tab_watcher = _TrayTabWatcher(self)
+        for bar in self.findChildren(QTabBar):
+            if bar.parentWidget() is self and not getattr(
+                    bar, "_tray_watched", False):
+                bar._tray_watched = True
+                bar.installEventFilter(watcher)
 
     def _sidebar_docks(self) -> list:
         return [d for d in (getattr(self, "tray", None),
@@ -1333,7 +1437,9 @@ class MainWindow(QMainWindow):
         children above the handle, which then vanishes behind the dock
         (Marco, 2026-09-14) — every dock change re-places (and re-raises) it."""
         from PySide6.QtCore import QTimer
-        bump = lambda *_: QTimer.singleShot(0, self._place_sidebar_handle)
+        def bump(*_):
+            QTimer.singleShot(0, self._place_sidebar_handle)
+            QTimer.singleShot(0, self._watch_tray_tabs)
         for d in self._sidebar_docks():
             d.visibilityChanged.connect(bump)
             d.dockLocationChanged.connect(bump)
@@ -1680,6 +1786,7 @@ class MainWindow(QMainWindow):
             if anchor is not None:
                 self.tabifyDockWidget(anchor, dock)
         self._extension_docks.append(dock)
+        self._make_floatable(dock)
         menu = getattr(self, "_panels_menu", None)
         if menu is not None:
             self._fill_panels_menu(menu)

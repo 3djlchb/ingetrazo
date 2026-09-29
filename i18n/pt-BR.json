@@ -2257,5 +2257,6 @@
  "Chain dimension": "Cota em cadeia",
  "Baseline dimension": "Cota por linha de base",
  "Angular dimension": "Cota angular",
- "Radius dimension": "Cota de raio"
+ "Radius dimension": "Cota de raio",
+ "Open «{name}» in its own window": "Abrir «{name}» em uma janela própria"
 }
