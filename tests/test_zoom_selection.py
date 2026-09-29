@@ -121,13 +121,19 @@ def test_zoom_selection_with_nothing_selected_does_nothing():
     win.close()
 
 
-def test_the_action_is_disabled_without_a_selection():
+def test_the_shortcut_and_the_button_run_the_action():
+    """Ctrl+Alt+Z is bound to the same action the toolbar button and the
+    Camera menu carry, and it stays enabled: nothing selected is a no-op
+    with a status-bar hint, not a greyed-out button that never wakes up."""
+    from PySide6.QtGui import QKeySequence
     win = _window()
+    act = win._act_zoom_selection
+    assert act.isEnabled()
+    assert act.shortcut() == QKeySequence("Ctrl+Alt+Z")
     scene = win.viewport.scene
-    win._update_zoom_selection_enabled()
-    assert not win._act_zoom_selection.isEnabled()
-    scene.select([scene.faces[0]])
-    win._update_zoom_selection_enabled()
-    assert win._act_zoom_selection.isEnabled()
+    far = _square(scene.mesh, 500, size=2.0)
+    scene.select([far])
+    act.trigger()
+    assert win.viewport.camera.target.x() == pytest.approx(501, abs=2.0)
     win._saved_version = scene.version
     win.close()
