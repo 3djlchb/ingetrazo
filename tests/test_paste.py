@@ -403,3 +403,105 @@ def test_a_face_pasted_over_another_merges_with_it():
     # Overlapping 2×2 squares offset by (1,1): three regions, no stacking.
     areas = sorted(round(f.area(), 6) for f in sc.mesh.faces)
     assert areas == [1.0, 3.0, 3.0], areas
+
+
+def test_paste_in_place_lands_on_the_original_and_selects_it():
+    scene = Scene()
+    hist = History(scene)
+    clip = {"faces": [([V(0, 0), V(2, 0), V(2, 2), V(0, 2)], [])],
+            "edges": [(V(5, 5), V(6, 5), False, None)], "ref": V(0, 0, 0)}
+    vp = _VP(scene, hist, clip)
+
+    assert PasteTool.in_place(vp) is True
+    coords = {(round(v.x()), round(v.y())) for f in scene.mesh.faces
+              for v in f.vertices}
+    assert coords == {(0, 0), (2, 0), (2, 2), (0, 2)}   # no cursor offset
+    assert len(scene.selection) == 2                    # the face and the edge
+
+    assert hist.undo() is True                          # one step
+    assert not scene.mesh.faces
+    assert PasteTool.in_place(_VP(scene, hist, None)) is False
+
+
+def test_paste_in_place_menu_action_keeps_the_active_tool():
+    import sys
+    from PySide6.QtWidgets import QApplication
+    if QApplication.instance() is None:
+        QApplication(sys.argv[:1])
+    from views.main_window import MainWindow
+    win = MainWindow()
+    try:
+        vp = win.viewport
+        vp.clipboard = {"faces": [([V(0, 0), V(1, 0), V(1, 1), V(0, 1)], [])],
+                        "edges": [], "ref": V(0, 0, 0)}
+        before = vp.active_tool
+        win._on_paste_in_place()
+        assert vp.active_tool is before
+        assert len(vp.scene.mesh.faces) == 1
+    finally:
+        win._saved_version = win.viewport.scene.version
+        win.close()
+
+
+def test_undoing_a_paste_leaves_no_loose_edges_behind():
+    # Paste in Place inside a group: undo removed the faces but the edges
+    # they had created stayed as debris in the group.
+    from core.group import Group
+    from core.mesh import Mesh
+    scene = Scene()
+    hist = History(scene)
+    g = Group(Mesh(), name="B")
+    scene.groups.append(g)
+    scene.begin_group_edit(g)
+    loop = [V(0, 0), V(2, 0), V(2, 2), V(0, 2)]
+    clip = {"faces": [(loop, [])], "edges": [(V(0, 0), V(2, 0), False, None)],
+            "ref": V(0, 0, 0)}
+    vp = _VP(scene, hist, clip)
+
+    assert PasteTool.in_place(vp)
+    assert (len(g.mesh.faces), len(g.mesh.edges)) == (1, 4)
+    assert hist.undo() is True
+    assert (len(g.mesh.faces), len(g.mesh.edges)) == (0, 0)
+    assert hist.redo() is True
+    assert (len(g.mesh.faces), len(g.mesh.edges)) == (1, 4)
+
+
+def test_undoing_a_paste_over_the_original_keeps_the_original_edges():
+    scene = Scene()
+    hist = History(scene)
+    scene.mesh.add_face([V(0, 0), V(2, 0), V(2, 2), V(0, 2)])
+    clip = {"faces": [([V(0, 0), V(2, 0), V(2, 2), V(0, 2)], [])],
+            "edges": [], "ref": V(0, 0, 0)}
+    before = len(scene.mesh.edges)
+    assert PasteTool.in_place(_VP(scene, hist, clip))
+    assert hist.undo() is True
+    assert len(scene.mesh.edges) == before == 4
+
+
+def test_undoing_a_paste_shrinks_the_group_back_and_redo_restores_it():
+    # The group's edit box wraps its vertices: leftovers of an undone paste
+    # kept it at the pasted size («quedó como si aún estuviera el cubo»).
+    from core.group import Group
+    from core.mesh import Mesh
+    scene = Scene()
+    hist = History(scene)
+    g = Group(Mesh(), name="B")
+    g.mesh.add_face([V(10, 0), V(12, 0), V(12, 2), V(10, 2)])
+    scene.groups.append(g)
+    scene.begin_group_edit(g)
+    clip = {"faces": [([V(0, 0), V(2, 0), V(2, 2), V(0, 2)], [])],
+            "edges": [], "ref": V(0, 0, 0)}
+    vp = _VP(scene, hist, clip)
+
+    def xs():
+        return sorted({round(v.position.x()) for v in g.mesh.vertices})
+
+    assert PasteTool.in_place(vp)
+    assert xs() == [0, 2, 10, 12]
+    assert hist.undo() is True
+    assert xs() == [10, 12]                     # box back to the original size
+    assert hist.redo() is True
+    assert xs() == [0, 2, 10, 12]
+    assert len(g.mesh.faces) == 2 and len(g.mesh.edges) == 8
+    # a stamp can still weld onto the restored vertices
+    assert PasteTool.in_place(vp)

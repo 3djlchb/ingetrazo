@@ -822,6 +822,11 @@ class MainWindow(QMainWindow):
         paste_action.triggered.connect(self._on_paste)
         edit_menu.addAction(paste_action)
 
+        paste_in_place_action = QAction(tr("Paste in Place"), self)
+        paste_in_place_action.setShortcut(QKeySequence("Ctrl+Alt+V"))
+        paste_in_place_action.triggered.connect(self._on_paste_in_place)
+        edit_menu.addAction(paste_in_place_action)
+
         edit_menu.addSeparator()
 
         select_all_action = QAction(tr("Select All"), self)
@@ -2648,6 +2653,7 @@ class MainWindow(QMainWindow):
         from formats import clip as clip_transfer
         if getattr(self.viewport, "clipboard", None) or clip_transfer.available():
             menu.addAction(tr("Paste"), self._on_paste)
+            menu.addAction(tr("Paste in Place"), self._on_paste_in_place)
         menu.addAction(tr("Zoom Extents"), self._on_zoom_extents)
         menu.addSeparator()
         undo = menu.addAction(tr("Undo"), self._on_undo)
@@ -3041,7 +3047,7 @@ class MainWindow(QMainWindow):
                         return None
         return o, n
 
-    def _on_paste(self) -> None:
+    def _sync_foreign_clipboard(self) -> None:
         # A copy made in ANOTHER IngeTrazo window wins over this window's
         # older one, as a system clipboard does (issue #76).
         from formats import clip as clip_transfer
@@ -3055,6 +3061,17 @@ class MainWindow(QMainWindow):
             if old and callable(drop):
                 drop(old)
             self.viewport.clipboard = other
+
+    def _on_paste_in_place(self) -> None:
+        """Edit ▸ Paste in Place (SketchUp): the copy lands where the
+        original was, in whatever context is open — the way to move things
+        into and out of groups without shifting them."""
+        self._sync_foreign_clipboard()
+        if PasteTool.in_place(self.viewport):
+            self.statusBar().showMessage(tr("Pasted in place."), 3000)
+
+    def _on_paste(self) -> None:
+        self._sync_foreign_clipboard()
         if self.viewport.clipboard is None:
             return
         self.viewport.set_active_tool(PasteTool())
