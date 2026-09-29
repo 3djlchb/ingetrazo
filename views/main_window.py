@@ -1199,6 +1199,7 @@ class MainWindow(QMainWindow):
         hidden = self._hidden_tray_names(st)
         docks = self._sidebar_docks()
         for d in docks:
+            self._keep_docked(d)
             d.setVisible(d.objectName() not in hidden)
             # Qt's own dock list (right-click on a toolbar) hides one too.
             d.toggleViewAction().triggered.connect(
@@ -1209,6 +1210,21 @@ class MainWindow(QMainWindow):
         menu = getattr(self, "_panels_menu", None)
         if menu is not None:
             self._fill_panels_menu(menu)
+
+    def _keep_docked(self, dock) -> None:
+        """The trays stay in the sidebar, as Blender's side panel does
+        (Marco, 29-09 — floating tabs were tried and dropped): no floating,
+        and one a saved layout left floating goes back among the tabs."""
+        from PySide6.QtWidgets import QDockWidget
+        dock.setFeatures(dock.features() & ~QDockWidget.DockWidgetFloatable)
+        if dock.isFloating():
+            dock.setFloating(False)
+            if dock.titleBarWidget() is None:
+                dock.setTitleBarWidget(QWidget(dock))
+            if self.dockWidgetArea(dock) != Qt.RightDockWidgetArea:
+                self.addDockWidget(Qt.RightDockWidgetArea, dock)
+            if dock is not self.tray:
+                self.tabifyDockWidget(self.tray, dock)
 
     @staticmethod
     def _hidden_tray_names(st) -> set:
@@ -1680,6 +1696,7 @@ class MainWindow(QMainWindow):
             if anchor is not None:
                 self.tabifyDockWidget(anchor, dock)
         self._extension_docks.append(dock)
+        self._keep_docked(dock)
         menu = getattr(self, "_panels_menu", None)
         if menu is not None:
             self._fill_panels_menu(menu)

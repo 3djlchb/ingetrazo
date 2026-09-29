@@ -100,18 +100,20 @@ def test_panels_have_stable_names_a_menu_entry_and_are_added_once(win):
 
 
 def test_a_panel_comes_back_where_the_user_left_it(win, tmp_path):
+    # The left sidebar rather than a floating window: tabs no longer float
+    # (Marco, 29-09 — the sidebar stays put, as in Blender).
     app = _app_for(win)
-    dock = app.add_panel("Floating", QLabel("x"))
-    dock.setFloating(True)
+    dock = app.add_panel("Moved", QLabel("x"))
+    win.addDockWidget(Qt.LeftDockWidgetArea, dock)
     _app.processEvents()
     state = win.saveState()
     from views.main_window import MainWindow
     again = MainWindow()
     again.restoreState(state)
     again.show()
-    dock2 = _app_for(again).add_panel("Floating", QLabel("y"))
+    dock2 = _app_for(again).add_panel("Moved", QLabel("y"))
     _app.processEvents()
-    assert dock2.isFloating()
+    assert again.dockWidgetArea(dock2) == Qt.LeftDockWidgetArea
     again._saved_version = again.viewport.scene.version
     again.close()
 

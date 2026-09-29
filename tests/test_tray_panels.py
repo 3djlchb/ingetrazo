@@ -159,3 +159,32 @@ def test_the_prompt_takes_several_lines_and_enter_sends(win):
                                 Qt.NoModifier))
     assert sent == ["una casa\ncon techo a dos aguas"]
     assert box.minimumHeight() >= 2 * box.fontMetrics().lineSpacing()
+
+
+def test_a_tab_saved_floating_comes_back_among_the_tabs(win):
+    # Floating tabs were tried and dropped (Marco, 29-09): a layout saved
+    # while one floated must not leave it loose — nor can a tab float now.
+    from PySide6.QtWidgets import QDockWidget
+    from views.main_window import MainWindow
+    win.resize(1300, 850)
+    win.show()
+    QApplication.processEvents()
+    ai = _dock(win, "extension_ai")
+    assert not ai.features() & QDockWidget.DockWidgetFloatable
+    ai.setFeatures(ai.features() | QDockWidget.DockWidgetFloatable)
+    ai.setFloating(True)                   # as the reverted feature left it
+    QApplication.processEvents()
+    win._saved_version = win.viewport.scene.version
+    win.close()                            # the layout is saved floating
+    again = MainWindow()
+    try:
+        again.resize(1300, 850)
+        again.show()
+        QApplication.processEvents()
+        back = _dock(again, "extension_ai")
+        assert not back.isFloating()
+        assert back in again.tabifiedDockWidgets(again.tray)
+        assert back.titleBarWidget() is not None
+    finally:
+        again._saved_version = again.viewport.scene.version
+        again.close()
