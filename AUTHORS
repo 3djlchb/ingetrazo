@@ -114,6 +114,11 @@ xyont  (github.com/xyont)
     against a wall (#94), units kept for new documents (#121), colours by
     layer (#120).
 
+kagehak  (github.com/kagehak)
+    STL import (pull request #161): binary and ASCII, the model's unit,
+    flat surfaces merged on import, the reading off the window's thread,
+    and Edit ▸ Simplify Mesh for any mesh.
+
 ---
 
 IngeTrazo is free software under GPL-3.0-or-later (see LICENSE).
