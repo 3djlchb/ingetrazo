@@ -63,6 +63,9 @@ Félix Riestra  (github.com/felixriestra)
     Components that come apart (pull request #96): OBJ files keep their
     parts, Split into Pieces, the Parts tray with its cut list, and the
     exploded view — furniture and joinery taken to pieces.
+    Extension API 2 (pull request #141): several named panels per
+    extension, overlays that project world points, file types an extension
+    opens itself, and workspaces that stand in for the model.
 
 Gabriel Rodríguez Arregin  (github.com/canalsecuario-blip)
     The Back color in Styles (pull request #99): SketchUp's Front/Back
