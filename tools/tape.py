@@ -196,7 +196,7 @@ class TapeMeasureTool(Tool):
             self._place_guide_point(viewport, ctx.world)
         elif self._edge is not None:
             offset = self._guide_offset(ctx.world)
-            if offset is not None and offset.length() > 1e-9:
+            if offset is not None:
                 self._place_guide(viewport, offset)
         elif (self._mode == "line" and self._from_point
               and kind not in self._POINT_KINDS
@@ -272,7 +272,7 @@ class TapeMeasureTool(Tool):
                 or self.hover_point is None):
             return []
         offset = self._guide_offset(self.hover_point)
-        if offset is None or offset.length() < 1e-9:
+        if offset is None:
             return []
         return [Guide(self.start_point + offset, self._edge_dir()).segment()]
 
