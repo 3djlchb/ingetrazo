@@ -2107,5 +2107,8 @@
  "the arrow keys lock an axis while drawing": "le frecce bloccano un asse durante il disegno",
  "it types a measure in the value box": "serve a digitare una misura nella casella dei valori",
  "«{keys}» cannot be a shortcut: {why}.": "«{keys}» non può essere una scorciatoia: {why}.",
- "Click here and press the keys": "Fai clic qui e premi i tasti"
+ "Click here and press the keys": "Fai clic qui e premi i tasti",
+ "Cancel": "Annulla",
+ "Don't Save": "Non salvare",
+ "Italian translation of the interface.": "Traduzione dell'interfaccia in italiano."
 }

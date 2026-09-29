@@ -215,8 +215,9 @@ Developed on **Python 3.14** (3.11+ should work). Run the tests with
 
 Contributors from anywhere are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md)
 and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). All code, comments and commit
-messages are in **English**; the UI speaks Spanish, English and Brazilian
-Portuguese (translations are one JSON file each under `i18n/`).
+messages are in **English**; the UI speaks Spanish, English, Brazilian
+Portuguese, Simplified Chinese and Italian (translations are one JSON file
+each under `i18n/`).
 
 ## Acknowledgements
 
@@ -243,6 +244,10 @@ Portuguese (translations are one JSON file each under `i18n/`).
   you need to read `.skp` files from Python, use OpenSKP — and give it a star.
 - **[dafrobozao](https://github.com/dafrobozao)** — the Brazilian Portuguese
   translation of the interface (#54), IngeTrazo's third language.
+- **[liuandy](https://github.com/liujvnes)** — the Simplified Chinese
+  translation of the interface (#123), IngeTrazo's fourth language.
+- **[deedend](https://github.com/deedend)** — the Italian translation of the
+  interface (#182), IngeTrazo's fifth language.
 
 ## License
 

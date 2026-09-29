@@ -2109,5 +2109,6 @@
  "the arrow keys lock an axis while drawing": "las flechas bloquean un eje mientras dibujas",
  "it types a measure in the value box": "sirve para escribir medidas en la casilla de valores",
  "«{keys}» cannot be a shortcut: {why}.": "«{keys}» no puede ser un atajo: {why}.",
- "Click here and press the keys": "Haz clic aquí y pulsa las teclas"
+ "Click here and press the keys": "Haz clic aquí y pulsa las teclas",
+ "Italian translation of the interface.": "Traducción de la interfaz al italiano."
 }

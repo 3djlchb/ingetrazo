@@ -1422,5 +1422,6 @@
  "the arrow keys lock an axis while drawing": "as setas travam um eixo enquanto você desenha",
  "it types a measure in the value box": "serve para digitar medidas na caixa de valores",
  "«{keys}» cannot be a shortcut: {why}.": "«{keys}» não pode ser um atalho: {why}.",
- "Click here and press the keys": "Clique aqui e pressione as teclas"
+ "Click here and press the keys": "Clique aqui e pressione as teclas",
+ "Italian translation of the interface.": "Tradução da interface para o italiano."
 }

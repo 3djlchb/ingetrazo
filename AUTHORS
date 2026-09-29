@@ -87,6 +87,10 @@ liuandy  (github.com/liujvnes)
     Simplified Chinese translation of the interface (issue #123, some
     2 080 strings): IngeTrazo's fourth language.
 
+deedend  (github.com/deedend)
+    Italian translation of the interface (pull request #182, some
+    2 110 strings): IngeTrazo's fifth language.
+
 Carlos Martins  (github.com/fafecm)
     Bug reports with screen recordings that made each one reproducible:
     diagonal guides crossing a hair off (#110), a group's paint missing

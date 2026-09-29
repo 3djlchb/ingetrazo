@@ -59,6 +59,9 @@ CONTRIBUTORS = [
     ("liuandy",
      "Simplified Chinese translation of the interface.",
      "https://github.com/liujvnes"),
+    ("deedend",
+     "Italian translation of the interface.",
+     "https://github.com/deedend"),
     ("Carlos Martins",
      "Bug reports with videos that pinned down guides, group paint and "
      "exploded groups.",
