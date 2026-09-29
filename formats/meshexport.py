@@ -58,14 +58,60 @@ def _turned_toward(mesh, toward):
     return transformed_mesh(mesh, m)
 
 
+def _facing_quad(mesh, toward):
+    """A simple face-me figure (one textured quad, ``billboard is True``)
+    rebuilt the way the viewport draws it (views.viewport._billboard_quad):
+    same width and height, centred on its feet, square to ``toward``, the
+    image pinned corner to corner. Turning the stored quad instead left its
+    planar texture anchored to the world, so the picture slid and repeated
+    across it — Sumari came out as two thin halves (#181)."""
+    import math
+    from PySide6.QtGui import QVector3D
+    from core.mesh import Mesh
+    from core.texture import fit_uv_affine
+    verts = [v.position for v in mesh.vertices]
+    tex = next((dict(f.attrs["texture"]) for f in mesh.faces
+                if f.attrs.get("texture", {}).get("path")), None)
+    if not verts or tex is None:
+        return _turned_toward(mesh, toward)
+    xs = [p.x() for p in verts]
+    ys = [p.y() for p in verts]
+    zs = [p.z() for p in verts]
+    anchor = QVector3D((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2,
+                       min(zs))
+    w = math.hypot(max(xs) - min(xs), max(ys) - min(ys))
+    h = max(zs) - min(zs)
+    d = toward(anchor)
+    d = QVector3D(d.x(), d.y(), 0.0)
+    if w < 1e-9 or h < 1e-9 or d.length() < 1e-6:
+        return mesh
+    d = d.normalized()
+    r = QVector3D(-d.y(), d.x(), 0.0)
+    up = QVector3D(0.0, 0.0, 1.0)
+    c0, c1 = anchor - r * (w / 2), anchor + r * (w / 2)
+    corners = [c0, c1, c1 + up * h, c0 + up * h]
+    tex["uvw"] = fit_uv_affine(corners, [(0.0, 0.0), (1.0, 0.0),
+                                         (1.0, 1.0), (0.0, 1.0)])
+    out = Mesh()
+    face = out.add_face(corners)
+    face.attrs.update({k: v for k, v in mesh.faces[0].attrs.items()
+                       if k != "texture"})
+    face.attrs["texture"] = tex
+    return out
+
+
 def _placements_facing(group, toward):
     """Every placement of ``group`` in world space, face-me figures (at any
-    depth) turned by :func:`_turned_toward`."""
+    depth) turned toward the camera: a cut-out outline (``"mesh"``) by
+    :func:`_turned_toward`, a simple quad rebuilt by :func:`_facing_quad`."""
     from core.group import iter_placements, transformed_mesh
     for g, m in iter_placements(group):
         mesh = g.mesh if m is None else transformed_mesh(g.mesh, m)
-        if getattr(g, "billboard", False):
+        kind = getattr(g, "billboard", False)
+        if kind == "mesh":
             mesh = _turned_toward(mesh, toward)
+        elif kind:
+            mesh = _facing_quad(mesh, toward)
         yield from mesh.faces
 
 
