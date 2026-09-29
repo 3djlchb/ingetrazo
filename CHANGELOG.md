@@ -4,6 +4,15 @@ All notable changes to IngeTrazo are documented here.
 Format inspired by [Keep a Changelog](https://keepachangelog.com); versions
 follow [SemVer](https://semver.org).
 
+## [Sin publicar]
+
+### Corregido
+- **El buscador de comandos (F3) aparece al instante.** En 0.5.6 se veía
+  primero la sombra del cuadro y la lista un momento después (~110 ms):
+  cada apertura volvía a preparar todos los comandos. Ahora recuerda lo ya
+  preparado y deja el cuadro listo mientras la ventana está quieta; se
+  dibuja en unos 25 ms, la primera vez incluida.
+
 ## [0.5.6] — 2026-09-29
 
 **Render con Blender, una pestaña para la IA y los aportes de la comunidad.**

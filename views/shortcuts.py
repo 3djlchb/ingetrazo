@@ -15,6 +15,8 @@ from the action that had them, after asking.
 """
 from __future__ import annotations
 
+from functools import lru_cache
+
 from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtCore import Signal
@@ -23,7 +25,7 @@ from PySide6.QtWidgets import (QHBoxLayout, QHeaderView, QLabel, QLineEdit,
                                QMessageBox, QPushButton, QTreeWidget,
                                QTreeWidgetItem, QVBoxLayout, QWidget)
 
-from core.i18n import source_of, tr
+from core.i18n import current_language, source_of, tr
 
 _GROUP = "shortcuts"
 _DEFAULTS = "ingetrazo_default_shortcuts"
@@ -63,7 +65,14 @@ def action_key(action: QAction) -> str:
     name = action.objectName()
     if name:
         return name
-    return "text:" + _plain(source_of(action.text()))
+    return _text_key(action.text(), current_language())
+
+
+@lru_cache(maxsize=4096)
+def _text_key(text: str, _language: str) -> str:
+    # Remembered per language: F3 asks for every action's key several
+    # times each time it opens (views/command_search.py).
+    return "text:" + _plain(source_of(text))
 
 
 def collect_actions(window) -> list:

@@ -12286,6 +12286,8 @@ class ComposerWindow(QMainWindow):
         search.setShortcut(QKeySequence("F3"))
         search.triggered.connect(lambda: open_search(self))
         self.addAction(search)
+        from views.command_search import warm_up
+        warm_up(self)
 
     def command_search_area(self):
         """Where F3 opens: the sheet with its rulers, not the side panel."""
