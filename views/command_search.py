@@ -79,20 +79,32 @@ def _menubar(window):
     return bar if isinstance(bar, QMenuBar) else None
 
 
+def _submenus(window) -> dict:
+    """``{action: menu}`` for every menu of the window, found from the
+    menus (``menuAction``) rather than asked of each action: with PySide
+    6.11.1, ``QAction.menu()`` on a menu whose wrapper did not exist yet
+    handed back a dead wrapper for the Help menu (seen on one machine;
+    every window then failed to build)."""
+    return {m.menuAction(): m for m in window.findChildren(QMenu)}
+
+
 def _top_menus(window) -> list:
     bar = _menubar(window)
-    return [] if bar is None else [a.menu() for a in bar.actions()
-                                   if a.menu() is not None]
+    if bar is None:
+        return []
+    subs = _submenus(window)
+    return [subs[a] for a in bar.actions() if a in subs]
 
 
 def menu_paths(window) -> dict:
     """``{action_key: "Edit ▸ Unhide"}`` for the actions in the menu bar;
     an action found only on a toolbar gets the toolbar's name («Draw»)."""
     paths: dict = {}
+    subs = _submenus(window)
 
     def walk(menu: QMenu, trail: list) -> None:
         for act in menu.actions():
-            sub = act.menu()
+            sub = subs.get(act)
             if sub is not None:
                 walk(sub, trail + [_plain(sub.title())])
             elif not act.isSeparator() and _plain(act.text()):
@@ -113,11 +125,13 @@ def menu_paths(window) -> dict:
 def menu_trail(window, menu: QMenu):
     """``"Edit ▸ Unhide"`` for a menu of the menu bar, ``None`` for any
     other (a right-click menu)."""
+    subs = _submenus(window)
+
     def walk(parent: QMenu, trail: list):
         if parent is menu:
             return _SEP.join(trail)
         for act in parent.actions():
-            sub = act.menu()
+            sub = subs.get(act)
             if sub is not None:
                 found = walk(sub, trail + [_plain(sub.title())])
                 if found is not None:
@@ -605,11 +619,14 @@ class _MenuTyping(QObject):
         super().__init__(window)
         self._window = window
 
-    def watch(self, menu: QMenu) -> None:
+    def watch(self, menu: QMenu, subs: dict | None = None) -> None:
+        if subs is None:
+            subs = _submenus(self._window)
         menu.installEventFilter(self)          # once: Qt drops repeats
         for act in menu.actions():
-            if act.menu() is not None:
-                self.watch(act.menu())
+            sub = subs.get(act)
+            if sub is not None:
+                self.watch(sub, subs)
 
     def eventFilter(self, menu, event) -> bool:
         if event.type() != event.Type.KeyPress or not isinstance(menu, QMenu):

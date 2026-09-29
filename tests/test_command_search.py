@@ -118,7 +118,7 @@ def test_damerau_levenshtein():
 def test_the_menus_tools_and_trays_are_all_there(ventana):
     names = _names(ventana, "")
     for expected in ("Orient Faces", "Line", "Push / Pull", "Preferences…",
-                     "Properties panel"):
+                     "Properties", "Show all panels"):     # Window ▸ Panels
         assert expected in names
     assert "Search commands…" not in names     # not itself
 
@@ -359,6 +359,9 @@ def test_the_real_box_is_fitted_to_the_modelling_area(ventana,
 
 # ---- the sheet composer ----------------------------------------------------------
 def _composer(win):
+    vp = win.viewport
+    if getattr(vp, "_gl", None) is None or not vp.isValid():
+        pytest.skip("no OpenGL here: the composer renders its views")
     comp = win._ensure_composer()
     comp.show()
     QApplication.processEvents()

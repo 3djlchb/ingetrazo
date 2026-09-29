@@ -1193,6 +1193,10 @@ class MainWindow(QMainWindow):
                 lambda on, dock=d: self._remember_tray_choice(dock, on))
         if not self.tray.isHidden():
             self.tray.raise_()
+        # Filled now too, not only when it opens: F3 finds each tab there.
+        menu = getattr(self, "_panels_menu", None)
+        if menu is not None:
+            self._fill_panels_menu(menu)
 
     @staticmethod
     def _hidden_tray_names(st) -> set:
