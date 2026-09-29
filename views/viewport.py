@@ -11078,7 +11078,20 @@ class Viewport(QOpenGLWidget):
                   extra=f"reused={'proj' if reproj else reused}", floor=10.0)
         self.update()
 
+    _MODIFIER_KEYS = frozenset({Qt.Key_Control, Qt.Key_Shift, Qt.Key_Alt,
+                                Qt.Key_Meta, Qt.Key_AltGr})
+
+    def ctrl_tapped(self) -> bool:
+        """Whether the Ctrl being released was pressed ALONE — no other key
+        in between, not even one a menu shortcut took (Ctrl+Z reaches us
+        only as a ShortcutOverride). Tools that toggle on a Ctrl tap ask
+        this on the release (#183)."""
+        return getattr(self, "_ctrl_alone", False)
+
     def event(self, ev) -> bool:
+        if (ev.type() in (QEvent.ShortcutOverride, QEvent.KeyPress)
+                and ev.key() not in self._MODIFIER_KEYS):
+            self._ctrl_alone = False
         # With a VCB buffer in progress, claim keys that continue it (unit
         # suffixes m/cm/mm, separators, sign) before the window's QAction
         # shortcuts swallow them — otherwise typing "2m" would fire the Move
@@ -11103,6 +11116,8 @@ class Viewport(QOpenGLWidget):
         return callable(claims) and bool(claims(ev.key(), ev.modifiers()))
 
     def keyPressEvent(self, ev) -> None:
+        if ev.key() == Qt.Key_Control and not ev.isAutoRepeat():
+            self._ctrl_alone = True       # until another key says otherwise
         # Held keys (First Person): the press and the release are the
         # tool's; auto-repeat says nothing new.
         if self._tool_claims_key(ev):
@@ -11463,6 +11478,7 @@ class Viewport(QOpenGLWidget):
         claim on it lapses (issue #26)."""
         self._alt_tap = False
         self._alt_down = False        # its release will not reach us either
+        self._ctrl_alone = False      # nor will Ctrl's
         # Nor will the release of a held walking key (First Person).
         lost = getattr(self.active_tool, "on_focus_out", None)
         if callable(lost):

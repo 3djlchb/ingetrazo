@@ -92,13 +92,24 @@ def test_the_tape_leaves_a_guide_by_default():
     assert len(scene.guides) == 1
 
 
+def _tap(tool, vp):
+    """A Ctrl tap: the Tape switches on the release of a Ctrl pressed
+    alone (#183), so a press alone does nothing yet."""
+    vp._ctrl_alone = True                 # what the viewport's press records
+    pressed = tool.on_key(vp, Qt.Key_Control, Qt.NoModifier)
+    release = getattr(tool, "on_key_release", None)
+    if release is None:                   # Protractor, Rotate: on the press
+        return pressed
+    return release(vp, Qt.Key_Control)
+
+
 def test_ctrl_cycles_the_tape_through_the_three_sketchup_modes():
     scene = Scene()
     vp = _Vp(scene, _edge(V(0, 0), V(4, 0)))
     tool = TapeMeasureTool()
     assert tool._mode == "line"
     for expected in ("point", "measure", "line"):
-        assert tool.on_key(vp, Qt.Key_Control, Qt.NoModifier)
+        assert _tap(tool, vp)
         assert tool._mode == expected
 
 
@@ -106,7 +117,7 @@ def test_the_middle_mode_drops_a_guide_POINT():
     scene = Scene()
     vp = _Vp(scene, _edge(V(0, 0), V(4, 0)))
     tool = TapeMeasureTool()
-    tool.on_key(vp, Qt.Key_Control, Qt.NoModifier)     # → points
+    _tap(tool, vp)     # → points
     tool.on_click(_ctx(vp, 1, 0))
     tool.on_click(_ctx(vp, 1, 2))
     assert len(scene.guides) == 1
@@ -119,7 +130,7 @@ def test_a_typed_distance_places_the_point_exactly():
     scene = Scene()
     vp = _Vp(scene, _edge(V(0, 0), V(4, 0)))
     tool = TapeMeasureTool()
-    tool.on_key(vp, Qt.Key_Control, Qt.NoModifier)     # → points
+    _tap(tool, vp)     # → points
     tool.on_click(_ctx(vp, 0, 0))
     tool.on_hover(_ctx(vp, 0, 1))                      # pointing up +Y
     assert tool.on_value(vp, 2.5)
@@ -131,8 +142,8 @@ def test_ctrl_turns_the_tape_into_a_plain_ruler():
     scene = Scene()
     vp = _Vp(scene, _edge(V(0, 0), V(4, 0)))
     tool = TapeMeasureTool()
-    tool.on_key(vp, Qt.Key_Control, Qt.NoModifier)     # → points
-    tool.on_key(vp, Qt.Key_Control, Qt.NoModifier)     # → measure
+    _tap(tool, vp)     # → points
+    _tap(tool, vp)     # → measure
     assert tool._guides is False
     tool.on_click(_ctx(vp, 1, 0))
     tool.on_click(_ctx(vp, 1, 2))
@@ -149,7 +160,7 @@ def test_picking_the_tool_up_starts_in_guide_mode():
     vp = _Vp(scene, _edge(V(0, 0), V(4, 0)))
     for tool in (TapeMeasureTool(), ProtractorTool()):
         while tool._guides:                    # walk to the measure-only mode
-            tool.on_key(vp, Qt.Key_Control, Qt.NoModifier)
+            _tap(tool, vp)
         tool.on_activate(vp)
         assert tool._guides is True, type(tool).__name__
 
@@ -163,7 +174,7 @@ def test_the_cursor_says_which_mode_it_is_in():
         tool.on_activate(vp)
         assert tool.cursor_plus is True, type(tool).__name__
         while tool._guides:
-            tool.on_key(vp, Qt.Key_Control, Qt.NoModifier)
+            _tap(tool, vp)
         assert tool.cursor_plus is False, type(tool).__name__
 
 
@@ -172,14 +183,14 @@ def test_the_tape_toggle_survives_the_operation():
     scene = Scene()
     vp = _Vp(scene, _edge(V(0, 0), V(4, 0)))
     tool = TapeMeasureTool()
-    tool.on_key(vp, Qt.Key_Control, Qt.NoModifier)   # → points
-    tool.on_key(vp, Qt.Key_Control, Qt.NoModifier)   # → measure
+    _tap(tool, vp)   # → points
+    _tap(tool, vp)   # → measure
     tool.on_click(_ctx(vp, 1, 0))
     tool.on_click(_ctx(vp, 1, 2))
     tool.on_click(_ctx(vp, 1, 0))          # a second measurement
     tool.on_click(_ctx(vp, 1, 3))
     assert scene.guides == []
-    tool.on_key(vp, Qt.Key_Control, Qt.NoModifier)   # …until it comes round
+    _tap(tool, vp)   # …until it comes round
     assert tool._mode == "line"
 
 
@@ -205,7 +216,7 @@ def test_ctrl_turns_the_protractor_into_a_plain_protractor():
     scene = Scene()
     vp = _Vp(scene)
     tool = ProtractorTool()
-    assert tool.on_key(vp, Qt.Key_Control, Qt.NoModifier)
+    assert _tap(tool, vp)
     assert tool._guides is False
     _measure(vp, tool)
     assert scene.guides == [], "measure only: nothing left behind"
@@ -235,7 +246,7 @@ def test_the_status_bar_keeps_the_ctrl_clause_up():
         seen = []
         for _ in range(3):
             seen.append(win.status_hint)
-            tool.on_key(vp, Qt.Key_Control, Qt.NoModifier)
+            _tap(tool, vp)
         assert all("Ctrl =" in t for t in seen)
         assert len(set(seen)) == 3, "the clause must change with the mode"
         assert seen[0].index("[") < seen[1].index("[") < seen[2].index("[")
@@ -274,6 +285,40 @@ def test_ctrl_still_means_COPY_on_rotate():
     scene.selection = [scene.mesh.faces[0]]
     vp = _Vp(scene)
     tool = RotateTool()
-    assert tool.on_key(vp, Qt.Key_Control, Qt.NoModifier)
+    assert _tap(tool, vp)
     assert tool._copy is True
     assert not hasattr(tool, "_guides") or tool._guides is True
+
+
+def test_ctrl_as_part_of_a_shortcut_leaves_the_mode_alone():
+    """#183 (Alejandro Limón): Ctrl+Z to undo a guide switched the Tape's
+    mode without a word. Only a Ctrl pressed and released ALONE toggles."""
+    scene = Scene()
+    vp = _Vp(scene, _edge(V(0, 0), V(4, 0)))
+    tool = TapeMeasureTool()
+    before = tool._mode
+    tool.on_key(vp, Qt.Key_Control, Qt.NoModifier)
+    assert tool._mode == before                 # the press alone: nothing yet
+    vp.ctrl_tapped = lambda: False              # a Z came between (Ctrl+Z)
+    assert tool.on_key_release(vp, Qt.Key_Control) is False
+    assert tool._mode == before
+    vp.ctrl_tapped = lambda: True               # a clean tap
+    tool.on_key(vp, Qt.Key_Control, Qt.NoModifier)
+    assert tool.on_key_release(vp, Qt.Key_Control) is True
+    assert tool._mode != before
+
+
+def test_the_viewport_knows_a_ctrl_tap_from_ctrl_z():
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QKeyEvent
+    from PySide6.QtWidgets import QApplication
+    if QApplication.instance() is None:
+        QApplication([])
+    from views.viewport import Viewport
+    vp = Viewport(None)
+    vp.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_Control, Qt.ControlModifier))
+    assert vp.ctrl_tapped()
+    vp.event(QKeyEvent(QEvent.ShortcutOverride, Qt.Key_Z, Qt.ControlModifier, "z"))
+    assert not vp.ctrl_tapped()                 # Ctrl+Z: not a tap
+    vp.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_Control, Qt.ControlModifier))
+    assert vp.ctrl_tapped()                     # a fresh press re-arms it

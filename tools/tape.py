@@ -123,21 +123,34 @@ class TapeMeasureTool(Tool):
     # ---- Keyboard -----------------------------------------------------------
     def on_key(self, viewport, key: int, modifiers) -> bool:
         # Ctrl toggles guide creation (SketchUp: the Tape either measures or
-        # leaves a guide, and the cursor shows a + when it will).
+        # leaves a guide, and the cursor shows a + when it will) -- on the
+        # RELEASE of a Ctrl pressed alone. On the press, Ctrl+Z switched
+        # the mode too, silently (Alejandro Limón, #183).
         if key == Qt.Key_Control:
-            names = [m for m, _lbl in self._MODES]
-            self._mode = names[(names.index(self._mode) + 1) % len(names)]
-            viewport.flash_status(
-                tr(dict(self._MODES)[self._mode]))
-            apply = getattr(viewport, "_apply_tool_cursor", None)
-            if apply is not None:
-                apply()                  # the + appears or disappears now
-            hint = getattr(viewport, "refresh_status_hint", None)
-            if hint is not None:
-                hint()                   # the clause says the new mode
-            viewport.update()
             return True
         return super().on_key(viewport, key, modifiers)
+
+    def on_key_release(self, viewport, key: int) -> bool:
+        if key != Qt.Key_Control:
+            return False
+        tapped = getattr(viewport, "ctrl_tapped", None)
+        if callable(tapped) and not tapped():
+            return False                 # Ctrl was part of a shortcut
+        self._toggle_mode(viewport)
+        return True
+
+    def _toggle_mode(self, viewport) -> None:
+        names = [m for m, _lbl in self._MODES]
+        self._mode = names[(names.index(self._mode) + 1) % len(names)]
+        viewport.flash_status(
+            tr(dict(self._MODES)[self._mode]))
+        apply = getattr(viewport, "_apply_tool_cursor", None)
+        if apply is not None:
+            apply()                  # the + appears or disappears now
+        hint = getattr(viewport, "refresh_status_hint", None)
+        if hint is not None:
+            hint()                   # the clause says the new mode
+        viewport.update()
 
     # ---- Spatial input ------------------------------------------------------
     def on_click(self, ctx: ToolContext) -> None:
