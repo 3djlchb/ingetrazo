@@ -322,6 +322,24 @@ def _closest_on_segment_2d(
     return math.hypot(px - qx, py - qy), t
 
 
+def _on_edge_point(edge, t: float,
+                   project_onto_line: Optional[ProjectOntoLine]) -> QVector3D:
+    """The point of ``edge`` under the cursor, given the screen parameter
+    ``t`` from :func:`_closest_on_segment_2d`. Under perspective ``t`` is
+    not the world parameter: on a long edge — a construction guide is tens
+    of metres once clipped to the view — lerping it put the «hovered» point
+    metres away and off screen, so a lock line could never take a guide's
+    height (issue #166, @pacaeiro: Shift on the blue axis, hover the guide).
+    Through the cursor ray instead, as rule 7 does, when the caller has it."""
+    ab = edge.b - edge.a
+    if project_onto_line is not None and ab.length() > 1e-9:
+        proj = project_onto_line(edge.a, ab)
+        if proj is not None:
+            tt = QVector3D.dotProduct(proj - edge.a, ab) / QVector3D.dotProduct(ab, ab)
+            return edge.a + ab * max(0.0, min(1.0, tt))
+    return edge.a + ab * t
+
+
 def _line_segment_intersection(
     p: QVector3D, u: QVector3D, a: QVector3D, b: QVector3D, tol: float = 1e-3
 ) -> Optional[QVector3D]:
@@ -839,6 +857,7 @@ def _from_point_snap(
     scene, start_point, draw_dir, cx, cy, world_to_pixel, threshold_px,
     is_occluded, extra_point=None, axis_deg: float = 10.0,
     hovered_refs: bool = False, line_dir: Optional[QVector3D] = None,
+    project_onto_line: Optional[ProjectOntoLine] = None,
 ) -> Optional[SnapResult]:
     """'From point' inference ("Desde el punto"), the single clean version.
 
@@ -911,7 +930,7 @@ def _from_point_snap(
                 continue
             d, t = _closest_on_segment_2d((cx, cy), pa, pb)
             if d <= threshold_px and (best_edge is None or d < best_edge[0]):
-                best_edge = (d, edge.a + (edge.b - edge.a) * t)
+                best_edge = (d, _on_edge_point(edge, t, project_onto_line))
         if best_edge is not None:
             refs.append((best_edge[1], "from_point", COLOR_ENDPOINT, True))
 
@@ -1079,6 +1098,7 @@ def _intersection_snap(
 def _lock_line_snaps(
     scene, start_point, line_dir, cx, cy, world_to_pixel, threshold_px,
     is_occluded, acquired_point, chain_first_point=None,
+    project_onto_line=None,
 ) -> Optional[SnapResult]:
     """What a directional lock still lets you fetch, in order: the chain's
     own first point (closing), a vertex sitting ON the lock line, the
@@ -1141,6 +1161,7 @@ def _lock_line_snaps(
         scene, start_point, line_dir, cx, cy, world_to_pixel,
         threshold_px, is_occluded, extra_point=acquired_point,
         hovered_refs=True, line_dir=line_dir,
+        project_onto_line=project_onto_line,
     )
 
 
@@ -1215,6 +1236,7 @@ def compute_snap(
         hit = _lock_line_snaps(
             scene, start_point, axis_dir, cx, cy, world_to_pixel,
             threshold_px, is_occluded, acquired_point, chain_first_point,
+            project_onto_line,
         )
         if hit is not None:
             return hit
@@ -1246,6 +1268,7 @@ def compute_snap(
         hit = _lock_line_snaps(
             scene, start_point, lock_dir, cx, cy, world_to_pixel,
             threshold_px, is_occluded, acquired_point, chain_first_point,
+            project_onto_line,
         )
         if hit is not None:
             return hit
@@ -1269,6 +1292,7 @@ def compute_snap(
                 scene, start_point, direction, candidate_pixel[0],
                 candidate_pixel[1], world_to_pixel, threshold_px,
                 is_occluded, acquired_point, chain_first_point,
+                project_onto_line,
             )
             if hit is not None:
                 return hit
@@ -1293,6 +1317,7 @@ def compute_snap(
             hit = _lock_line_snaps(
                 scene, start_point, axis_dir, cx3, cy3, world_to_pixel,
                 threshold_px, is_occluded, acquired_point, chain_first_point,
+                project_onto_line,
             )
             if hit is not None:
                 return hit
