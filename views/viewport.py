@@ -9408,7 +9408,12 @@ class Viewport(QOpenGLWidget):
             arcs = getattr(self, "_arc_midpoints", None)
             if arcs is not None:
                 near += arcs(px, py)
-        near += self._selection_box_points()
+        box_pts = self._selection_box_points()
+        if excl is not None and excl[1]:
+            # A selected group's box corners are the group itself: Scale
+            # dragging it must not land its grip on its own box (#233).
+            box_pts = self._selection_box_points(skip=excl[1])
+        near += box_pts
         valid = getattr(self, "_valid_center_ref", None)   # stub VPs in tests
         ref = valid() if callable(valid) else None
         if ref is not None:
@@ -9724,7 +9729,7 @@ class Viewport(QOpenGLWidget):
         self._center_ref = fresh
         return fresh
 
-    def _selection_box_points(self) -> list:
+    def _selection_box_points(self, skip=()) -> list:
         """The corners of a selected group's bounding box, as degenerate
         pseudo-edges so the snap engine offers them as endpoints.
 
@@ -9737,6 +9742,8 @@ class Viewport(QOpenGLWidget):
         pts: list = []
         for ent in self.scene.selection:
             if not isinstance(ent, Group) or getattr(ent, "billboard", False):
+                continue
+            if id(ent) in skip:
                 continue
             from core.group import oriented_box_corners
             for p in oriented_box_corners(*self._group_obb(ent)):
