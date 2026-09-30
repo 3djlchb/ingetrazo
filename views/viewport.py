@@ -5541,8 +5541,14 @@ class Viewport(QOpenGLWidget):
         cam = tuple(cam.data())
         moving = getattr(self, "_sil_cam", None) not in (None, cam)
         self._sil_cam = cam
-        if moving and getattr(self, "_sil_cost", 0.0) > 0.03:
-            wait = 0.2 + (now - last[1] if last else 0.0)
+        if moving:
+            self._sil_cam_t = now
+        # «Stopped» means 600 ms without a camera change: a run of wheel
+        # notches is a string of short pauses, and re-deriving after each
+        # one blocked the next notch (live profile, #158).
+        still = now - getattr(self, "_sil_cam_t", 0.0)
+        if getattr(self, "_sil_cost", 0.0) > 0.03 and still < 0.6:
+            wait = (now - last[1] if last else 0.0) + (0.6 - still)
         if last is not None and last[0] == key and now - last[1] < wait:
             if getattr(self, "_sil_refresh_booked", False) is False:
                 from PySide6.QtCore import QTimer
@@ -8701,7 +8707,7 @@ class Viewport(QOpenGLWidget):
     #: index is exactly what it always was.
     _PICK_LAZY_MIN_FACES = 1_000_000
     #: How many faces of lazy placements the index keeps baked at once.
-    _PICK_LIVE_MAX_FACES = 2_000_000
+    _PICK_LIVE_MAX_FACES = 600_000
     #: Screen margin, in pixels, around the cursor for «near the cursor».
     _PICK_NEAR_PX = 32.0
 
@@ -11853,7 +11859,13 @@ class Viewport(QOpenGLWidget):
             else None
         if seen is not None and seen[0] == "hit":
             return seen[1]
-        idx = self._pick_index(near=("px", x, y)) if seen is None else None
+        # No frame to read (wheel notches faster than paints): on a huge
+        # model the ray against the index cost 2 s a notch (live profile,
+        # #158) — the ground and focal planes below answer at once.
+        huge = (seen is None and hasattr(self, "_pick_lazy_table")
+                and self._pick_lazy_table() is not None)
+        idx = (self._pick_index(near=("px", x, y))
+               if seen is None and not huge else None)
         if idx is not None and idx.entities:
             import numpy as np
             t = self._ray_hits(idx, origin, direction, idx.ent_vis,

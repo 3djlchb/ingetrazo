@@ -430,9 +430,17 @@ class MainWindow(QMainWindow):
         from PySide6.QtWidgets import QApplication
         # Housekeeping that rides the same slow tick: a clean collection
         # now and then — never mid-gesture (over a big model it is ~0.3 s).
-        if getattr(self.viewport, "_last_pos", None) is None:
+        if getattr(self.viewport, "_last_pos", None) is None \
+                and not getattr(self, "_gc_too_slow", False):
             import gc
+            import time
+            t0 = time.perf_counter()
             gc.collect()
+            # On a model of 14 million faces a full collection froze the
+            # app for 4.5 s every five minutes (live profile, #158): once
+            # one takes that long, the housekeeping stops for the session.
+            if time.perf_counter() - t0 > 0.5:
+                self._gc_too_slow = True
         if not self._is_dirty():
             return
         if self._workspace is not None:
