@@ -62,6 +62,9 @@ CONTRIBUTORS = [
     ("deedend",
      "Italian translation of the interface.",
      "https://github.com/deedend"),
+    ("Rainjalin",
+     "Indonesian translation of the interface.",
+     "https://github.com/Rainjalin"),
     ("Carlos Martins",
      "Bug reports with videos that pinned down guides, group paint and "
      "exploded groups.",
