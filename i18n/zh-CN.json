@@ -2436,5 +2436,7 @@
  "Show or hide this tab of the side tray.": "显示或隐藏侧边面板的此选项卡。",
  "Start the local bridge through which an AI agent (MCP) drives the open document.": "启动本地网桥，AI 代理 (MCP) 通过它操作打开的文档。",
  "Flip Along": "沿轴翻转",
- "Blue axis": "蓝色轴"
+ "Blue axis": "蓝色轴",
+ "Name:": "名称：",
+ "The name of the selected group or component — Enter keeps it": "所选组或组件的名称；按 Enter 保存"
 }

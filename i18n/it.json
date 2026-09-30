@@ -2437,5 +2437,7 @@
  "Work the faces out again from the edges: on the plane of the selected faces, or over the whole drawing when it is flat.": "Ricalcola le facce dagli spigoli: sul piano delle facce selezionate, o su tutto il disegno quando è piano.",
  "Wrap the selection in a group that moves as one and keeps apart from the geometry around it.": "Racchiude la selezione in un gruppo che si sposta come uno solo e resta separato dalla geometria circostante.",
  "Flip Along": "Rifletti lungo",
- "Blue axis": "Asse blu"
+ "Blue axis": "Asse blu",
+ "Name:": "Nome:",
+ "The name of the selected group or component — Enter keeps it": "Il nome del gruppo o componente selezionato; Invio lo conferma"
 }

@@ -2926,6 +2926,20 @@ class EntityInfoPanel(QWidget):
         self._label.setTextFormat(Qt.RichText)
         self._label.setStyleSheet("font-size: 12px;")
         lay.addWidget(self._label)
+        # The name of ONE group or component, edited here — where everyone
+        # looks for it (issue #214: «there seems to be no way to name this
+        # group»). The Parts panel could already rename, out of sight.
+        from PySide6.QtWidgets import QLineEdit
+        name_row = QHBoxLayout()
+        self._name_caption = QLabel(tr("Name:"))
+        self._name_edit = QLineEdit()
+        self._name_edit.setToolTip(
+            tr("The name of the selected group or component — Enter keeps it"))
+        self._name_edit.editingFinished.connect(self._on_name_edited)
+        name_row.addWidget(self._name_caption)
+        name_row.addWidget(self._name_edit, 1)
+        lay.addLayout(name_row)
+        self._named = None               # the group the field is showing
         row = QHBoxLayout()
         self._layer_caption = QLabel(tr("Layer:"))
         self._layer_box = QComboBox()
@@ -2941,7 +2955,8 @@ class EntityInfoPanel(QWidget):
         # library) slid up and down with every click (Marco, 23-09, four
         # screenshots). The layer row keeps its place when hidden, and the
         # text keeps room for the four lines a face or a solid shows.
-        for w in (self._layer_caption, self._layer_box):
+        for w in (self._layer_caption, self._layer_box,
+                  self._name_caption, self._name_edit):
             pol = w.sizePolicy()
             pol.setRetainSizeWhenHidden(True)
             w.setSizePolicy(pol)
@@ -2951,11 +2966,39 @@ class EntityInfoPanel(QWidget):
         self._label.setMinimumHeight(QFontMetrics(font).lineSpacing() * 4 + 4)
         self._layer_caption.hide()
         self._layer_box.hide()
+        self._name_caption.hide()
+        self._name_edit.hide()
 
     def refresh(self) -> None:
         sel = list(self._window.viewport.scene.selection)
         self._label.setText(self._describe(sel))
+        self._refresh_name(sel)
         self._refresh_layer(sel)
+
+    # ---- Name field ---------------------------------------------------------
+    def _refresh_name(self, sel: list) -> None:
+        one = sel[0] if len(sel) == 1 and isinstance(sel[0], Group) else None
+        self._name_caption.setVisible(one is not None)
+        self._name_edit.setVisible(one is not None)
+        changed = one is not self._named
+        self._named = one
+        if one is None:
+            return
+        # Not while typing into it — unless the selection moved on.
+        if changed or not self._name_edit.hasFocus():
+            self._name_edit.setText(one.name or "")
+
+    def _on_name_edited(self) -> None:
+        group = self._named
+        if group is None:
+            return
+        name = self._name_edit.text().strip()
+        if not name or name == (group.name or ""):
+            self._name_edit.setText(group.name or "")    # empty: keep it
+            return
+        from core.history import RenameGroupCommand
+        self._window.viewport.history.execute(RenameGroupCommand(group, name))
+        self._window.viewport.update()
 
     # ---- Layer field --------------------------------------------------------
     def _refresh_layer(self, sel: list) -> None:
@@ -3038,7 +3081,6 @@ class EntityInfoPanel(QWidget):
                     title = (tr("Solid Component") if vol is not None
                              else tr("Component"))
                     return (f"<b>{title}</b><br>"
-                            f"{tr('Name')}: {e.name}<br>"
                             f"{tr('Faces')}: {len(e.mesh.faces)}<br>"
                             f"{tr('In model')}: {kin}{solid}")
                 title = tr("Solid Group") if vol is not None else tr("Group")

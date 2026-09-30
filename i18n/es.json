@@ -2436,5 +2436,7 @@
  "Show or hide this tab of the side tray.": "Muestra u oculta esta pestaña del panel lateral.",
  "Start the local bridge through which an AI agent (MCP) drives the open document.": "Inicia el puente local por el que un agente de IA (MCP) maneja el documento abierto.",
  "Flip Along": "Voltear en",
- "Blue axis": "Eje azul"
+ "Blue axis": "Eje azul",
+ "Name:": "Nombre:",
+ "The name of the selected group or component — Enter keeps it": "El nombre del grupo o componente seleccionado; Enter lo guarda"
 }
