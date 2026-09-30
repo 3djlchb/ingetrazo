@@ -16,7 +16,8 @@ Face modes (Face Styles):
 - ``monochrome``  Flat default front/back colours, no materials — the
                   reversed-face checker.
 - ``wireframe``   Edges only, no faces (nothing occludes).
-- ``xray``        Everything translucent, edges always visible.
+- ``xray``        Everything translucent, edges always visible — the ones
+                  behind a face washed toward the background.
 
 Deferred (documented, not lost): back edges, depth cue, extensions,
 endpoints, jitter, watermarks, per-material edge colour.

@@ -213,6 +213,7 @@ GL_CULL_FACE = 0x0B44
 GL_FRONT = 0x0404
 GL_BACK = 0x0405
 GL_LEQUAL = 0x0203
+GL_GREATER = 0x0204
 GL_FALSE = 0
 GL_TRUE = 1
 GL_FRAMEBUFFER = 0x8D40
@@ -333,6 +334,14 @@ EDIT_REST_MODES = ("normal", "fade", "hide")
 #: the group in its surroundings, faint enough that what you are editing reads
 #: as the subject.
 EDIT_REST_FADE = 0.75
+
+#: X-ray: how opaque each translucent face layer is. Layers stack, so a face
+#: seen through another reads darker and an opening (no face) stays clear.
+XRAY_FACE_OPACITY = 0.6
+#: X-ray: edges hidden behind a face are washed this far toward the
+#: background (0 = like a visible edge, 1 = gone), so the form still reads
+#: and you can tell which edges have a face in front of them.
+XRAY_HIDDEN_EDGE_FADE = 0.6
 
 #: Dot colour of a SELECTED face (the usual selection orange) and the one it
 #: switches to on a surface that is itself orange/red, where orange dots
@@ -1539,7 +1548,8 @@ class Viewport(QOpenGLWidget):
             if mode == "xray":
                 # X-ray: translucent faces that do not occlude — edges stay
                 # fully visible because nothing writes depth.
-                self._program.setUniformValue1f(self._loc_opacity, 0.55)
+                self._program.setUniformValue1f(self._loc_opacity,
+                                                XRAY_FACE_OPACITY)
                 self._gl.glDepthMask(GL_FALSE)
             self._faces_vao.bind()
             if split_f is None:
@@ -1620,7 +1630,8 @@ class Viewport(QOpenGLWidget):
             self._gl.glPolygonOffset(1.0, 1.0)
             self._program.setUniformValue(self._loc_use_tex, 1)
             if mode == "xray":
-                self._program.setUniformValue1f(self._loc_opacity, 0.55)
+                self._program.setUniformValue1f(self._loc_opacity,
+                                                XRAY_FACE_OPACITY)
                 self._gl.glDepthMask(GL_FALSE)
             self._tex_faces_vao.bind()
             run_parts = getattr(self, "_tex_run_parts", None)
@@ -1964,12 +1975,32 @@ class Viewport(QOpenGLWidget):
         # sub-pixel offsets to reach it — exports only, never the screen.
         _jit_e = self._line_jitter(self._export_edge_px, w, h)
         _jit_p = self._line_jitter(self._export_profile_px, w, h)
-        for _dx, _dy in _jit_e:
-            if _dx or _dy:
+        # X-ray draws every edge, but the ones BEHIND a face come out washed
+        # toward the background: the faces' depth (never written by their
+        # translucent pass) is laid down here, the edges beyond it drawn
+        # first in the faded colour, then the ones in front at full strength.
+        # From above, an open box keeps every edge dark and a lidded one
+        # greys the edges under the lid — you see whether a face is there.
+        xray_edges = mode == "xray" and show_edges
+        if xray_edges:
+            self._xray_face_depth()
+            bg = style.background
+            k = XRAY_HIDDEN_EDGE_FADE
+            _edge_passes = ((tuple(ec[i] + (bg[i] - ec[i]) * k
+                                   for i in range(3)), True),
+                            (tuple(ec[:3]), False))
+        else:
+            _edge_passes = ((tuple(ec[:3]), False),)
+        for (_ecol, _hidden), (_dx, _dy) in (
+                (_p, _j) for _p in _edge_passes for _j in _jit_e):
+            if xray_edges:
+                self._gl.glDepthFunc(GL_GREATER if _hidden else GL_LEQUAL)
+                self._gl.glDepthMask(GL_FALSE if _hidden else GL_TRUE)
+            if len(_jit_e) > 1:
                 self._program.setUniformValue(self._loc_mvp,
                                               _shifted_mvp(mvp, _dx, _dy))
             if self._edges_count > 0 and show_edges:
-                self._set_color(ec[0], ec[1], ec[2], 1.0)
+                self._set_color(*_ecol, 1.0)
                 self._edges_vao.bind()
                 _espans = getattr(self, "_frame_edge_spans",
                                   ((0, self._edges_count),))
@@ -1991,8 +2022,14 @@ class Viewport(QOpenGLWidget):
                             self._gl.glDrawArrays(GL_LINES, _vs, _vc)
                 self._edges_vao.release()
             if show_edges:
-                self._set_color(ec[0], ec[1], ec[2], 1.0)
+                self._set_color(*_ecol, 1.0)
                 self._draw_instanced_edges()
+        if xray_edges:
+            # Back to X-ray's depth: the faces never occlude, so selected
+            # and hovered edges behind them still show.
+            self._gl.glDepthFunc(GL_LEQUAL)
+            self._gl.glDepthMask(GL_TRUE)
+            self._gl.glClear(GL_DEPTH_BUFFER_BIT)
         if len(_jit_e) > 1:
             self._program.setUniformValue(self._loc_mvp, mvp)
 
@@ -2690,7 +2727,8 @@ class Viewport(QOpenGLWidget):
         self._gl.glEnable(GL_POLYGON_OFFSET_FILL)
         self._gl.glPolygonOffset(1.0, 1.0)
         if mode == "xray":
-            self._program.setUniformValue1f(self._loc_opacity, 0.55)
+            self._program.setUniformValue1f(self._loc_opacity,
+                                            XRAY_FACE_OPACITY)
             self._gl.glDepthMask(GL_FALSE)
         for mesh, paint, groups in by_proto.values():
             entry = self._ensure_proto_draw(mesh, paint)
@@ -2791,6 +2829,25 @@ class Viewport(QOpenGLWidget):
                 for _tk, s0, cnt in entry["tex_runs"]:
                     extra.glDrawArraysInstanced(GL_TRIANGLES, s0, cnt, n)
                 entry["tex_vao"].release()
+
+    def _xray_face_depth(self) -> None:
+        """Write every face's depth and no colour — X-ray's translucent
+        face pass leaves the depth buffer without them. Same polygon offset
+        as the faces, so an edge lying ON a face still counts as in front."""
+        self._gl.glColorMask(False, False, False, False)
+        self._gl.glEnable(GL_POLYGON_OFFSET_FILL)
+        self._gl.glPolygonOffset(1.0, 1.0)
+        if self._faces_count > 0:
+            self._faces_vao.bind()
+            self._gl.glDrawArrays(GL_TRIANGLES, 0, self._faces_count)
+            self._faces_vao.release()
+        if self._tex_faces_count > 0:
+            self._tex_faces_vao.bind()
+            self._gl.glDrawArrays(GL_TRIANGLES, 0, self._tex_faces_count)
+            self._tex_faces_vao.release()
+        self._draw_instanced_raw()
+        self._gl.glDisable(GL_POLYGON_OFFSET_FILL)
+        self._gl.glColorMask(True, True, True, True)
 
     def _draw_instanced_edges(self) -> None:
         by_proto = getattr(self, "_frame_instanced", None)
