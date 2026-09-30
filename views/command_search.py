@@ -626,21 +626,17 @@ class CommandSearch(QFrame):
 
 
 def warm_up(window, delay_ms: int = 2000) -> None:
-    """Get F3 ready while the window idles after opening — the box made
-    with its native window, the commands worked out — so even the first
-    F3 shows at once instead of its shadow first and the list after."""
+    """Work out F3's command list while the window idles after opening,
+    so even the first F3 shows its list at once.
+
+    Only the list — pure Python. The box and its native popup are made on
+    the first F3, as they always were up to 0.5.6.1: made ahead, the popup
+    left the main window flickering under GNOME's Wayland, a black band
+    and the toolbar drawn half over the menu bar (Marco, 30-09, bisected
+    to ``box.winId()`` here; it only shows with two monitors, when
+    IngeTrazo runs on Wayland). Kept off on every platform until it has
+    been tried on each."""
     def ready() -> None:
-        from PySide6.QtGui import QGuiApplication
-        box = getattr(window, "_command_search", None)
-        if box is None:
-            box = window._command_search = CommandSearch(window)
-        # The native popup, now — except on Wayland: a popup surface made
-        # there before it is ever shown left the main window flickering
-        # under GNOME, a black band and the toolbar drawn half over the
-        # menu bar (Marco, 30-09, found by bisecting to this line). The
-        # command list, the part that took the time, is still ready.
-        if not QGuiApplication.platformName().startswith("wayland"):
-            box.winId()
         commands(window)
     QTimer.singleShot(delay_ms, window, ready)
 

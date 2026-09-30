@@ -488,25 +488,25 @@ def test_a_removed_action_leaves_the_cache(ventana):
     assert act not in ventana._command_cache
 
 
-def test_warm_up_makes_the_box_and_the_commands_before_f3(ventana):
+def test_warm_up_works_out_the_commands_before_f3(ventana):
     ventana._command_search = None
     ventana._command_cache = None
     cs.warm_up(ventana, 0)
     QTest.qWait(50)
-    assert ventana._command_search is not None
     assert ventana._command_cache
+    # the box itself waits for F3, as up to 0.5.6.1
+    assert ventana._command_search is None
 
 
-@pytest.mark.parametrize("platform, native", [("wayland", False),
-                                               ("wayland-egl", False),
-                                               ("xcb", True),
-                                               ("windows", True)])
-def test_warm_up_makes_no_native_popup_on_wayland(ventana, monkeypatch,
-                                                  platform, native):
-    """On Wayland a popup surface made before it is shown left the main
-    window flickering under GNOME (a black band, the toolbar half over the
-    menu bar; Marco, 30-09, bisected to the warm-up). There the commands
-    are still worked out; only the native window waits for F3."""
+@pytest.mark.parametrize("platform", ["wayland", "wayland-egl", "xcb",
+                                      "windows", "cocoa"])
+def test_warm_up_makes_no_native_popup_ahead_of_f3(ventana, monkeypatch,
+                                                   platform):
+    """Made ahead of F3, the popup's native window left the main window
+    flickering under GNOME's Wayland (a black band, the toolbar half over
+    the menu bar; Marco, 30-09, bisected to the warm-up). Off everywhere
+    until tried on each platform: the commands are still worked out, the
+    native window waits for the first F3."""
     from PySide6.QtGui import QGuiApplication
     monkeypatch.setattr(QGuiApplication, "platformName",
                         staticmethod(lambda: platform))
@@ -518,7 +518,7 @@ def test_warm_up_makes_no_native_popup_on_wayland(ventana, monkeypatch,
     cs.warm_up(ventana, 0)
     QTest.qWait(50)
     assert ventana._command_cache
-    assert bool(made) is native
+    assert made == [] and ventana._command_search is None
 
 
 def test_every_command_says_what_it_does(ventana):
