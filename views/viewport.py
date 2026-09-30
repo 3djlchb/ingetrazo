@@ -3387,6 +3387,7 @@ class Viewport(QOpenGLWidget):
     _DOCUMENT_CACHES = ("_group_chunks", "_inst_chunks", "_fp_memo",
                         "_proto_wrappers", "_proto_draw", "_faceme_cache",
                         "_proto_pts_store", "_container_obb", "_placement_frames",
+                        "_pick_live",
                         # Also keyed by id(): a face-me's placed sprite, the
                         # nested-placement proxies and the arc midpoints per
                         # mesh. A group of the next document born at a dead
@@ -3426,6 +3427,8 @@ class Viewport(QOpenGLWidget):
         self._billboard_groups = None
         self._placements_memo = None
         self._epoch_same = None
+        self._pick_lazy_memo = None
+        self._pick_near_memo = None
 
     def reset_texture_cache(self) -> None:
         """Return the document's cached GL textures to the driver.
@@ -6495,7 +6498,7 @@ class Viewport(QOpenGLWidget):
         cached = getattr(self, "_section_cut_cache", None)
         if cached is not None and cached[0] == key:
             return cached[1]
-        idx = self._pick_index()
+        idx = self._pick_index(near="all")
         segs = None
         if idx.tri_v0 is not None and len(idx.tri_v0):
             nv = np.array([n.x(), n.y(), n.z()], dtype=np.float64)
@@ -8686,7 +8689,186 @@ class Viewport(QOpenGLWidget):
             [(bb, s, n) for bb, s, n, sub in parts if sub], planes)[0]
         return ctx, subj
 
-    def _pick_index(self):
+    #: Component placements holding more faces than this, all together,
+    #: switch the pick index to LAZY placements (issue #158): below it the
+    #: index is exactly what it always was.
+    _PICK_LAZY_MIN_FACES = 1_000_000
+    #: How many faces of lazy placements the index keeps baked at once.
+    _PICK_LIVE_MAX_FACES = 2_000_000
+    #: Screen margin, in pixels, around the cursor for «near the cursor».
+    _PICK_NEAR_PX = 32.0
+
+    def _pick_lazy_table(self):
+        """The component placements the pick index takes lazily — only when
+        a query comes near them — as ``(groups, lo, hi, nf, ids)``, or
+        ``None`` when they are too few to bother (the index then holds
+        everything, as it always did).
+
+        Baking every placement to world coordinates for the index was what
+        a model of 21 406 placements (14 million faces) could not survive:
+        the first hover with Select went past 8 GB (issue #158)."""
+        import numpy as np
+        key = self._placements_epoch()
+        memo = getattr(self, "_pick_lazy_memo", None)
+        if memo is not None and memo[0] == key:
+            return memo[1]
+        groups = [g for g in self._placements()
+                  if getattr(g, "xform", None) is not None
+                  and not getattr(g, "billboard", False)]
+        nf = np.fromiter((len(g.mesh.faces) for g in groups), np.int64,
+                         count=len(groups))
+        table = None
+        if int(nf.sum()) >= self._PICK_LAZY_MIN_FACES:
+            inf = float("inf")
+            lo = np.empty((len(groups), 3))
+            hi = np.empty((len(groups), 3))
+            for i, g in enumerate(groups):
+                box = self._placement_frame(g)[0]
+                lo[i], hi[i] = box if box else ((-inf,) * 3, (inf,) * 3)
+            table = (groups, lo, hi, nf, {id(g) for g in groups})
+        self._pick_lazy_memo = (key, table)
+        return table
+
+    def _pick_materialize(self, near) -> None:
+        """Bake into the pick index the lazy placements a query needs:
+        ``near`` = ``None`` (around the cursor), ``("px", x, y)`` (around a
+        widget pixel), ``("ray", origin, direction)`` or ``"all"``. What was
+        baked stays until the cap needs room (least recently needed first);
+        ``_pick_gen`` counts the changes, which key the index."""
+        import numpy as np
+        from collections import OrderedDict
+        table = self._pick_lazy_table()
+        live = getattr(self, "_pick_live", None)
+        if table is None:
+            if live:
+                live.clear()
+                self._pick_gen = getattr(self, "_pick_gen", 0) + 1
+            return
+        groups, lo, hi, nf, _ids = table
+        if live is None:
+            live = self._pick_live = OrderedDict()
+        if near == "all":
+            need = np.arange(len(groups))
+        elif isinstance(near, tuple) and near[0] == "ray":
+            o, d = near[1], near[2]
+            o = np.array([o.x(), o.y(), o.z()])
+            d = np.array([d.x(), d.y(), d.z()])
+            with np.errstate(divide="ignore", invalid="ignore"):
+                inv = 1.0 / np.where(np.abs(d) > 1e-12, d, 1e-12)
+                t1 = (lo - o) * inv
+                t2 = (hi - o) * inv
+            tmin = np.nanmax(np.minimum(t1, t2), axis=1)
+            tmax = np.nanmin(np.maximum(t1, t2), axis=1)
+            need = np.flatnonzero((tmax >= np.maximum(tmin, 0.0)))
+        else:
+            if near is None:
+                pos = getattr(self, "_last_mouse_pos", None)
+                if pos is None:
+                    return
+                x, y = float(pos.x()), float(pos.y())
+            else:
+                x, y = float(near[1]), float(near[2])
+            ckey = (self._placements_epoch(), round(x), round(y),
+                    tuple(self._np_mvp().ravel()))
+            cmemo = getattr(self, "_pick_near_memo", None)
+            if cmemo is not None and cmemo[0] == ckey:
+                need = cmemo[1]
+            else:
+                need = self._placements_under_px(lo, hi, x, y)
+                far = self._visible_depth_limit(x, y)
+                if far is not None and len(need):
+                    # What lies wholly behind what is on screen around the
+                    # cursor can be neither picked nor snapped to (hidden
+                    # snaps are dropped): a dense plant stacks thousands of
+                    # placements under one pixel (#158).
+                    e = self.camera.eye()
+                    e = np.array([e.x(), e.y(), e.z()])
+                    near_pt = np.clip(e, lo[need], hi[need])
+                    dist = np.linalg.norm(near_pt - e, axis=1)
+                    need = need[dist <= far]
+                self._pick_near_memo = (ckey, need)
+        changed = False
+        for i in need:
+            g = groups[int(i)]
+            k = id(g)
+            if k in live:
+                live.move_to_end(k)
+            else:
+                live[k] = (g, int(nf[int(i)]))
+                changed = True
+        faces = sum(v[1] for v in live.values())
+        if faces > self._PICK_LIVE_MAX_FACES and near != "all":
+            keep = {id(groups[int(i)]) for i in need}
+            inst = getattr(self, "_inst_chunks", None)
+            for k in list(live):
+                if faces <= self._PICK_LIVE_MAX_FACES:
+                    break
+                if k in keep:
+                    continue
+                faces -= live.pop(k)[1]
+                if inst is not None:
+                    inst.pop(k, None)     # its world bake goes with it
+                changed = True
+        if changed:
+            self._pick_gen = getattr(self, "_pick_gen", 0) + 1
+
+    def _visible_depth_limit(self, x: float, y: float):
+        """The farthest distance from the eye of what the last frame shows
+        within ``_PICK_NEAR_PX`` of widget pixel ``(x, y)``, with a margin —
+        or ``None`` when the frame cannot say (no read-back, the camera
+        moved since, or sky in the window: then anything may be there)."""
+        import numpy as np
+        if self._depth_world_at(x, y) is None:
+            return None
+        snap = self._depth_snap
+        buf, inv, w, h = snap[0], snap[2], snap[3], snap[4]
+        dpr = w / max(1, self.width())
+        r = int(self._PICK_NEAR_PX * dpr) + 1
+        cx, cy = int(x * dpr), int(h - 1 - y * dpr)
+        win = buf[max(cy - r, 0):cy + r + 1, max(cx - r, 0):cx + r + 1]
+        if not win.size or float(win.max()) >= 1.0:
+            return None
+        iy, ix = np.unravel_index(int(np.argmax(win)), win.shape)
+        px = max(cx - r, 0) + ix
+        py = max(cy - r, 0) + iy
+        d = float(win.max())
+        q = inv.map(QVector4D((px + 0.5) / w * 2 - 1, (py + 0.5) / h * 2 - 1,
+                              d * 2 - 1, 1.0))
+        if abs(q.w()) < 1e-12:
+            return None
+        far = (QVector3D(q.x() / q.w(), q.y() / q.w(), q.z() / q.w())
+               - self.camera.eye()).length()
+        return far * 1.02 + 0.05
+
+    def _placements_under_px(self, lo, hi, x, y):
+        """Indices of the boxes ``lo``/``hi`` whose screen footprint comes
+        within ``_PICK_NEAR_PX`` of widget pixel ``(x, y)``; a box that
+        crosses the eye plane counts (it can be anywhere on screen)."""
+        import numpy as np
+        M = self._np_mvp()
+        corners = np.stack([np.where(np.array([(i >> k) & 1 for k in range(3)],
+                                              bool), hi, lo)
+                            for i in range(8)], axis=1)          # (P, 8, 3)
+        finite = np.isfinite(corners).all(axis=(1, 2))
+        c = np.where(np.isfinite(corners), corners, 0.0)
+        clip = c @ M[:, :3].T + M[:, 3]                          # (P, 8, 4)
+        w = clip[..., 3]
+        front = w > 1e-9
+        ww = np.where(front, w, 1.0)
+        sx = (clip[..., 0] / ww * 0.5 + 0.5) * self.width()
+        sy = (1.0 - (clip[..., 1] / ww * 0.5 + 0.5)) * self.height()
+        big = 1e12
+        x0 = np.where(front, sx, big).min(axis=1)
+        x1 = np.where(front, sx, -big).max(axis=1)
+        y0 = np.where(front, sy, big).min(axis=1)
+        y1 = np.where(front, sy, -big).max(axis=1)
+        r = self._PICK_NEAR_PX
+        inside = (x0 - r <= x) & (x <= x1 + r) & (y0 - r <= y) & (y <= y1 + r)
+        straddle = front.any(axis=1) & ~front.all(axis=1)
+        return np.flatnonzero((inside & front.all(axis=1)) | straddle
+                              | ~finite)
+
+    def _pick_index(self, near=None):
         """Flat NumPy pick index of the scene — triangles of every loose and
         group face (with visibility/selectability masks and areas) plus the
         loose edges — rebuilt when the scene changes.
@@ -8694,7 +8876,14 @@ class Viewport(QOpenGLWidget):
         Every mouse-move pick used to walk the mesh in Python re-running
         earcut per face (~1–2 s per move against an imported 17k-triangle
         building — the app read as frozen); batched over this index a pick
-        is a couple of milliseconds."""
+        is a couple of milliseconds.
+
+        On a model whose component placements hold more than
+        ``_PICK_LAZY_MIN_FACES`` faces, those placements enter only when a
+        query comes near them (``near``, see ``_pick_materialize``): the
+        rest of the index is the same."""
+        if hasattr(self, "_pick_lazy_table"):
+            self._pick_materialize(near)
         oculto = getattr(self, "_rest_is_hidden", None)
         oculto = bool(oculto()) if callable(oculto) else False
         # The open context decides what a hit RESOLVES to (inside the
@@ -8702,7 +8891,7 @@ class Viewport(QOpenGLWidget):
         # kept answering "the plaza" after a double-click opened it, so the
         # arch inside never opened (Marco, 2026-09-14).
         key = (_cache_ver(self), id(self.scene.mesh), oculto,
-               id(self.scene.edit_group))
+               id(self.scene.edit_group), getattr(self, "_pick_gen", 0))
         cached = getattr(self, "_pick_index_cache", None)
         if cached is not None and cached[0] == key:
             return cached[1]
@@ -8784,6 +8973,13 @@ class Viewport(QOpenGLWidget):
         else:
             candidatos = [g for g in self._placements()
                           if g is not ctx and self._owner_of(g) is not ctx]
+        lazy = (self._pick_lazy_table()
+                if hasattr(self, "_pick_lazy_table") else None)
+        if lazy is not None:
+            live = getattr(self, "_pick_live", None) or {}
+            lazy_ids = lazy[4]
+            candidatos = [g for g in candidatos
+                          if id(g) not in lazy_ids or id(g) in live]
         if candidatos:
             # The group block is cached across versions (keyed by each
             # chunk's identity + rev + flags): re-deriving per-face masks and
@@ -8795,7 +8991,7 @@ class Viewport(QOpenGLWidget):
             # them changed (2026-09-14).
             epoch_of = getattr(self, "_placements_epoch", None)   # stub VPs in tests
             sig = (epoch_of() if epoch_of is not None else _cache_ver(self),
-                   oculto, len(candidatos))
+                   oculto, len(candidatos), getattr(self, "_pick_gen", 0))
             blk = getattr(self, "_pick_block", None)
             frozen = getattr(self, "_frozen_cache_version", None) is not None
             chunks = []
@@ -8845,7 +9041,15 @@ class Viewport(QOpenGLWidget):
                     n = len(chunk["faces"])
                     off = len(b_entities)
                     owner = self._owner_of(g)
-                    b_entities.extend((f, owner) for f in chunk["faces"])
+                    # A chunk keeps its (face, owner) list: the block is
+                    # rebuilt whenever the lazy placements change (#158),
+                    # and re-making a tuple per face of everything already
+                    # in it cost ~250 ms a hover on 14 million faces.
+                    ents = chunk.get("_pick_ents")
+                    if ents is None or ents[0] is not owner:
+                        ents = chunk["_pick_ents"] = (
+                            owner, [(f, owner) for f in chunk["faces"]])
+                    b_entities.extend(ents[1])
                     b_pidx.append(np.full(n, len(b_plist), dtype=np.int32))
                     b_plist.append(g)
                     b_area.append(chunk["areas"])
@@ -8860,8 +9064,13 @@ class Viewport(QOpenGLWidget):
                                         len(chunk["v0"])))
                         b_tri_off += len(chunk["v0"])
                     if gsnap and chunk["edges"]:
-                        ge = np.frombuffer(chunk["edges"], dtype=np.float32)
-                        ge = ge.reshape(-1, 2, 3).astype(np.float64)
+                        ge = chunk.get("_pick_ge")
+                        if ge is None or ge[0] is not chunk["edges"]:
+                            ge = chunk["_pick_ge"] = (
+                                chunk["edges"],
+                                np.frombuffer(chunk["edges"], dtype=np.float32)
+                                .reshape(-1, 2, 3).astype(np.float64))
+                        ge = ge[1]
                         b_gea.append(ge[:, 0])
                         b_geb.append(ge[:, 1])
                         b_ggi.append(np.full(len(ge), len(b_ggroups),
@@ -8985,7 +9194,7 @@ class Viewport(QOpenGLWidget):
         walkthrough tools ask — the floor under the eye, the wall ahead —
         over the same index every pick uses (hidden objects and hidden
         layers are not there to bump into)."""
-        idx = self._pick_index()
+        idx = self._pick_index(near=("ray", origin, direction))
         if idx is None or getattr(idx, "tri_v0", None) is None:
             return None
         t = self._ray_hits(idx, origin, direction, idx.ent_vis,
@@ -9116,7 +9325,7 @@ class Viewport(QOpenGLWidget):
     def _pick_edge(self, screen_x: float, screen_y: float,
                    visible_only: bool):
         import numpy as np
-        idx = self._pick_index()
+        idx = self._pick_index(near=("px", screen_x, screen_y))
         if idx.edge_a is None:
             return None
         ax, ay, oka = self._project_px(idx.edge_a)
@@ -9386,6 +9595,9 @@ class Viewport(QOpenGLWidget):
         hover, so feeding it ALL 160k edges of an import would freeze every
         mouse move; the ~dozens near the cursor cover the point/edge snaps
         the user can actually see."""
+        # The placements near THIS pixel enter the index first (lazy mode,
+        # #158): the projection below reads the index as it stands.
+        self._pick_index(near=("px", px, py))
         proj = self._gedge_screen()
         if proj is None:
             return []
@@ -9397,7 +9609,7 @@ class Viewport(QOpenGLWidget):
         cand = np.where(d < radius_px)[0]
         if len(cand) > cap:
             cand = cand[np.argsort(d[cand])[:cap]]
-        idx = self._pick_index()
+        idx = self._pick_index(near=("px", px, py))
         ga, gb = idx.gedge_a, idx.gedge_b
         return [_group_pseudo_edge(idx, int(i)) for i in cand]
 
@@ -9427,7 +9639,7 @@ class Viewport(QOpenGLWidget):
                 dl, _t = _closest_on_segment_2d((screen_x, screen_y), pa, pb)
                 if dl <= d[i]:
                     return loose
-        return _group_pseudo_edge(self._pick_index(), i)
+        return _group_pseudo_edge(self._pick_index(near=("px", screen_x, screen_y)), i)
 
     #: How close (px) the cursor must come to a component's origin or an
     #: arc's midpoint for it to enter the snap scene at all.
@@ -10030,7 +10242,7 @@ class Viewport(QOpenGLWidget):
         ascending screen distance, so the nearest visible corner wins — the
         same answer the old per-edge scan produced)."""
         import numpy as np
-        idx = self._pick_index()
+        idx = self._pick_index(near=("px", screen_x, screen_y))
         # On the projections the viewport already caches per camera pose
         # (this runs on EVERY hover now — encouraged points): one numpy
         # distance pass, no re-projection of the model per mouse move.
@@ -10092,7 +10304,7 @@ class Viewport(QOpenGLWidget):
         open surface (no second face)."""
         import numpy as np
         scene = self.scene
-        idx = self._pick_index()
+        idx = self._pick_index(near="all")
         if getattr(idx, "tri_v0", None) is not None and len(idx.tri_v0):
             keep = idx.ent_vis[idx.tri_ent]
             v0 = idx.tri_v0[keep]
@@ -10326,7 +10538,7 @@ class Viewport(QOpenGLWidget):
         if origin is None or direction is None:
             return None
         import numpy as np
-        idx = self._pick_index()
+        idx = self._pick_index(near=("px", screen_x, screen_y))
         if not idx.entities:
             return None
         face_t = self._hover_face_t(idx, origin, direction)
@@ -10354,7 +10566,7 @@ class Viewport(QOpenGLWidget):
 
         Memoised per cursor position and view: a hover asks up to three
         times (work plane, acquisition, on-face flag) for the same answer."""
-        idx = self._pick_index()
+        idx = self._pick_index(near=("px", screen_x, screen_y))
         try:
             cam = self.camera
             key = (round(screen_x, 2), round(screen_y, 2), id(idx),
@@ -10396,7 +10608,7 @@ class Viewport(QOpenGLWidget):
         face, owner = self.pick_face_any(screen_x, screen_y)
         if face is None:
             return None, None
-        idx = self._pick_index()
+        idx = self._pick_index(near=("px", screen_x, screen_y))
         i = getattr(self, "_face_any_index", None)
         pidx = getattr(idx, "ent_place_idx", None)
         if (pidx is not None and i is not None and i < len(pidx)
@@ -10414,7 +10626,7 @@ class Viewport(QOpenGLWidget):
         if origin is not None and direction is not None:
             import numpy as np
             best = None  # (t, group)
-            idx = self._pick_index()
+            idx = self._pick_index(near=("px", screen_x, screen_y))
             if idx.entities:
                 face_t = self._hover_face_t(idx, origin, direction)
                 if face_t is not None:
@@ -10423,9 +10635,14 @@ class Viewport(QOpenGLWidget):
                     if np.isfinite(face_t[i]):
                         best = (float(face_t[i]), idx.entities[i][1])
             for g in self._context_placements():
+                # The figure test first: it is an attribute, the layer test
+                # walks tags — asked of every placement on every hover it
+                # cost ~90 ms on 21 406 placements (issue #158).
+                if not getattr(g, "billboard", False):
+                    continue
                 if not self.scene.entity_selectable(g):
                     continue                    # hidden or locked layer
-                if getattr(g, "billboard", False):
+                if True:
                     quad = self._billboard_quad(g)
                     if quad is not None:
                         c = quad[0]
@@ -10453,7 +10670,7 @@ class Viewport(QOpenGLWidget):
                              + (screen_y - ay) * dy) / safe, 0.0, 1.0)
                 d = np.hypot(ax + t * dx - screen_x,
                              ay + t * dy - screen_y)
-                idx = self._pick_index()
+                idx = self._pick_index(near=("px", screen_x, screen_y))
                 # The index also carries the edges of the model OUTSIDE the
                 # open group (snap targets); those cannot be picked.
                 sel = getattr(idx, "gedge_sel", None)

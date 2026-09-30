@@ -20,6 +20,13 @@ follow [SemVer](https://semver.org).
   la imagen en pantalla (unos 15 ms) en vez de construir el índice de
   selección, que horneaba todas las copias — minutos y 8 GB en el primer
   giro de rueda con el modelo de la #158.
+- **Seleccionar y dibujar con snap sobre un modelo enorme ya no agota la
+  memoria**: cuando las copias de componentes pasan del millón de caras,
+  el índice de selección solo hornea las que quedan cerca del cursor (y
+  delante de lo que se ve), con un tope, y suelta las que dejan de usarse.
+  Con el modelo de la #158, pasar el ratón con Seleccionar pasó de colgarse
+  por encima de 18 GB a 32 ms por movimiento y 11,7 GB; con Línea, 71 ms.
+  Los modelos normales usan el índice de siempre.
 
 ## [0.5.7] — 2026-09-30
 
