@@ -139,12 +139,35 @@ def default_shortcuts(action: QAction) -> list:
     return _from_text(action.property(_DEFAULTS) or "")
 
 
-def apply_user_shortcuts(window) -> int:
-    """Put the remembered keys on the window's actions. Returns how many."""
+def _store_key(key: str) -> str:
+    """``key`` as a QSettings key: QSettings reads «/» as a group, so
+    «text:Push / Pull» was stored as a group «text:Push » holding « Pull»
+    and never read back — the key worked until the next start (issue
+    #236, @zhang-922). «/», «\\» and «%» travel escaped."""
+    return (key.replace("%", "%25").replace("/", "%2F")
+            .replace("\\", "%5C"))
+
+
+def _read_key(stored: str) -> str:
+    """The action key a stored QSettings key stands for. Keys written
+    before the escape come back through ``allKeys`` with their «/»."""
+    import re
+    return re.sub(r"%(25|2F|5C)",
+                  lambda m: {"25": "%", "2F": "/", "5C": "\\"}[m.group(1)],
+                  stored)
+
+
+def _saved_shortcuts() -> dict:
     st = QSettings()
     st.beginGroup(_GROUP)
-    saved = {k: str(st.value(k) or "") for k in st.childKeys()}
+    saved = {_read_key(k): str(st.value(k) or "") for k in st.allKeys()}
     st.endGroup()
+    return saved
+
+
+def apply_user_shortcuts(window) -> int:
+    """Put the remembered keys on the window's actions. Returns how many."""
+    saved = _saved_shortcuts()
     n = 0
     for act in collect_actions(window):
         key = action_key(act)
@@ -159,10 +182,11 @@ def apply_user_shortcuts(window) -> int:
 def save_shortcut(action: QAction, seqs: list) -> None:
     st = QSettings()
     key = action_key(action)
+    st.remove(f"{_GROUP}/{key}")               # a pre-escape entry, if any
     if _to_text(seqs) == (action.property(_DEFAULTS) or ""):
-        st.remove(f"{_GROUP}/{key}")           # back to the factory keys
+        st.remove(f"{_GROUP}/{_store_key(key)}")   # back to the factory keys
     else:
-        st.setValue(f"{_GROUP}/{key}", _to_text(seqs))
+        st.setValue(f"{_GROUP}/{_store_key(key)}", _to_text(seqs))
     st.sync()
 
 
