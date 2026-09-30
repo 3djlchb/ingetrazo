@@ -175,6 +175,41 @@ def test_restamp_updates_registry_and_every_face():
         assert tuple(f.attrs["color"]) == (0.62, 0.60, 0.58)
 
 
+def test_restamp_reaches_groups_painted_whole():
+    """Issue #155 (@fafecm): a colour painted on a loose face and on a group
+    as a whole; editing the colour changed the face and left the group."""
+    from core.history import SetGroupMaterialCommand
+    scene = Scene()
+    history = History(scene)
+    old = Material("Azul", color=(0.1, 0.6, 0.9))
+    scene.materials["Azul"] = old
+    face = _quad(scene.mesh)
+    face.attrs.update(old.face_attrs())
+    box = Group(Mesh(), name="Caja")
+    _quad(box.mesh, z=5.0)                       # default faces: show the paint
+    inner = Group(Mesh(), name="Tapa")           # nested, painted too
+    _quad(inner.mesh, z=6.0)
+    box.adopt([inner])
+    scene.groups.append(box)
+    other = Group(Mesh(), name="Otro")           # a different paint
+    _quad(other.mesh, z=7.0)
+    scene.groups.append(other)
+    history.execute(SetGroupMaterialCommand(box, old.face_attrs()))
+    history.execute(SetGroupMaterialCommand(other, {"color": (0.2, 0.2, 0.2)}))
+    history.execute(SetGroupMaterialCommand(inner, old.face_attrs()))
+
+    history.execute(RestampMaterialCommand(
+        "Azul", Material("Azul", color=(0.6, 1.0, 0.4))))
+    assert tuple(face.attrs["color"]) == (0.6, 1.0, 0.4)
+    assert tuple(box.material["color"]) == (0.6, 1.0, 0.4)
+    assert tuple(inner.material["color"]) == (0.6, 1.0, 0.4)
+    assert tuple(other.material["color"]) == (0.2, 0.2, 0.2)   # untouched
+
+    history.undo()
+    assert tuple(box.material["color"]) == (0.1, 0.6, 0.9)
+    assert tuple(inner.material["color"]) == (0.1, 0.6, 0.9)
+
+
 def test_restamp_from_texture_to_colour_drops_the_texture():
     scene = Scene()
     history = History(scene)
