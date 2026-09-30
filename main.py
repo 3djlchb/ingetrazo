@@ -9,6 +9,7 @@ Licensed under GPL-3.0-or-later. See LICENSE.
 from __future__ import annotations
 
 import faulthandler
+import os
 import sys
 from pathlib import Path
 
@@ -542,5 +543,24 @@ def _offer_appimage_integration(window) -> None:
     QTimer.singleShot(600, ask)
 
 
+def _exit_now(code) -> None:
+    """Leave without tearing the model down object by object. Everything
+    that must reach the disk has by now: the window closed, the document
+    was saved or discarded, and the settings are synced here. What is left
+    is freeing millions of Python objects one at a time, which on a big
+    model kept the process — and its gigabytes — alive for a minute after
+    the window was gone (issue #158, @pacaeiro: 21 406 groups, 6.7 GB)."""
+    import logging
+    from PySide6.QtCore import QSettings
+    QSettings().sync()
+    logging.shutdown()
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except Exception:
+            pass
+    os._exit(code if isinstance(code, int) else 0)
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    _exit_now(main())
