@@ -5032,9 +5032,6 @@ class MainWindow(QMainWindow):
         with a click — the classic import of a .skp. Furniture drawn in its
         own file (a pergola, an arch, a lamp post) lands in the plaza with
         its groups, materials and layers intact (see :mod:`core.insert`)."""
-        from core.insert import import_document_as_component
-        from core.scene import Scene as _Scene
-        from formats import igz as _igz
         start = (str(self._current_path.parent)
                  if self._current_path is not None else "")
         path_str, _ = file_dialogs.getOpenFileName(
@@ -5048,25 +5045,50 @@ class MainWindow(QMainWindow):
                 self, tr("Import IngeTrazo document"),
                 tr("That is the document you are editing."))
             return
-        self.viewport.end_group_edit()
-        temp = _Scene()
         try:
-            _igz.load_into(temp, path)
+            comp = self.import_igz_path(path)
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(
                 self, tr("Import IngeTrazo document failed"), str(exc))
             return
-        comp = import_document_as_component(self.viewport.scene, temp,
-                                            path.stem)
         if comp is None:
             QMessageBox.warning(
                 self, tr("Import IngeTrazo document"),
                 tr("“{name}” has no geometry.", name=path.name))
-            return
+
+    def import_igz_path(self, path, at=None):
+        """Insert the IngeTrazo document at ``path`` as ONE component,
+        without a file dialog — for extensions and scripts (issue #179,
+        a palette that inserts components as the mouse moves).
+
+        ``at=None`` hands it to the placement tool: it follows the cursor
+        and a click drops it, as File ▸ Import does. ``at`` a point
+        (``QVector3D`` or ``(x, y, z)`` in metres) inserts it with its
+        origin there at once, in one undo step. Returns the component, or
+        ``None`` when the file has no geometry; a file that cannot be read
+        raises (``OSError``, ``ValueError``…), and nothing is changed."""
+        from PySide6.QtGui import QVector3D
+        from core.insert import import_document_as_component
+        from core.scene import Scene as _Scene
+        from formats import igz as _igz
+        path = Path(path)
+        temp = _Scene()
+        _igz.load_into(temp, path)            # raises before anything moves
+        self.viewport.end_group_edit()
+        comp = import_document_as_component(self.viewport.scene, temp,
+                                            path.stem)
+        if comp is None:
+            return None
         # The file's origin is the handle (the component axes): the
         # arch's footings, drawn below z=0, go below grade in the plaza too.
-        from PySide6.QtGui import QVector3D
-        self._start_place(comp, anchor=QVector3D(0.0, 0.0, 0.0))
+        origin = QVector3D(0.0, 0.0, 0.0)
+        if at is None:
+            self._start_place(comp, anchor=origin)
+        else:
+            from tools.place_group import PlaceGroupTool
+            point = at if isinstance(at, QVector3D) else QVector3D(*at)
+            PlaceGroupTool(comp, anchor=origin).place_at(self.viewport, point)
+        return comp
 
     def _on_import_obj(self) -> None:
         path_str, _ = file_dialogs.getOpenFileName(

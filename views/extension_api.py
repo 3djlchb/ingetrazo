@@ -96,6 +96,14 @@ class ExtensionApp:
             notify()
         vp.update()
 
+    def import_igz(self, path, at=None):
+        """Insert the IngeTrazo document at ``path`` as one component, with
+        no file dialog. ``at=None``: it follows the mouse and a click drops
+        it; ``at=(x, y, z)`` (metres) or a ``QVector3D``: inserted with its
+        origin there, one undo step. Returns the component, or ``None``
+        when the file has no geometry; an unreadable file raises."""
+        return self._window.import_igz_path(path, at=at)
+
     def on_document_changed(self, fn) -> None:
         """Call ``fn()`` whenever the document changes — an edit, an undo,
         New, Open — so a panel can show the current data."""

@@ -148,6 +148,12 @@ def setup(app):
     app.add_menu_action("Levels…", lambda: app.show_panel(dock), "Ctrl+Shift+L",
                         tip="Show the levels of the building.")
 
+    # Another .igz as ONE component, with no file dialog: it follows the
+    # mouse and a click drops it, or `at=` puts its origin at a point now
+    # (one undo step). Returns the component; None = no geometry.
+    app.import_igz("/path/to/bench.igz")
+    comp = app.import_igz("/path/to/bench.igz", at=(4.0, 2.0, 0.0))
+
     # Drawn with a QPainter over every frame, whatever the active tool;
     # world points (metres) to pixels, thousands at a time:
     app.add_overlay(lambda viewport, painter: ...)
