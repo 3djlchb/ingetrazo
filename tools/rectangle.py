@@ -98,6 +98,9 @@ class RectangleTool(PlaneLock, Tool):
             if self.work_plane is None:
                 self.work_plane = self.locked_work_plane(ctx.world)
             return
+        # The plane may follow the far corner (``drawing_plane``), so it
+        # must be judged on the point being clicked, not the last hover.
+        self.hover_point = ctx.world
         anchor, far = self._span(ctx.world)
         du, dv = self._dimensions(anchor, far)
         if abs(du) < 1e-6 or abs(dv) < 1e-6:
@@ -148,6 +151,9 @@ class RectangleTool(PlaneLock, Tool):
     def on_hover(self, ctx: ToolContext) -> None:
         self.note_plane(ctx.viewport)
         self._viewport = ctx.viewport
+        # First: the plane follows a snapped far corner (``plane_points``),
+        # so the square test below must see this point, not the last one.
+        self.hover_point = ctx.world
         square_inference = (self.start_point is not None
                             and self._square_corner(
                                 self.start_point, ctx.world)[1])
@@ -155,7 +161,6 @@ class RectangleTool(PlaneLock, Tool):
             self._shift_square_lock = False
         elif square_inference:
             self._shift_square_lock = True
-        self.hover_point = ctx.world
         self.wireframe_color = self.lock_color()
         ctx.viewport.update()
 
@@ -271,6 +276,14 @@ class RectangleTool(PlaneLock, Tool):
         c = self.hover_point
         pts = [c + u * h + v * h, c - u * h + v * h, c - u * h - v * h, c + u * h - v * h]
         return [(pts[i], pts[(i + 1) % 4]) for i in range(4)]
+
+    def plane_points(self):
+        """First corner and far corner: a far corner snapped off the plane
+        picks the axis plane that holds both (``PlaneLock.snapped_plane``)
+        — how a window opening gets filled from jamb to jamb."""
+        if self.start_point is None:
+            return []
+        return [self.start_point, self.hover_point]
 
     def _axes(self) -> tuple[QVector3D, QVector3D]:
         """In-plane horizontal/vertical axes for the drawing plane: the

@@ -215,6 +215,7 @@ class ArcTool(AxisMagnet, PlaneLock, Tool):
             if (end - self.start_point).length() < 1e-6:
                 return
             self.end_point = end
+            self.adopt_snapped_plane()   # the bulge is read on the arc's plane
             self._fillet = None
             self._fillet_edge_b = None
             if self._equidistant is not None:
@@ -739,6 +740,16 @@ class ArcTool(AxisMagnet, PlaneLock, Tool):
         normal = self.drawing_plane()[1]
         return plane_axes(normal)
 
+    def plane_points(self):
+        """Start and end: an end snapped off the plane turns the arc to the
+        axis plane holding both (``PlaneLock.snapped_plane``) — before, it
+        ended on the end's projection, nowhere near the point clicked."""
+        if self.start_point is None:
+            return []
+        return [self.start_point,
+                self.end_point if self.end_point is not None
+                else self.hover_point]
+
     def _to2(self, p, u, v):
         d = p - self.start_point
         return (QVector3D.dotProduct(d, u), QVector3D.dotProduct(d, v))
@@ -845,6 +856,7 @@ class ThreePointArcTool(AxisMagnet, PlaneLock, Tool):
             if (ctx.world - self.start_point).length() < 1e-6:
                 return
             self.mid_point = ctx.world
+            self.adopt_snapped_plane()
             return
         pts = self._points(ctx.world)
         if len(pts) >= 2:
@@ -870,6 +882,15 @@ class ThreePointArcTool(AxisMagnet, PlaneLock, Tool):
     def _axes(self):
         normal = self.drawing_plane()[1]
         return plane_axes(normal)
+
+    def plane_points(self):
+        """The arc's own points: with all three, a snapped one off the plane
+        takes the plane through them (``PlaneLock.snapped_plane``)."""
+        if self.start_point is None:
+            return []
+        if self.mid_point is None:
+            return [self.start_point, self.hover_point]
+        return [self.start_point, self.mid_point, self.hover_point]
 
     def _points(self, end: QVector3D) -> list[QVector3D]:
         u, v = self._axes()
@@ -945,6 +966,7 @@ class CenterArcTool(AxisMagnet, PlaneLock, Tool):
             if (ctx.world - self.start_point).length() < 1e-6:
                 return
             self.arm_point = ctx.world
+            self.adopt_snapped_plane()   # the sweep is read on the arc's plane
             return
         pts = self._points(self._sweep_to(ctx.world))
         if len(pts) >= 2:
@@ -987,7 +1009,10 @@ class CenterArcTool(AxisMagnet, PlaneLock, Tool):
         if self.hover_point is None or self.start_point is None:
             return None
         if self.arm_point is None:
-            r = (self.hover_point - self.start_point).length()
+            u, v = self._axes()          # the radius drawn, as the circle's
+            d = self.hover_point - self.start_point
+            r = math.hypot(QVector3D.dotProduct(d, u),
+                           QVector3D.dotProduct(d, v))
             return ("R " + fmt_len(r), self.hover_point)
         return (f"{self._sweep_to(self.hover_point):+.1f}°", self.hover_point)
 
@@ -998,6 +1023,16 @@ class CenterArcTool(AxisMagnet, PlaneLock, Tool):
     def _axes(self):
         normal = self.drawing_plane()[1]
         return plane_axes(normal)
+
+    def plane_points(self):
+        """Centre and arm: an arm snapped off the plane turns the arc to the
+        axis plane holding both (``PlaneLock.snapped_plane``). The sweep
+        point is only an angle, so it never moves the plane."""
+        if self.start_point is None:
+            return []
+        return [self.start_point,
+                self.arm_point if self.arm_point is not None
+                else self.hover_point]
 
     def _sweep_to(self, cursor: QVector3D) -> float:
         """Signed sweep (degrees) from the 0° arm to the cursor."""
