@@ -334,6 +334,27 @@ EDIT_REST_MODES = ("normal", "fade", "hide")
 #: as the subject.
 EDIT_REST_FADE = 0.75
 
+#: Dot colour of a SELECTED face (the usual selection orange) and the one it
+#: switches to on a surface that is itself orange/red, where orange dots
+#: would vanish into the paint.
+SELECTION_DOT_COLOR = (0.95, 0.45, 0.16)
+SELECTION_DOT_ALT_COLOR = (0.10, 0.25, 0.85)
+
+
+def selection_dot_color(surface) -> tuple:
+    """The dot colour that reads on a face side painted ``surface`` (an RGB
+    triple, or ``None`` when unknown, e.g. a texture): the selection orange,
+    unless the surface is orange-ish or red-ish itself (hue within ~50° of
+    red, with enough saturation and value to look coloured), where the dots
+    turn blue so a selected face still tells itself apart."""
+    if surface is None:
+        return SELECTION_DOT_COLOR
+    import colorsys
+    h, s, v = colorsys.rgb_to_hsv(*(float(c) for c in surface[:3]))
+    if s >= 0.35 and v >= 0.35 and (h <= 0.14 or h >= 0.96):
+        return SELECTION_DOT_ALT_COLOR
+    return SELECTION_DOT_COLOR
+
 
 def _box_edges(frame, lo, hi) -> bytes:
     """The twelve segments of a box given in ``frame``'s axes, as an
@@ -931,6 +952,9 @@ class Viewport(QOpenGLWidget):
         self._sel_faces_vao = None
         self._sel_faces_vbo = None
         self._sel_faces_count = 0
+        # [(front_rgb, back_rgb, first_vertex, count)] — one run per dot
+        # colour pair inside the selected-faces buffer.
+        self._sel_faces_spans = []
         self._faces_vao = None
         self._faces_vbo = None
         self._faces_count = 0
@@ -1813,17 +1837,36 @@ class Viewport(QOpenGLWidget):
             self._gl.glPolygonOffset(1.0, 1.0)
             self._gl.glDepthMask(GL_FALSE)
             if self._sel_faces_count > 0:
-                self._set_color(0.95, 0.45, 0.16, 0.35)  # selection orange tint
+                # Selected faces: an opaque DOT pattern, not a tint — the
+                # old 35% orange wash over a back face read as just another
+                # back face. Each run carries the dot colour for its front
+                # and for its back side, picked against that side's paint.
+                self._program.setUniformValue(self._loc_stipple, 3)
                 self._sel_faces_vao.bind()
-                self._gl.glDrawArrays(GL_TRIANGLES, 0, self._sel_faces_count)
+                for front, back, start, count in self._sel_faces_spans:
+                    self._set_color(*front, 1.0)
+                    self._program.setUniformValue(
+                        self._loc_back_color, QVector4D(*back, 1.0))
+                    self._gl.glDrawArrays(GL_TRIANGLES, start, count)
                 self._sel_faces_vao.release()
-            if isinstance(self._hover_entity, Face):
-                hover_count = self._upload_hover_face(self._hover_entity)
+                self._program.setUniformValue(self._loc_stipple, 0)
+            hovered = self._hover_entity
+            if isinstance(hovered, Face) and hovered not in self.scene.selection:
+                # The face under the cursor (Select, Push/Pull, Paint,
+                # Offset, Follow Me...) wears the same dots as a selected
+                # one, so every tool points at a face the same way. An
+                # already selected face is skipped: it shows its dots.
+                hover_count = self._upload_hover_face(hovered)
                 if hover_count > 0:
-                    self._set_color(0.30, 0.55, 0.95, 0.28)  # hover blue tint
+                    front, back = self._selection_dot_colors(hovered)
+                    self._set_color(*front, 1.0)
+                    self._program.setUniformValue(
+                        self._loc_back_color, QVector4D(*back, 1.0))
+                    self._program.setUniformValue(self._loc_stipple, 3)
                     self._hover_faces_vao.bind()
                     self._gl.glDrawArrays(GL_TRIANGLES, 0, hover_count)
                     self._hover_faces_vao.release()
+                    self._program.setUniformValue(self._loc_stipple, 0)
             self._gl.glDepthMask(GL_TRUE)
             self._gl.glDisable(GL_POLYGON_OFFSET_FILL)
 
@@ -3033,6 +3076,31 @@ class Viewport(QOpenGLWidget):
         # passes override it just before their draws.
         self._program.setUniformValue(self._loc_back_color,
                                       QVector4D(r, g, b, a))
+
+    def _selection_dot_colors(self, face) -> tuple:
+        """``(front_dot, back_dot)``: the selection dot colour for each side
+        of ``face``, each picked against the paint that side shows — its
+        material colour (or the open group's paint), the two-sided back
+        paint, or the style's back-face tint."""
+        from core.group import effective_material
+        from core.materials import effective_attrs
+        attrs = effective_attrs(face.attrs,
+                                effective_material(self.scene.edit_group))
+        tex = attrs.get("texture")
+        if tex is not None and tex.get("path"):
+            front = None                      # a texture: colour unknown
+        else:
+            front = tuple(attrs.get("color") or self.DEFAULT_FACE_COLOR)
+        back_attr = attrs.get("back")
+        if back_attr is True:
+            back = front                      # both sides wear the front
+        elif isinstance(back_attr, dict):
+            col = back_attr.get("color")
+            back = tuple(col) if col is not None else None
+        else:
+            back = effective_back_color(
+                getattr(self.scene, "display_style", None), self.scene)
+        return selection_dot_color(front), selection_dot_color(back)
 
     def _set_back_face_color(self) -> None:
         # The style's Back color wins; else the scene's adopted tint (from
@@ -4512,18 +4580,26 @@ class Viewport(QOpenGLWidget):
             self._selected_vbo, "sel_edges",
             [sel_loose.tobytes()] + sel_edge_parts) // 12
 
-        sel_face_loose = array("f")
+        sel_face_runs: dict = {}     # (front_dot, back_dot) -> array
         for ent in self.scene.selection:
             if isinstance(ent, Face):
+                buf = sel_face_runs.setdefault(
+                    self._selection_dot_colors(ent), array("f"))
                 for t0, t1, t2 in ent.triangulate():
-                    sel_face_loose.extend([
+                    buf.extend([
                         t0.x(), t0.y(), t0.z(),
                         t1.x(), t1.y(), t1.z(),
                         t2.x(), t2.y(), t2.z(),
                     ])
+        self._sel_faces_spans = []
+        first = 0
+        for (front, back), buf in sel_face_runs.items():
+            n = len(buf) // 3
+            self._sel_faces_spans.append((front, back, first, n))
+            first += n
         self._sel_faces_count = self._upload_vbo(
             self._sel_faces_vbo, "sel_faces",
-            [sel_face_loose.tobytes()]) // 12
+            [buf.tobytes() for buf in sel_face_runs.values()]) // 12
 
         # Faces: triangulate each face (fan when simple, hole-aware when the
         # face has been divided) into one VBO, but grouped by material colour
