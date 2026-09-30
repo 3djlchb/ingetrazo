@@ -2448,5 +2448,7 @@
  "Shortcuts (*.json)": "快捷键 (*.json)",
  "This is not an IngeTrazo shortcuts file.": "这不是 IngeTrazo 快捷键文件。",
  "{n} shortcuts imported.": "已导入 {n} 个快捷键。",
- "{n} belong to actions this installation does not have (a plugin, say) and were left out.": "{n} 个属于此安装中没有的操作（例如某个扩展），已跳过。"
+ "{n} belong to actions this installation does not have (a plugin, say) and were left out.": "{n} 个属于此安装中没有的操作（例如某个扩展），已跳过。",
+ "Document repaired": "文档已修复",
+ "{n} damaged pieces (a coordinate that is not a number) were left out so the rest of “{name}” could open. Save it to keep the repaired document.": "为打开“{name}”的其余部分，已略过 {n} 个损坏的元素（坐标不是数字）。请保存以保留修复后的文档。"
 }

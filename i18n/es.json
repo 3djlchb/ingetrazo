@@ -2448,5 +2448,7 @@
  "Shortcuts (*.json)": "Atajos (*.json)",
  "This is not an IngeTrazo shortcuts file.": "Este no es un archivo de atajos de IngeTrazo.",
  "{n} shortcuts imported.": "{n} atajos importados.",
- "{n} belong to actions this installation does not have (a plugin, say) and were left out.": "{n} son de acciones que esta instalación no tiene (de una extensión, por ejemplo) y se dejaron fuera."
+ "{n} belong to actions this installation does not have (a plugin, say) and were left out.": "{n} son de acciones que esta instalación no tiene (de una extensión, por ejemplo) y se dejaron fuera.",
+ "Document repaired": "Documento reparado",
+ "{n} damaged pieces (a coordinate that is not a number) were left out so the rest of “{name}” could open. Save it to keep the repaired document.": "Se dejaron fuera {n} piezas dañadas (una coordenada que no es un número) para poder abrir el resto de «{name}». Guárdalo para conservar el documento reparado."
 }

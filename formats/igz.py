@@ -41,6 +41,7 @@ ZIP magic, so both shapes open transparently.
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 from core.version import __version__
@@ -590,10 +591,42 @@ def load_into(scene, path: Path, progress=None) -> None:
             gc.enable()
 
 
+#: Entities left out of the document being opened because a coordinate
+#: is not a number (NaN / inf) — counted per load, reported on the scene.
+_dropped_nonfinite = [0]
+
+
+def _finite_points(*points) -> bool:
+    try:
+        return all(math.isfinite(float(c)) for p in points for c in p)
+    except (TypeError, ValueError):
+        return False
+
+
+def _without_nonfinite(payload: dict) -> dict:
+    """The mesh block minus the edges and faces with a NaN or infinite
+    coordinate. One such corner made the WHOLE document unopenable
+    («cannot convert float NaN to integer», #185): the rest of the model
+    opens, the damaged pieces are left out and counted."""
+    edges = [r for r in payload.get("edges", [])
+             if _finite_points(r.get("a", ()), r.get("b", ()))]
+    faces = [r for r in payload.get("faces", [])
+             if _finite_points(*r.get("vertices", ()),
+                               *(p for h in r.get("holes", []) for p in h))]
+    dropped = (len(payload.get("edges", [])) - len(edges)
+               + len(payload.get("faces", [])) - len(faces))
+    if not dropped:
+        return payload
+    _dropped_nonfinite[0] += dropped
+    return dict(payload, edges=edges, faces=faces)
+
+
 def _load_into_inner(scene, path: Path, progress=None) -> None:
     def tick(frac, text):
         if progress is not None:
             progress(frac, text)
+
+    _dropped_nonfinite[0] = 0
 
     tick(0.05, "Reading the document…")
     data, archive = _read_document(path)
@@ -808,7 +841,15 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
     from core.guide import Guide
     scene.guides.clear()
     for raw in payload.get("guides", []):
+        # A guide at (nan, nan, nan) stalled every tool (#185): left out.
+        if not _finite_points(raw.get("point", ()),
+                              raw.get("direction") or (),
+                              raw.get("origin") or ()):
+            _dropped_nonfinite[0] += 1
+            continue
         scene.guides.append(Guide.from_dict(raw))
+    # What had to be left out, for the window to say so.
+    scene.load_repairs = _dropped_nonfinite[0]
 
     from core.image_plane import ImagePlane
     scene.image_planes.clear()
@@ -884,6 +925,7 @@ def _load_mesh(mesh, payload) -> None:
     import core.mesh as _mesh_mod
     from core.topology import _maximal_holes
 
+    payload = _without_nonfinite(payload)
     raw_edges = payload.get("edges", [])
     raw_faces = payload.get("faces", [])
     if len(raw_edges) + len(raw_faces) * 4 < 1024:   # ~corner estimate

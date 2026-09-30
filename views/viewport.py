@@ -634,7 +634,23 @@ def _parse_number(tok: str):
         v += float(m.group(1))
     # A number too long for a float comes back as inf, and inf − inf is
     # NaN a few steps later: a coordinate no tool can recover from (#185).
-    return v if math.isfinite(v) else None
+    # So does a finite one too big for the geometry's float32 coordinates
+    # (1e34 overflows them): nothing typed in a model is ever that large.
+    return v if math.isfinite(v) and abs(v) <= _MAX_TYPED else None
+
+
+#: The largest number the value box takes (in whatever unit it is typed):
+#: a UTM northing is ~1e7 m, a kilometre in millimetres 1e6.
+_MAX_TYPED = 1e9
+
+
+def _is_chord(modifiers) -> bool:
+    """Ctrl or Alt held — a shortcut, not typing. Both together is AltGr on
+    Windows, which types characters, so that one still types."""
+    ctrl = bool(modifiers & Qt.ControlModifier)
+    alt = bool(modifiers & Qt.AltModifier)
+    return (ctrl or alt or bool(modifiers & Qt.MetaModifier)) \
+        and not (ctrl and alt)
 
 
 def _merge_mixed_numbers(fields: list) -> list:
@@ -11333,7 +11349,8 @@ class Viewport(QOpenGLWidget):
         if ev.type() == QEvent.ShortcutOverride and self._tool_claims_key(ev):
             ev.accept()
             return True
-        if ev.type() == QEvent.ShortcutOverride and self._value_buffer:
+        if (ev.type() == QEvent.ShortcutOverride and self._value_buffer
+                and not _is_chord(ev.modifiers())):
             t = ev.text().lower()
             if t and (t.isdigit() or t in (".", ",", ";", " ", "-", ":",
                                            "\"", "'", "/", "m", "c", "r",
@@ -11896,6 +11913,12 @@ class Viewport(QOpenGLWidget):
             self._set_value_buffer(self._value_buffer[:-1])
             return True
 
+        if _is_chord(getattr(ev, "modifiers", lambda: Qt.NoModifier)()):
+            # Alt+1, Ctrl+2…: a shortcut, not a digit for the value box. It
+            # was taken as one while a value was being typed, so the view
+            # shortcut never fired and each try added a «1» — a 35-digit
+            # number, inf in the geometry's floats, then NaN (#185).
+            return False
         arrays = getattr(self.active_tool, "accepts_array", False)
         if arrays and text == "*":
             # "*3" / "3*": the array multiplier ("x" works too).

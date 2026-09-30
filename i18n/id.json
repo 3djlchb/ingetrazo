@@ -2245,5 +2245,7 @@
  "Shortcuts (*.json)": "Pintasan (*.json)",
  "This is not an IngeTrazo shortcuts file.": "Ini bukan berkas pintasan IngeTrazo.",
  "{n} shortcuts imported.": "{n} pintasan diimpor.",
- "{n} belong to actions this installation does not have (a plugin, say) and were left out.": "{n} milik tindakan yang tidak ada di instalasi ini (misalnya dari ekstensi) dan dilewati."
+ "{n} belong to actions this installation does not have (a plugin, say) and were left out.": "{n} milik tindakan yang tidak ada di instalasi ini (misalnya dari ekstensi) dan dilewati.",
+ "Document repaired": "Dokumen diperbaiki",
+ "{n} damaged pieces (a coordinate that is not a number) were left out so the rest of “{name}” could open. Save it to keep the repaired document.": "{n} bagian rusak (koordinat yang bukan angka) dilewati agar sisa «{name}» bisa dibuka. Simpan untuk mempertahankan dokumen yang diperbaiki."
 }

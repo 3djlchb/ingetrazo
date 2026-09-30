@@ -2449,5 +2449,7 @@
  "Shortcuts (*.json)": "Scorciatoie (*.json)",
  "This is not an IngeTrazo shortcuts file.": "Questo non è un file di scorciatoie di IngeTrazo.",
  "{n} shortcuts imported.": "{n} scorciatoie importate.",
- "{n} belong to actions this installation does not have (a plugin, say) and were left out.": "{n} appartengono ad azioni che questa installazione non ha (di un'estensione, ad esempio) e sono state escluse."
+ "{n} belong to actions this installation does not have (a plugin, say) and were left out.": "{n} appartengono ad azioni che questa installazione non ha (di un'estensione, ad esempio) e sono state escluse.",
+ "Document repaired": "Documento riparato",
+ "{n} damaged pieces (a coordinate that is not a number) were left out so the rest of “{name}” could open. Save it to keep the repaired document.": "{n} elementi danneggiati (una coordinata che non è un numero) sono stati esclusi perché il resto di «{name}» potesse aprirsi. Salvalo per conservare il documento riparato."
 }

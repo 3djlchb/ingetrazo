@@ -4263,6 +4263,20 @@ class MainWindow(QMainWindow):
         # shows stale defaults over a scene that has its own.
         self.georef_tray.base_map.sync_from_document()
         self.georef_tray.base_map.sync_photo_mesh()
+        repaired = getattr(self.viewport.scene, "load_repairs", 0)
+        if repaired:
+            # Pieces with a coordinate that is not a number (NaN / inf) were
+            # left out rather than refuse the whole document (#185). Keep it
+            # unsaved, so Ctrl+S writes the cleaned file, and say so.
+            self._saved_version = -1
+            box = QMessageBox(
+                QMessageBox.Warning, tr("Document repaired"),
+                tr("{n} damaged pieces (a coordinate that is not a number) "
+                   "were left out so the rest of “{name}” could open. Save "
+                   "it to keep the repaired document.",
+                   n=repaired, name=path.name), QMessageBox.Ok, self)
+            box.setAttribute(Qt.WA_DeleteOnClose)
+            box.open()                       # not modal to the event loop
         self.viewport.notify_scene_changed()
         self._update_title()
         self.settle_heap()
