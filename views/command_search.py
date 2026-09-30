@@ -630,10 +630,17 @@ def warm_up(window, delay_ms: int = 2000) -> None:
     with its native window, the commands worked out — so even the first
     F3 shows at once instead of its shadow first and the list after."""
     def ready() -> None:
+        from PySide6.QtGui import QGuiApplication
         box = getattr(window, "_command_search", None)
         if box is None:
             box = window._command_search = CommandSearch(window)
-        box.winId()                            # the native popup, now
+        # The native popup, now — except on Wayland: a popup surface made
+        # there before it is ever shown left the main window flickering
+        # under GNOME, a black band and the toolbar drawn half over the
+        # menu bar (Marco, 30-09, found by bisecting to this line). The
+        # command list, the part that took the time, is still ready.
+        if not QGuiApplication.platformName().startswith("wayland"):
+            box.winId()
         commands(window)
     QTimer.singleShot(delay_ms, window, ready)
 

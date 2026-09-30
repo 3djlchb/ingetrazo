@@ -497,6 +497,30 @@ def test_warm_up_makes_the_box_and_the_commands_before_f3(ventana):
     assert ventana._command_cache
 
 
+@pytest.mark.parametrize("platform, native", [("wayland", False),
+                                               ("wayland-egl", False),
+                                               ("xcb", True),
+                                               ("windows", True)])
+def test_warm_up_makes_no_native_popup_on_wayland(ventana, monkeypatch,
+                                                  platform, native):
+    """On Wayland a popup surface made before it is shown left the main
+    window flickering under GNOME (a black band, the toolbar half over the
+    menu bar; Marco, 30-09, bisected to the warm-up). There the commands
+    are still worked out; only the native window waits for F3."""
+    from PySide6.QtGui import QGuiApplication
+    monkeypatch.setattr(QGuiApplication, "platformName",
+                        staticmethod(lambda: platform))
+    made = []
+    monkeypatch.setattr(cs.CommandSearch, "winId",
+                        lambda self: made.append(self) or 0)
+    ventana._command_search = None
+    ventana._command_cache = None
+    cs.warm_up(ventana, 0)
+    QTest.qWait(50)
+    assert ventana._command_cache
+    assert bool(made) is native
+
+
 def test_every_command_says_what_it_does(ventana):
     """Blender explains every command on hover; so do both windows."""
     comp = _composer(ventana)
