@@ -548,11 +548,12 @@ def _read_document(path: Path):
     embedded images."""
     raw = path.read_bytes()
     if not raw.startswith(_ZIP_MAGIC):
-        return json.loads(raw.decode("utf-8")), None
+        return json.loads(raw.decode("utf-8"), parse_constant=_note_constant), None
     import zipfile
     archive = zipfile.ZipFile(path)
     try:
-        data = json.loads(archive.read(_DOC_ENTRY).decode("utf-8"))
+        data = json.loads(archive.read(_DOC_ENTRY).decode("utf-8"),
+                          parse_constant=_note_constant)
     except KeyError:
         archive.close()
         raise ValueError(
@@ -598,6 +599,15 @@ def load_into(scene, path: Path, progress=None) -> None:
 #: Entities left out of the document being opened because a coordinate
 #: is not a number (NaN / inf) — counted per load, reported on the scene.
 _dropped_nonfinite = [0]
+#: Whether the document text holds any NaN / Infinity at all. The JSON
+#: parser reports them as it reads (``parse_constant``), so a clean
+#: document — nearly every one — skips the per-coordinate check entirely.
+_saw_nonfinite = [False]
+
+
+def _note_constant(token: str) -> float:
+    _saw_nonfinite[0] = True
+    return float(token)
 
 
 def _finite_points(*points) -> bool:
@@ -612,6 +622,8 @@ def _without_nonfinite(payload: dict) -> dict:
     coordinate. One such corner made the WHOLE document unopenable
     («cannot convert float NaN to integer», #185): the rest of the model
     opens, the damaged pieces are left out and counted."""
+    if not _saw_nonfinite[0]:
+        return payload
     edges = [r for r in payload.get("edges", [])
              if _finite_points(r.get("a", ()), r.get("b", ()))]
     faces = [r for r in payload.get("faces", [])
@@ -631,6 +643,7 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
             progress(frac, text)
 
     _dropped_nonfinite[0] = 0
+    _saw_nonfinite[0] = False
 
     tick(0.05, "Reading the document…")
     data, archive = _read_document(path)
