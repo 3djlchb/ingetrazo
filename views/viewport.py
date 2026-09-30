@@ -2508,19 +2508,42 @@ class Viewport(QOpenGLWidget):
         off ``_group_chunk(g)`` baked the whole placement to world
         coordinates only to take its box: on the model of issue #158 that
         was 21 000 baked copies of geometry the instanced pass never uses."""
+        return self._placement_frame(g)[0]
+
+    def _placement_frame(self, g):
+        """``(world bbox, inverse matrix)`` of an instanced placement,
+        cached per placement and keyed on its matrix and its prototype's
+        bake: the silhouette pass asks for both for every placement at up
+        to 12 Hz, and working them out in Python each time cost ~7 ms a
+        pass on the plaza's 1 359 placements (release check, 30-09)."""
         from core.group import effective_material
         base = self._proto_base_chunk(g.mesh, effective_material(g))
-        bb = base.get("bbox")
-        if not bb:
-            return None
-        (x0, y0, z0), (x1, y1, z1) = bb
         m = g.xform
-        pts = [m.map(QVector3D(x, y, z))
-               for x in (x0, x1) for y in (y0, y1) for z in (z0, z1)]
-        return ((min(p.x() for p in pts), min(p.y() for p in pts),
-                 min(p.z() for p in pts)),
-                (max(p.x() for p in pts), max(p.y() for p in pts),
-                 max(p.z() for p in pts)))
+        key = (base.get("uid"), tuple(m.data()))
+        cache = getattr(self, "_placement_frames", None)
+        if cache is None:
+            cache = self._placement_frames = {}
+        hit = cache.get(id(g))
+        if hit is not None and hit[0] == key:
+            return hit[1]
+        bb = base.get("bbox")
+        box = None
+        if bb:
+            (x0, y0, z0), (x1, y1, z1) = bb
+            pts = [m.map(QVector3D(x, y, z))
+                   for x in (x0, x1) for y in (y0, y1) for z in (z0, z1)]
+            box = ((min(p.x() for p in pts), min(p.y() for p in pts),
+                    min(p.z() for p in pts)),
+                   (max(p.x() for p in pts), max(p.y() for p in pts),
+                    max(p.z() for p in pts)))
+        inv, ok = m.inverted()
+        if len(cache) > 4 * max(64, len(getattr(self, "_inst_pool", (0, ()))[1]
+                                         if getattr(self, "_inst_pool", None)
+                                         else ())):
+            cache.clear()                  # ids of placements long gone
+        val = (box, inv if ok else None)
+        cache[id(g)] = (key, val)
+        return val
 
     def _front_face(self, mirrored: bool) -> None:
         """Clockwise front faces for a MIRRORED batch — the mirror flips the
@@ -5572,12 +5595,11 @@ class Viewport(QOpenGLWidget):
         base = self._proto_base_chunk(g.mesh, effective_material(g))
         if base["soft_pts"] is None:
             return b""
-        if planes is not None:
-            bb = self._placement_bbox(g)
-            if bb is not None and not self._aabb_visible(planes, bb[0], bb[1]):
-                return b""
-        inv, ok = g.xform.inverted()
-        if not ok:
+        bb, inv = self._placement_frame(g)
+        if planes is not None and bb is not None \
+                and not self._aabb_visible(planes, bb[0], bb[1]):
+            return b""
+        if inv is None:
             return None
         le = inv.map(eye)
         e_np = np.array([le.x(), le.y(), le.z()])
