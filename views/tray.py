@@ -2154,11 +2154,21 @@ class MaterialsPanel(QWidget):
 
     def _on_pick_tint(self) -> None:
         base = self._tint or (0.7, 0.7, 0.7)
+        colour_only = not PaintTool.current_texture
+        if colour_only and self._tint is None and \
+                not PaintTool.current_is_default:
+            base = PaintTool.current_color
         chosen = get_color(
-            QColor.fromRgbF(*base[:3]), self, tr("Tint the texture"))
+            QColor.fromRgbF(*base[:3]), self,
+            tr("Colour") if colour_only else tr("Tint the texture"))
         if not chosen.isValid():
             return
-        self._tint = (chosen.redF(), chosen.greenF(), chosen.blueF())
+        rgb = (chosen.redF(), chosen.greenF(), chosen.blueF())
+        if colour_only and self._recolour_active(rgb):
+            # A plain colour changes at once: nothing to tint, no Apply.
+            self._refresh_preview()
+            return
+        self._tint = rgb
         if not self._tint_mode.isEnabled():
             self._tint_mode.setEnabled(True)
         self._refresh_tint_swatch()
@@ -2206,9 +2216,48 @@ class MaterialsPanel(QWidget):
             self._window.statusBar().showMessage(
                 tr("Texture updated on {n} faces", n=len(targets)), 2500)
         elif not PaintTool.current_texture:
-            self._window.statusBar().showMessage(
-                tr("Pick a texture (or select textured faces) first"), 2500)
+            # A plain colour is active: the Color row changes IT — the
+            # place everyone looks for (Marco, testing 0.5.7, tinted a
+            # colour material here and nothing happened: tinting needs a
+            # texture, and the right-click edit was out of sight).
+            if not self._recolour_active(self._tint):
+                self._window.statusBar().showMessage(
+                    tr("Pick a texture (or select textured faces) first"),
+                    2500)
         self._refresh_preview()
+
+    def _recolour_active(self, rgb) -> bool:
+        """Give the active plain colour ``rgb``: a named material is edited
+        and restamped on every face and group that wears it (one undo
+        step); an anonymous colour becomes the colour to paint next.
+        False when there is no colour to change."""
+        if rgb is None or PaintTool.current_is_default:
+            return False
+        rgb = tuple(float(c) for c in rgb[:3])
+        mat = PaintTool.current_material
+        scene = self._window.viewport.scene
+        if mat is not None and mat.name in scene.materials:
+            from core.history import RestampMaterialCommand
+            from core.materials import Material
+            old = scene.materials[mat.name]
+            new_mat = Material(mat.name, color=rgb, opacity=old.opacity,
+                               finish=old.finish)
+            self._window.viewport.history.execute(
+                RestampMaterialCommand(mat.name, new_mat))
+            self._window.viewport.notify_scene_changed()
+            PaintTool.current_material = new_mat
+            PaintTool.current_color = rgb
+            self._window.statusBar().showMessage(
+                tr("Material '{name}' updated on every face that wears it",
+                   name=mat.name), 3000)
+            return True
+        PaintTool.current_color = rgb
+        if mat is not None:
+            from core.materials import Material
+            PaintTool.current_material = Material(mat.name, color=rgb)
+        self._window.statusBar().showMessage(
+            tr("Active colour changed — click faces to paint it"), 3000)
+        return True
 
     def _apply_texture(self, path: str, size: float | None = None,
                        sw: float | None = None,

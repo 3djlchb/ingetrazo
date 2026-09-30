@@ -287,3 +287,41 @@ def test_the_eyedropper_button_arms_one_sample_and_pops_out():
 
     _click(vp, target)                                # and now it paints
     assert tuple(target.attrs["color"]) == (0.2, 0.4, 0.6)
+
+
+def test_the_color_row_recolours_a_plain_colour_material(monkeypatch):
+    """Marco, testing 0.5.7: with a colour material active he used the
+    Color row of the texture section — it tinted nothing, since tinting
+    needs a texture. For a plain colour it now edits the material itself,
+    on the loose face and on the group painted whole, in one undo."""
+    from PySide6.QtGui import QColor
+    from core.history import SetGroupMaterialCommand, SetFaceMaterialTagCommand, CompoundCommand
+    from views.main_window import MainWindow
+    import views.color_dialog as color_dialog
+    import views.tray as T
+    w = MainWindow()
+    try:
+        vp = w.viewport
+        scene = vp.scene
+        panel = w.findChild(T.MaterialsPanel)
+        face = _quad(scene.mesh)
+        g = Group(Mesh(), name="Caja")
+        _quad(g.mesh, z=5.0)
+        scene.groups.append(g)
+        panel._apply_color((0.1, 0.4, 0.9), name="Azul")
+        paint = PaintTool._current_as_material()
+        face.attrs.update(paint)
+        mat = PaintTool.current_material
+        vp.history.execute(CompoundCommand([
+            SetFaceMaterialTagCommand([], mat.name, mat),
+            SetGroupMaterialCommand(g, paint)]))
+        monkeypatch.setattr(color_dialog.QColorDialog, "getColor",
+                            staticmethod(lambda *a, **k: QColor(0, 255, 0)))
+        panel._on_pick_tint()                       # choose → applies at once
+        assert tuple(face.attrs["color"]) == (0.0, 1.0, 0.0)
+        assert tuple(g.material["color"]) == (0.0, 1.0, 0.0)
+        assert vp.history.undo()
+        assert tuple(g.material["color"]) == pytest.approx((0.1, 0.4, 0.9))
+    finally:
+        w._saved_version = w.viewport.scene.version
+        w.close()
