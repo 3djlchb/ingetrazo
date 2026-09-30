@@ -315,6 +315,10 @@ def save_scene(scene, path: Path) -> dict:
                 # A 3D text keeps what it was made from, so it reopens
                 # editable. Older readers ignore the key.
                 entry["text3d"] = dict(g.text3d)
+            if getattr(g, "ext", None):
+                # Extensions' parameters for this container (JSON-safe by
+                # contract); older readers ignore the key.
+                entry["ext"] = json.loads(json.dumps(g.ext, default=str))
             if getattr(g, "uid", None):
                 # The identity a scene's hidden-object list names.
                 entry["uid"] = g.uid
@@ -728,6 +732,8 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
             group.billboard = raw["billboard"]   # True | "mesh"
         if isinstance(raw.get("text3d"), dict):
             group.text3d = dict(raw["text3d"])
+        if isinstance(raw.get("ext"), dict):
+            group.ext = raw["ext"]
         if raw.get("uid"):
             group.uid = str(raw["uid"])   # older documents keep the fresh one
         if raw.get("hidden"):

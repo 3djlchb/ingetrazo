@@ -65,6 +65,10 @@ CONTRIBUTORS = [
     ("Rainjalin",
      "Indonesian translation of the interface.",
      "https://github.com/Rainjalin"),
+    ("Bane Andreev",
+     "Architect. The Windowizer example extension: parametric windows from "
+     "faces, and the extension API's menus and group data.",
+     ""),
     ("Carlos Martins",
      "Bug reports with videos that pinned down guides, group paint and "
      "exploded groups.",

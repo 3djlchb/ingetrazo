@@ -2248,5 +2248,6 @@
  "{n} belong to actions this installation does not have (a plugin, say) and were left out.": "{n} milik tindakan yang tidak ada di instalasi ini (misalnya dari ekstensi) dan dilewati.",
  "Document repaired": "Dokumen diperbaiki",
  "{n} damaged pieces (a coordinate that is not a number) were left out so the rest of “{name}” could open. Save it to keep the repaired document.": "{n} bagian rusak (koordinat yang bukan angka) dilewati agar sisa «{name}» bisa dibuka. Simpan untuk mempertahankan dokumen yang diperbaiki.",
- "Put the scale figure in new documents": "Tempatkan figur skala di dokumen baru"
+ "Put the scale figure in new documents": "Tempatkan figur skala di dokumen baru",
+ "Architect. The Windowizer example extension: parametric windows from faces, and the extension API's menus and group data.": "Arsitek. Ekstensi contoh Windowizer: jendela parametrik dari muka, serta menu dan data per grup pada API ekstensi."
 }

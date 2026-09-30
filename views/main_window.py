@@ -3109,6 +3109,17 @@ class MainWindow(QMainWindow):
             act_clear.triggered.connect(self.viewport.update)
             menu.addSeparator()
 
+        # Extensions' own entries (app.add_context_menu): after the
+        # selection's, before Paste and Undo. One that raises is logged and
+        # skipped — the menu always opens.
+        for fn in getattr(self, "_ext_context_menus", ()):
+            try:
+                fn(menu, list(sel))
+            except Exception:  # noqa: BLE001 — an extension's bug
+                import logging
+                logging.getLogger(__name__).exception(
+                    "extension context menu failed")
+
         from formats import clip as clip_transfer
         if getattr(self.viewport, "clipboard", None) or clip_transfer.available():
             menu.addAction(tr("Paste"), self._on_paste)

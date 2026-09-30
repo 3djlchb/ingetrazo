@@ -192,6 +192,24 @@ class ExtensionApp:
         menu.addAction(action)
         return action
 
+    def add_menu(self, title: str):
+        """A submenu of its own in the Extensions menu («Windowizer ▸»),
+        for an extension with several commands; returns the QMenu to fill
+        (``None`` outside a window with that menu)."""
+        menu = getattr(self._window, "_ext_menu", None)
+        return menu.addMenu(title) if menu is not None else None
+
+    def add_context_menu(self, fn) -> None:
+        """``fn(menu, selection)`` adds entries to the viewport's
+        right-click menu (a QMenu), after the ones for the selection and
+        before Paste and Undo; ``selection`` is a list of what is
+        selected. Open dialogs from the entries with
+        ``QTimer.singleShot(0, …)``, after the menu has closed."""
+        win = self._window
+        if not hasattr(win, "_ext_context_menus"):
+            win._ext_context_menus = []
+        win._ext_context_menus.append(fn)
+
     # ---- Viewport ------------------------------------------------------------
     def add_overlay(self, fn) -> None:
         """``fn(viewport, painter)`` draws over every frame, in the widget's
