@@ -2235,5 +2235,15 @@
  "Flip Along": "Balik sepanjang",
  "Blue axis": "Sumbu biru",
  "Name:": "Nama:",
- "The name of the selected group or component — Enter keeps it": "Nama grup atau komponen yang dipilih; Enter menyimpannya"
+ "The name of the selected group or component — Enter keeps it": "Nama grup atau komponen yang dipilih; Enter menyimpannya",
+ "Export…": "Ekspor…",
+ "Import…": "Impor…",
+ "Save these shortcuts to a file, to take them to another computer": "Simpan pintasan ini ke berkas untuk dibawa ke komputer lain",
+ "Use the shortcuts saved in a file": "Gunakan pintasan yang tersimpan di berkas",
+ "Export shortcuts": "Ekspor pintasan",
+ "Import shortcuts": "Impor pintasan",
+ "Shortcuts (*.json)": "Pintasan (*.json)",
+ "This is not an IngeTrazo shortcuts file.": "Ini bukan berkas pintasan IngeTrazo.",
+ "{n} shortcuts imported.": "{n} pintasan diimpor.",
+ "{n} belong to actions this installation does not have (a plugin, say) and were left out.": "{n} milik tindakan yang tidak ada di instalasi ini (misalnya dari ekstensi) dan dilewati."
 }

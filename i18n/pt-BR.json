@@ -2437,5 +2437,15 @@
  "Flip Along": "Inverter em",
  "Blue axis": "Eixo azul",
  "Name:": "Nome:",
- "The name of the selected group or component — Enter keeps it": "O nome do grupo ou componente selecionado; Enter o guarda"
+ "The name of the selected group or component — Enter keeps it": "O nome do grupo ou componente selecionado; Enter o guarda",
+ "Export…": "Exportar…",
+ "Import…": "Importar…",
+ "Save these shortcuts to a file, to take them to another computer": "Salve estes atalhos em um arquivo para levá-los a outro computador",
+ "Use the shortcuts saved in a file": "Use os atalhos salvos em um arquivo",
+ "Export shortcuts": "Exportar atalhos",
+ "Import shortcuts": "Importar atalhos",
+ "Shortcuts (*.json)": "Atalhos (*.json)",
+ "This is not an IngeTrazo shortcuts file.": "Este não é um arquivo de atalhos do IngeTrazo.",
+ "{n} shortcuts imported.": "{n} atalhos importados.",
+ "{n} belong to actions this installation does not have (a plugin, say) and were left out.": "{n} pertencem a ações que esta instalação não tem (de uma extensão, por exemplo) e ficaram de fora."
 }

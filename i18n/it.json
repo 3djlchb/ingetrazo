@@ -2439,5 +2439,15 @@
  "Flip Along": "Rifletti lungo",
  "Blue axis": "Asse blu",
  "Name:": "Nome:",
- "The name of the selected group or component — Enter keeps it": "Il nome del gruppo o componente selezionato; Invio lo conferma"
+ "The name of the selected group or component — Enter keeps it": "Il nome del gruppo o componente selezionato; Invio lo conferma",
+ "Export…": "Esporta…",
+ "Import…": "Importa…",
+ "Save these shortcuts to a file, to take them to another computer": "Salva queste scorciatoie in un file, per portarle su un altro computer",
+ "Use the shortcuts saved in a file": "Usa le scorciatoie salvate in un file",
+ "Export shortcuts": "Esporta scorciatoie",
+ "Import shortcuts": "Importa scorciatoie",
+ "Shortcuts (*.json)": "Scorciatoie (*.json)",
+ "This is not an IngeTrazo shortcuts file.": "Questo non è un file di scorciatoie di IngeTrazo.",
+ "{n} shortcuts imported.": "{n} scorciatoie importate.",
+ "{n} belong to actions this installation does not have (a plugin, say) and were left out.": "{n} appartengono ad azioni che questa installazione non ha (di un'estensione, ad esempio) e sono state escluse."
 }

@@ -166,6 +166,55 @@ def save_shortcut(action: QAction, seqs: list) -> None:
     st.sync()
 
 
+#: What an exported shortcuts file says it is (issue #142).
+EXPORT_FORMAT = "ingetrazo-shortcuts"
+
+
+def export_shortcuts(window) -> dict:
+    """Every action's keys, by its language-free key: a file made in one
+    language imports in any other, on any machine (issue #142, @pacaeiro:
+    «transfer shortcut configurations between computers, O.S., friends»).
+    Actions with no keys are written too, so a cleared key travels."""
+    return {"format": EXPORT_FORMAT, "version": 1,
+            "shortcuts": {action_key(a): _to_text(a.shortcuts())
+                          for a in collect_actions(window)}}
+
+
+def import_shortcuts(window, data) -> tuple:
+    """Put the keys of an exported file on the window's actions, and
+    remember them. Actions this machine does not have (a plugin not
+    installed) and reserved keys are skipped; a key the file gives to one
+    action is taken from any other that held it, as assigning it by hand
+    does. Returns ``(applied, skipped)``; raises ValueError for a file
+    that is not an IngeTrazo shortcuts file."""
+    if (not isinstance(data, dict) or data.get("format") != EXPORT_FORMAT
+            or not isinstance(data.get("shortcuts"), dict)):
+        raise ValueError(tr("This is not an IngeTrazo shortcuts file."))
+    wanted = {str(k): str(v or "") for k, v in data["shortcuts"].items()}
+    actions = collect_actions(window)
+    by_key = {action_key(a): a for a in actions}
+    applied = 0
+    taken: set = set()
+    for key, text in wanted.items():
+        act = by_key.get(key)
+        if act is None:
+            continue
+        seqs = [q for q in _from_text(text) if reserved_reason(q) is None]
+        act.setShortcuts(seqs)
+        save_shortcut(act, seqs)
+        taken |= {s.toString(QKeySequence.PortableText) for s in seqs}
+        applied += 1
+    for act in actions:
+        if action_key(act) in wanted:
+            continue
+        kept = [s for s in act.shortcuts()
+                if s.toString(QKeySequence.PortableText) not in taken]
+        if len(kept) != len(act.shortcuts()):
+            act.setShortcuts(kept)
+            save_shortcut(act, kept)
+    return applied, len(wanted) - applied
+
+
 class _KeyCapture(QLineEdit):
     """A box that takes ONE key combination (the keys pressed in it).
 
@@ -241,6 +290,15 @@ class ShortcutsPanel(QWidget):
                          "Changes apply at once and are remembered."))
         hint.setWordWrap(True)
         foot.addWidget(hint, 1)
+        export = QPushButton(tr("Export…"))
+        export.setToolTip(tr("Save these shortcuts to a file, to take them "
+                             "to another computer"))
+        export.clicked.connect(self._on_export)
+        foot.addWidget(export)
+        imp = QPushButton(tr("Import…"))
+        imp.setToolTip(tr("Use the shortcuts saved in a file"))
+        imp.clicked.connect(self._on_import)
+        foot.addWidget(imp)
         reset_all = QPushButton(tr("Restore all defaults"))
         reset_all.clicked.connect(self._on_reset_all)
         foot.addWidget(reset_all)
@@ -346,6 +404,42 @@ class ShortcutsPanel(QWidget):
         _row, act = self._current()
         if act is not None:
             self.assign(act, default_shortcuts(act))
+
+    def _on_export(self) -> None:
+        import json
+        from views.filedialogs import file_dialogs
+        path, _ = file_dialogs.getSaveFileName(
+            self, tr("Export shortcuts"), "ingetrazo-shortcuts.json",
+            tr("Shortcuts (*.json)"))
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(export_shortcuts(self._window), f, indent=1,
+                          ensure_ascii=False)
+        except OSError as exc:
+            QMessageBox.warning(self, tr("Export shortcuts"), str(exc))
+
+    def _on_import(self) -> None:
+        import json
+        from views.filedialogs import file_dialogs
+        path, _ = file_dialogs.getOpenFileName(
+            self, tr("Import shortcuts"), "", tr("Shortcuts (*.json)"))
+        if not path:
+            return
+        try:
+            with open(path, encoding="utf-8") as f:
+                applied, skipped = import_shortcuts(self._window, json.load(f))
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, tr("Import shortcuts"), str(exc))
+            return
+        self._fill()
+        msg = tr("{n} shortcuts imported.", n=applied)
+        if skipped:
+            msg += " " + tr("{n} belong to actions this installation does "
+                            "not have (a plugin, say) and were left out.",
+                            n=skipped)
+        QMessageBox.information(self, tr("Import shortcuts"), msg)
 
     def _on_reset_all(self) -> None:
         if QMessageBox.question(
