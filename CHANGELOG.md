@@ -4,6 +4,27 @@ All notable changes to IngeTrazo are documented here.
 Format inspired by [Keep a Changelog](https://keepachangelog.com); versions
 follow [SemVer](https://semver.org).
 
+## [0.5.6.1] — 2026-09-29
+
+**Las extensiones nuevas cargan en Windows, macOS y los paquetes de Linux.**
+Versión de corrección de la 0.5.6.
+
+### Corregido
+- **El Asistente IA, el puente MCP y Renderizar con Blender salían como
+  «error al cargar»** en el instalador y el portable de Windows, el `.dmg`
+  de macOS, el AppImage y el `.tar.gz` (#208, reportado por @fafecm y
+  @blender3darchitect). Un módulo nuevo que sólo usan esas tres extensiones
+  quedaba fuera del paquete. Ahora el empaquetado reúne solo todo lo que
+  importan las extensiones, y `--check` carga cada una en la CI: un paquete
+  con una extensión rota ya no puede publicarse. El Flatpak y el Snap no
+  estaban afectados.
+
+### Cambiado
+- **IngeTrazo se describe por sí mismo** en la interfaz, las fichas de
+  Flatpak y Snap, el instalador y la documentación. El formato se llama
+  «SKP (.skp)» en Archivo ▸ Importar, y si un `.skp` no se puede leer, el
+  aviso sugiere exportarlo como COLLADA u OBJ desde el programa de origen.
+
 ## [0.5.6] — 2026-09-29
 
 **Render con Blender, una pestaña para la IA y los aportes de la comunidad.**
