@@ -81,6 +81,522 @@ OPENINGS = [("auto", "Automatic (through the wall up to max. thickness, otherwis
 _EPS = 1e-6
 
 
+#: Translations of the texts it shows (the example ships in every language
+#: IngeTrazo speaks; a text missing here stays in English).
+_TEXTS = {
+    'es': {
+        'Automatic (through the wall up to max. thickness, otherwise reveals)':
+            'Automático (atraviesa el muro hasta el espesor máximo; si no, derrames)',
+        'Reveals (single-plane wall)':
+            'Derrames (muro de un solo plano)',
+        'Hole in the wall face only':
+            'Solo el hueco en la cara del muro',
+        'Degenerate geometry (zero length).':
+            'Geometría degenerada (longitud cero).',
+        'Parallel grid lines — check the face.':
+            'Líneas de la cuadrícula paralelas: revisa la cara.',
+        'Invalid number of panes: {text}':
+            'Número de paños no válido: {text}',
+        'Material “{name}” does not exist in the document.':
+            'El material «{name}» no existe en el documento.',
+        'Frame and mullions are wider than the opening — reduce the widths or the number of panes.':
+            'El marco y los parteluces son más anchos que el hueco: reduce los anchos o el número de paños.',
+        'The frame is wider than the opening — reduce the frame width.':
+            'El marco es más ancho que el hueco: reduce el ancho del marco.',
+        'Frame':
+            'Marco',
+        'Glass {k}':
+            'Vidrio {k}',
+        'The face already has openings — select a face without holes.':
+            'La cara ya tiene huecos: selecciona una cara sin agujeros.',
+        'The face has fewer than 3 corners.':
+            'La cara tiene menos de 3 esquinas.',
+        '«{name}» is not a Windowizer window.':
+            '«{name}» no es una ventana de Windowizer.',
+        'Close the group you are editing, then run Windowizer.':
+            'Cierra el grupo que estás editando y vuelve a ejecutar Windowizer.',
+        'Select one or more faces (e.g. a rectangle drawn on a wall), then run Windowizer.':
+            'Selecciona una o más caras (por ejemplo, un rectángulo dibujado en un muro) y vuelve a ejecutar Windowizer.',
+        'Windowizer — {n} face(s)':
+            'Windowizer — {n} cara(s)',
+        'Nothing was done.':
+            'No se hizo nada.',
+        'Windowizer: {n} window(s) created.':
+            'Windowizer: {n} ventana(s) creada(s).',
+        'Some faces were skipped:':
+            'Se omitieron algunas caras:',
+        'Select a window made with Windowizer.':
+            'Selecciona una ventana hecha con Windowizer.',
+        'Edit — {names}':
+            'Editar — {names}',
+        'Windowizer: {n} window(s) updated.':
+            'Windowizer: {n} ventana(s) actualizada(s).',
+        'Windowizer: current settings taken from “{name}”.':
+            'Windowizer: ajustes actuales tomados de «{name}».',
+        'Windowizer: {n} window(s) deleted.':
+            'Windowizer: {n} ventana(s) borrada(s).',
+        'The wall has been edited since, so the opening was not closed for: {names}. Close it by hand.':
+            'El muro se editó después, así que el hueco no se cerró para: {names}. Ciérralo a mano.',
+        'Invalid length: {text} (e.g. 5cm, 50mm, 0.05)':
+            'Longitud no válida: {text} (p. ej. 5cm, 50mm, 0.05)',
+        'Frame width (left/right)':
+            'Ancho del marco (izquierda/derecha)',
+        'Frame height (top/bottom)':
+            'Alto del marco (arriba/abajo)',
+        'Vertical mullion width':
+            'Ancho del parteluz vertical',
+        'Horizontal transom height':
+            'Alto del travesaño horizontal',
+        'Frame depth':
+            'Profundidad del marco',
+        'Frame setback from wall face':
+            'Retiro del marco desde la cara del muro',
+        'Glass setback from frame face':
+            'Retiro del vidrio desde la cara del marco',
+        'Glass thickness':
+            'Espesor del vidrio',
+        'Number of rows (from the bottom) or proportions, e.g. 1,3,1':
+            'Número de filas (desde abajo) o proporciones, p. ej. 1,3,1',
+        'Number of columns (from the left) or proportions, e.g. 2,5,2':
+            'Número de columnas (desde la izquierda) o proporciones, p. ej. 2,5,2',
+        'Rows':
+            'Filas',
+        'Columns':
+            'Columnas',
+        'Frame material':
+            'Material del marco',
+        'Glass material':
+            'Material del vidrio',
+        'The wall is cut through only if its back face is at most this far behind (a single-plane wall has no back face).':
+            'El muro solo se atraviesa si su cara trasera está como mucho a esta distancia (un muro de un solo plano no tiene cara trasera).',
+        'Wall opening':
+            'Hueco en el muro',
+        'Max. wall thickness':
+            'Espesor máximo del muro',
+        'Current settings':
+            'Ajustes actuales',
+        'Windowize selected faces':
+            'Crear ventanas en las caras seleccionadas',
+        'Edit window…':
+            'Editar ventana…',
+        'Inherit settings':
+            'Heredar ajustes',
+        'Erase window':
+            'Borrar ventana',
+    },
+    'pt-BR': {
+        'Automatic (through the wall up to max. thickness, otherwise reveals)':
+            'Automático (atravessa a parede até a espessura máxima; senão, requadros)',
+        'Reveals (single-plane wall)':
+            'Requadros (parede de um só plano)',
+        'Hole in the wall face only':
+            'Só o vão na face da parede',
+        'Degenerate geometry (zero length).':
+            'Geometria degenerada (comprimento zero).',
+        'Parallel grid lines — check the face.':
+            'Linhas da grade paralelas: verifique a face.',
+        'Invalid number of panes: {text}':
+            'Número de painéis inválido: {text}',
+        'Material “{name}” does not exist in the document.':
+            'O material «{name}» não existe no documento.',
+        'Frame and mullions are wider than the opening — reduce the widths or the number of panes.':
+            'O caixilho e os montantes são mais largos que o vão: reduza as larguras ou o número de painéis.',
+        'The frame is wider than the opening — reduce the frame width.':
+            'O caixilho é mais largo que o vão: reduza a largura do caixilho.',
+        'Frame':
+            'Caixilho',
+        'Glass {k}':
+            'Vidro {k}',
+        'The face already has openings — select a face without holes.':
+            'A face já tem vãos: selecione uma face sem furos.',
+        'The face has fewer than 3 corners.':
+            'A face tem menos de 3 cantos.',
+        '«{name}» is not a Windowizer window.':
+            '«{name}» não é uma janela do Windowizer.',
+        'Close the group you are editing, then run Windowizer.':
+            'Feche o grupo que está editando e execute o Windowizer de novo.',
+        'Select one or more faces (e.g. a rectangle drawn on a wall), then run Windowizer.':
+            'Selecione uma ou mais faces (por exemplo, um retângulo desenhado numa parede) e execute o Windowizer de novo.',
+        'Windowizer — {n} face(s)':
+            'Windowizer — {n} face(s)',
+        'Nothing was done.':
+            'Nada foi feito.',
+        'Windowizer: {n} window(s) created.':
+            'Windowizer: {n} janela(s) criada(s).',
+        'Some faces were skipped:':
+            'Algumas faces foram ignoradas:',
+        'Select a window made with Windowizer.':
+            'Selecione uma janela feita com o Windowizer.',
+        'Edit — {names}':
+            'Editar — {names}',
+        'Windowizer: {n} window(s) updated.':
+            'Windowizer: {n} janela(s) atualizada(s).',
+        'Windowizer: current settings taken from “{name}”.':
+            'Windowizer: ajustes atuais tomados de «{name}».',
+        'Windowizer: {n} window(s) deleted.':
+            'Windowizer: {n} janela(s) apagada(s).',
+        'The wall has been edited since, so the opening was not closed for: {names}. Close it by hand.':
+            'A parede foi editada depois, então o vão não foi fechado para: {names}. Feche-o à mão.',
+        'Invalid length: {text} (e.g. 5cm, 50mm, 0.05)':
+            'Comprimento inválido: {text} (ex.: 5cm, 50mm, 0.05)',
+        'Frame width (left/right)':
+            'Largura do caixilho (esquerda/direita)',
+        'Frame height (top/bottom)':
+            'Altura do caixilho (cima/baixo)',
+        'Vertical mullion width':
+            'Largura do montante vertical',
+        'Horizontal transom height':
+            'Altura da travessa horizontal',
+        'Frame depth':
+            'Profundidade do caixilho',
+        'Frame setback from wall face':
+            'Recuo do caixilho em relação à face da parede',
+        'Glass setback from frame face':
+            'Recuo do vidro em relação à face do caixilho',
+        'Glass thickness':
+            'Espessura do vidro',
+        'Number of rows (from the bottom) or proportions, e.g. 1,3,1':
+            'Número de linhas (de baixo) ou proporções, ex.: 1,3,1',
+        'Number of columns (from the left) or proportions, e.g. 2,5,2':
+            'Número de colunas (da esquerda) ou proporções, ex.: 2,5,2',
+        'Rows':
+            'Linhas',
+        'Columns':
+            'Colunas',
+        'Frame material':
+            'Material do caixilho',
+        'Glass material':
+            'Material do vidro',
+        'The wall is cut through only if its back face is at most this far behind (a single-plane wall has no back face).':
+            'A parede só é atravessada se sua face traseira estiver no máximo a esta distância (uma parede de um só plano não tem face traseira).',
+        'Wall opening':
+            'Vão na parede',
+        'Max. wall thickness':
+            'Espessura máxima da parede',
+        'Current settings':
+            'Ajustes atuais',
+        'Windowize selected faces':
+            'Criar janelas nas faces selecionadas',
+        'Edit window…':
+            'Editar janela…',
+        'Inherit settings':
+            'Herdar ajustes',
+        'Erase window':
+            'Apagar janela',
+    },
+    'it': {
+        'Automatic (through the wall up to max. thickness, otherwise reveals)':
+            'Automatico (attraversa il muro fino allo spessore massimo; altrimenti mazzette)',
+        'Reveals (single-plane wall)':
+            'Mazzette (muro a un solo piano)',
+        'Hole in the wall face only':
+            'Solo il foro nella faccia del muro',
+        'Degenerate geometry (zero length).':
+            'Geometria degenere (lunghezza zero).',
+        'Parallel grid lines — check the face.':
+            'Linee della griglia parallele: controlla la faccia.',
+        'Invalid number of panes: {text}':
+            'Numero di riquadri non valido: {text}',
+        'Material “{name}” does not exist in the document.':
+            'Il materiale «{name}» non esiste nel documento.',
+        'Frame and mullions are wider than the opening — reduce the widths or the number of panes.':
+            "Telaio e montanti sono più larghi dell'apertura: riduci le larghezze o il numero di riquadri.",
+        'The frame is wider than the opening — reduce the frame width.':
+            "Il telaio è più largo dell'apertura: riduci la larghezza del telaio.",
+        'Frame':
+            'Telaio',
+        'Glass {k}':
+            'Vetro {k}',
+        'The face already has openings — select a face without holes.':
+            'La faccia ha già delle aperture: seleziona una faccia senza fori.',
+        'The face has fewer than 3 corners.':
+            'La faccia ha meno di 3 vertici.',
+        '«{name}» is not a Windowizer window.':
+            '«{name}» non è una finestra di Windowizer.',
+        'Close the group you are editing, then run Windowizer.':
+            'Chiudi il gruppo che stai modificando, poi esegui di nuovo Windowizer.',
+        'Select one or more faces (e.g. a rectangle drawn on a wall), then run Windowizer.':
+            'Seleziona una o più facce (ad es. un rettangolo disegnato su un muro), poi esegui di nuovo Windowizer.',
+        'Windowizer — {n} face(s)':
+            'Windowizer — {n} faccia/e',
+        'Nothing was done.':
+            'Non è stato fatto nulla.',
+        'Windowizer: {n} window(s) created.':
+            'Windowizer: {n} finestra/e create.',
+        'Some faces were skipped:':
+            'Alcune facce sono state saltate:',
+        'Select a window made with Windowizer.':
+            'Seleziona una finestra fatta con Windowizer.',
+        'Edit — {names}':
+            'Modifica — {names}',
+        'Windowizer: {n} window(s) updated.':
+            'Windowizer: {n} finestra/e aggiornate.',
+        'Windowizer: current settings taken from “{name}”.':
+            'Windowizer: impostazioni correnti prese da «{name}».',
+        'Windowizer: {n} window(s) deleted.':
+            'Windowizer: {n} finestra/e eliminate.',
+        'The wall has been edited since, so the opening was not closed for: {names}. Close it by hand.':
+            "Il muro è stato modificato dopo, quindi l'apertura non è stata chiusa per: {names}. Chiudila a mano.",
+        'Invalid length: {text} (e.g. 5cm, 50mm, 0.05)':
+            'Lunghezza non valida: {text} (es. 5cm, 50mm, 0.05)',
+        'Frame width (left/right)':
+            'Larghezza del telaio (sinistra/destra)',
+        'Frame height (top/bottom)':
+            'Altezza del telaio (sopra/sotto)',
+        'Vertical mullion width':
+            'Larghezza del montante verticale',
+        'Horizontal transom height':
+            'Altezza del traverso orizzontale',
+        'Frame depth':
+            'Profondità del telaio',
+        'Frame setback from wall face':
+            'Arretramento del telaio dalla faccia del muro',
+        'Glass setback from frame face':
+            'Arretramento del vetro dalla faccia del telaio',
+        'Glass thickness':
+            'Spessore del vetro',
+        'Number of rows (from the bottom) or proportions, e.g. 1,3,1':
+            'Numero di righe (dal basso) o proporzioni, es. 1,3,1',
+        'Number of columns (from the left) or proportions, e.g. 2,5,2':
+            'Numero di colonne (da sinistra) o proporzioni, es. 2,5,2',
+        'Rows':
+            'Righe',
+        'Columns':
+            'Colonne',
+        'Frame material':
+            'Materiale del telaio',
+        'Glass material':
+            'Materiale del vetro',
+        'The wall is cut through only if its back face is at most this far behind (a single-plane wall has no back face).':
+            'Il muro viene attraversato solo se la sua faccia posteriore è al massimo a questa distanza (un muro a un solo piano non ha faccia posteriore).',
+        'Wall opening':
+            'Apertura nel muro',
+        'Max. wall thickness':
+            'Spessore massimo del muro',
+        'Current settings':
+            'Impostazioni correnti',
+        'Windowize selected faces':
+            'Crea finestre nelle facce selezionate',
+        'Edit window…':
+            'Modifica finestra…',
+        'Inherit settings':
+            'Eredita impostazioni',
+        'Erase window':
+            'Elimina finestra',
+    },
+    'zh-CN': {
+        'Automatic (through the wall up to max. thickness, otherwise reveals)':
+            '自动（在最大厚度内穿透墙体，否则做洞口侧面）',
+        'Reveals (single-plane wall)':
+            '洞口侧面（单平面墙）',
+        'Hole in the wall face only':
+            '仅在墙面上开洞',
+        'Degenerate geometry (zero length).':
+            '几何退化（长度为零）。',
+        'Parallel grid lines — check the face.':
+            '网格线平行：请检查该面。',
+        'Invalid number of panes: {text}':
+            '窗格数量无效：{text}',
+        'Material “{name}” does not exist in the document.':
+            '文档中不存在材质“{name}”。',
+        'Frame and mullions are wider than the opening — reduce the widths or the number of panes.':
+            '窗框和中梃比洞口更宽：请减小宽度或窗格数量。',
+        'The frame is wider than the opening — reduce the frame width.':
+            '窗框比洞口更宽：请减小窗框宽度。',
+        'Frame':
+            '窗框',
+        'Glass {k}':
+            '玻璃 {k}',
+        'The face already has openings — select a face without holes.':
+            '该面已有开洞：请选择一个没有孔的面。',
+        'The face has fewer than 3 corners.':
+            '该面少于 3 个角点。',
+        '«{name}» is not a Windowizer window.':
+            '“{name}”不是 Windowizer 窗户。',
+        'Close the group you are editing, then run Windowizer.':
+            '请先关闭正在编辑的组，然后再运行 Windowizer。',
+        'Select one or more faces (e.g. a rectangle drawn on a wall), then run Windowizer.':
+            '请选择一个或多个面（例如在墙上画的矩形），然后再运行 Windowizer。',
+        'Windowizer — {n} face(s)':
+            'Windowizer — {n} 个面',
+        'Nothing was done.':
+            '未执行任何操作。',
+        'Windowizer: {n} window(s) created.':
+            'Windowizer：已创建 {n} 个窗户。',
+        'Some faces were skipped:':
+            '部分面被跳过：',
+        'Select a window made with Windowizer.':
+            '请选择一个用 Windowizer 创建的窗户。',
+        'Edit — {names}':
+            '编辑 — {names}',
+        'Windowizer: {n} window(s) updated.':
+            'Windowizer：已更新 {n} 个窗户。',
+        'Windowizer: current settings taken from “{name}”.':
+            'Windowizer：当前设置取自“{name}”。',
+        'Windowizer: {n} window(s) deleted.':
+            'Windowizer：已删除 {n} 个窗户。',
+        'The wall has been edited since, so the opening was not closed for: {names}. Close it by hand.':
+            '墙体之后被编辑过，因此以下洞口未能封闭：{names}。请手动封闭。',
+        'Invalid length: {text} (e.g. 5cm, 50mm, 0.05)':
+            '长度无效：{text}（例如 5cm、50mm、0.05）',
+        'Frame width (left/right)':
+            '窗框宽度（左/右）',
+        'Frame height (top/bottom)':
+            '窗框高度（上/下）',
+        'Vertical mullion width':
+            '竖梃宽度',
+        'Horizontal transom height':
+            '横档高度',
+        'Frame depth':
+            '窗框深度',
+        'Frame setback from wall face':
+            '窗框距墙面的退进',
+        'Glass setback from frame face':
+            '玻璃距窗框面的退进',
+        'Glass thickness':
+            '玻璃厚度',
+        'Number of rows (from the bottom) or proportions, e.g. 1,3,1':
+            '行数（从下往上）或比例，例如 1,3,1',
+        'Number of columns (from the left) or proportions, e.g. 2,5,2':
+            '列数（从左往右）或比例，例如 2,5,2',
+        'Rows':
+            '行',
+        'Columns':
+            '列',
+        'Frame material':
+            '窗框材质',
+        'Glass material':
+            '玻璃材质',
+        'The wall is cut through only if its back face is at most this far behind (a single-plane wall has no back face).':
+            '只有当墙体背面距离不超过此值时才会穿透墙体（单平面墙没有背面）。',
+        'Wall opening':
+            '墙体开洞',
+        'Max. wall thickness':
+            '最大墙厚',
+        'Current settings':
+            '当前设置',
+        'Windowize selected faces':
+            '在所选面上创建窗户',
+        'Edit window…':
+            '编辑窗户…',
+        'Inherit settings':
+            '继承设置',
+        'Erase window':
+            '删除窗户',
+    },
+    'id': {
+        'Automatic (through the wall up to max. thickness, otherwise reveals)':
+            'Otomatis (menembus dinding hingga tebal maksimum; jika tidak, kusen samping)',
+        'Reveals (single-plane wall)':
+            'Kusen samping (dinding satu bidang)',
+        'Hole in the wall face only':
+            'Hanya lubang di muka dinding',
+        'Degenerate geometry (zero length).':
+            'Geometri degenerasi (panjang nol).',
+        'Parallel grid lines — check the face.':
+            'Garis kisi sejajar: periksa mukanya.',
+        'Invalid number of panes: {text}':
+            'Jumlah panel tidak valid: {text}',
+        'Material “{name}” does not exist in the document.':
+            'Material «{name}» tidak ada di dokumen.',
+        'Frame and mullions are wider than the opening — reduce the widths or the number of panes.':
+            'Kusen dan mullion lebih lebar dari bukaan: kurangi lebarnya atau jumlah panel.',
+        'The frame is wider than the opening — reduce the frame width.':
+            'Kusen lebih lebar dari bukaan: kurangi lebar kusen.',
+        'Frame':
+            'Kusen',
+        'Glass {k}':
+            'Kaca {k}',
+        'The face already has openings — select a face without holes.':
+            'Muka sudah memiliki bukaan: pilih muka tanpa lubang.',
+        'The face has fewer than 3 corners.':
+            'Muka memiliki kurang dari 3 sudut.',
+        '«{name}» is not a Windowizer window.':
+            '«{name}» bukan jendela Windowizer.',
+        'Close the group you are editing, then run Windowizer.':
+            'Tutup grup yang sedang diedit, lalu jalankan Windowizer lagi.',
+        'Select one or more faces (e.g. a rectangle drawn on a wall), then run Windowizer.':
+            'Pilih satu atau lebih muka (misalnya persegi panjang yang digambar di dinding), lalu jalankan Windowizer lagi.',
+        'Windowizer — {n} face(s)':
+            'Windowizer — {n} muka',
+        'Nothing was done.':
+            'Tidak ada yang dilakukan.',
+        'Windowizer: {n} window(s) created.':
+            'Windowizer: {n} jendela dibuat.',
+        'Some faces were skipped:':
+            'Beberapa muka dilewati:',
+        'Select a window made with Windowizer.':
+            'Pilih jendela yang dibuat dengan Windowizer.',
+        'Edit — {names}':
+            'Edit — {names}',
+        'Windowizer: {n} window(s) updated.':
+            'Windowizer: {n} jendela diperbarui.',
+        'Windowizer: current settings taken from “{name}”.':
+            'Windowizer: pengaturan saat ini diambil dari «{name}».',
+        'Windowizer: {n} window(s) deleted.':
+            'Windowizer: {n} jendela dihapus.',
+        'The wall has been edited since, so the opening was not closed for: {names}. Close it by hand.':
+            'Dinding telah diedit setelahnya, jadi bukaan tidak ditutup untuk: {names}. Tutup secara manual.',
+        'Invalid length: {text} (e.g. 5cm, 50mm, 0.05)':
+            'Panjang tidak valid: {text} (mis. 5cm, 50mm, 0.05)',
+        'Frame width (left/right)':
+            'Lebar kusen (kiri/kanan)',
+        'Frame height (top/bottom)':
+            'Tinggi kusen (atas/bawah)',
+        'Vertical mullion width':
+            'Lebar mullion vertikal',
+        'Horizontal transom height':
+            'Tinggi transom horizontal',
+        'Frame depth':
+            'Kedalaman kusen',
+        'Frame setback from wall face':
+            'Jarak mundur kusen dari muka dinding',
+        'Glass setback from frame face':
+            'Jarak mundur kaca dari muka kusen',
+        'Glass thickness':
+            'Tebal kaca',
+        'Number of rows (from the bottom) or proportions, e.g. 1,3,1':
+            'Jumlah baris (dari bawah) atau proporsi, mis. 1,3,1',
+        'Number of columns (from the left) or proportions, e.g. 2,5,2':
+            'Jumlah kolom (dari kiri) atau proporsi, mis. 2,5,2',
+        'Rows':
+            'Baris',
+        'Columns':
+            'Kolom',
+        'Frame material':
+            'Material kusen',
+        'Glass material':
+            'Material kaca',
+        'The wall is cut through only if its back face is at most this far behind (a single-plane wall has no back face).':
+            'Dinding hanya ditembus jika muka belakangnya paling jauh sejauh ini (dinding satu bidang tidak punya muka belakang).',
+        'Wall opening':
+            'Bukaan dinding',
+        'Max. wall thickness':
+            'Tebal dinding maksimum',
+        'Current settings':
+            'Pengaturan saat ini',
+        'Windowize selected faces':
+            'Buat jendela pada muka yang dipilih',
+        'Edit window…':
+            'Edit jendela…',
+        'Inherit settings':
+            'Warisi pengaturan',
+        'Erase window':
+            'Hapus jendela',
+    },
+}
+
+
+def _tr(text: str, **kw) -> str:
+    """``text`` in the interface language, with ``{fields}`` filled."""
+    try:
+        from core.i18n import current_language
+        lang = current_language()
+    except Exception:  # noqa: BLE001
+        lang = "en"
+    out = _TEXTS.get(lang, {}).get(text, text)
+    return out.format(**kw) if kw else out
+
 class WindowizerError(Exception):
     """A user-facing refusal (bad selection, frame wider than the face…)."""
 
@@ -126,7 +642,7 @@ def _len(a):
 def _unit(a):
     n = _len(a)
     if n < 1e-12:
-        raise WindowizerError("Degenerate geometry (zero length).")
+        raise WindowizerError(_tr("Degenerate geometry (zero length)."))
     return _mul(a, 1.0 / n)
 
 
@@ -153,7 +669,7 @@ def _intersect_lines(p1, p2, q1, q2):
     c, f = _dot(d1, r), _dot(d2, r)
     den = a * e - b * b
     if abs(den) < 1e-14:
-        raise WindowizerError("Parallel grid lines — check the face.")
+        raise WindowizerError(_tr("Parallel grid lines — check the face."))
     s = (b * f - c * e) / den
     t = (a * f - b * c) / den
     return _mul(_add(_add(p1, _mul(d1, s)), _add(q1, _mul(d2, t))), 0.5)
@@ -210,7 +726,7 @@ def parse_bands(text) -> list[int]:
             return [1] * max(1, int(float(s)))
         out = [int(float(t)) for t in s.split(",") if t.strip()]
     except ValueError:
-        raise WindowizerError(f"Invalid number of panes: {text!r}")
+        raise WindowizerError(_tr("Invalid number of panes: {text}", text=repr(text)))
     return [w if w > 0 else 1 for w in out] or [1]
 
 
@@ -292,7 +808,7 @@ def ensure_default_materials(scene) -> None:
 def _paint(scene, name, glass=False) -> dict:
     mat = scene.materials.get(name)
     if mat is None:
-        raise WindowizerError(f"Material “{name}” does not exist in the document.")
+        raise WindowizerError(_tr("Material “{name}” does not exist in the document.", name=name))
     attrs = mat.face_attrs()
     if glass:
         attrs["back"] = True
@@ -318,8 +834,8 @@ def _bottom_index(loop):
 def _bands(total, frame, mull, weights):
     avail = total - 2 * frame - mull * (len(weights) - 1)
     if avail <= _EPS:
-        raise WindowizerError(
-            "Frame and mullions are wider than the opening — reduce the widths or the number of panes.")
+        raise WindowizerError(_tr(
+            "Frame and mullions are wider than the opening — reduce the widths or the number of panes."))
     unit = avail / sum(weights)
     out, acc = [], 0.0
     for k, w in enumerate(weights):
@@ -359,7 +875,7 @@ def single_pane(outline, p):
     normal = _unit(_newell(outline))
     regions = offset_regions([_v(q) for q in outline], _v(normal), p["frame_w"])
     if not regions:
-        raise WindowizerError("The frame is wider than the opening — reduce the frame width.")
+        raise WindowizerError(_tr("The frame is wider than the opening — reduce the frame width."))
     outer = max(regions, key=lambda r: _len(_newell([_t(q) for q in r[0]])))[0]
     return [[(round(q.x(), 9), 0.0, round(q.z(), 9)) for q in outer]]
 
@@ -412,11 +928,11 @@ def build_parts(scene, outline, params, pose: QMatrix4x4):
 
     frame = Mesh()
     _prism(frame, outline, panes, fi, fi + fd, frame_attrs)
-    parts = [Group(frame, name="Frame")]
+    parts = [Group(frame, name=_tr("Frame"))]
     for k, pane in enumerate(panes, 1):
         glass = Mesh()
         _prism(glass, pane, [], fi + gi, fi + gi + gt, glass_attrs)
-        parts.append(Group(glass, name=f"Glass {k}"))
+        parts.append(Group(glass, name=_tr("Glass {k}", k=k)))
     for g in parts:
         g.xform = QMatrix4x4(pose)
         g.component = False
@@ -545,10 +1061,10 @@ def cut_opening(scene, face, params=None) -> tuple:
     p = normalize_params(params)
     mesh = scene.mesh
     if face.hole_loops:
-        raise WindowizerError("The face already has openings — select a face without holes.")
+        raise WindowizerError(_tr("The face already has openings — select a face without holes."))
     outer = [_t(v.position) for v in face.loop]
     if len(outer) < 3:
-        raise WindowizerError("The face has fewer than 3 corners.")
+        raise WindowizerError(_tr("The face has fewer than 3 corners."))
     pose, local, normal = _frame_of(outer)
     host_attrs = copy.deepcopy(face.attrs or {})
     rec = {"host": {"loop": [list(q) for q in outer], "attrs": _json_safe(host_attrs)},
@@ -664,7 +1180,7 @@ def rebuild_window(scene, group, params) -> None:
     current ones stand (Move/Rotate of the window are kept)."""
     data = window_data(group)
     if data is None:
-        raise WindowizerError(f"«{group.name}» is not a Windowizer window.")
+        raise WindowizerError(_tr("«{name}» is not a Windowizer window.", name=group.name))
     p = normalize_params(params)
     outline = [tuple(q) for q in data["outline"]]
     pose = window_pose(group) if group.children else _mat_from_list(data["pose"])
@@ -759,7 +1275,7 @@ def _run(viewport, mutate, ok_message) -> bool:
 def _at_top_level(viewport) -> bool:
     sc = viewport.scene
     if getattr(sc, "edit_group", None) is not None:
-        _warn(viewport, "Close the group you are editing, then run Windowizer.")
+        _warn(viewport, _tr("Close the group you are editing, then run Windowizer."))
         return False
     return True
 
@@ -785,12 +1301,12 @@ def windowize(viewport) -> None:
     scene = viewport.scene
     faces = _selected_faces(scene)
     if not faces:
-        _warn(viewport, "Select one or more faces (e.g. a rectangle "
-                        "drawn on a wall), then run Windowizer.")
+        _warn(viewport, _tr("Select one or more faces (e.g. a rectangle "
+                           "drawn on a wall), then run Windowizer."))
         return
     mats = sorted(set(scene.materials) | {FRAME_MAT, GLASS_MAT})
     params = WindowizerDialog.ask(viewport, current_params(scene), mats,
-                                  title=f"Windowizer — {len(faces)} face(s)")
+                                  title=_tr("Windowizer — {n} face(s)", n=len(faces)))
     if params is None:
         return
     skipped, made = [], []
@@ -808,13 +1324,14 @@ def windowize(viewport) -> None:
                 sc.groups[:] = groups
                 skipped.append(str(exc))
         if not made:
-            raise WindowizerError(skipped[0] if skipped else "Nothing was done.")
+            raise WindowizerError(skipped[0] if skipped else _tr("Nothing was done."))
         sc.selection.clear()
         sc.selection.update(made)
 
-    if _run(viewport, mutate, f"Windowizer: {len(faces) - len(skipped)} window(s) created."):
+    if _run(viewport, mutate, _tr("Windowizer: {n} window(s) created.",
+                                  n=len(faces) - len(skipped))):
         if skipped:
-            _warn(viewport, "Some faces were skipped:\n• " + "\n• ".join(skipped))
+            _warn(viewport, _tr("Some faces were skipped:") + "\n• " + "\n• ".join(skipped))
 
 
 def edit(viewport) -> None:
@@ -823,12 +1340,12 @@ def edit(viewport) -> None:
     scene = viewport.scene
     wins = _selected_windows(scene)
     if not wins:
-        _warn(viewport, "Select a window made with Windowizer.")
+        _warn(viewport, _tr("Select a window made with Windowizer."))
         return
     base = normalize_params(window_data(wins[0])["params"])
     mats = sorted(set(scene.materials) | {FRAME_MAT, GLASS_MAT})
     params = WindowizerDialog.ask(viewport, base, mats,
-                                  title="Edit — " + ", ".join(g.name for g in wins),
+                                  title=_tr("Edit — {names}", names=", ".join(g.name for g in wins)),
                                   current=current_params(scene))
     if params is None:
         return
@@ -838,21 +1355,22 @@ def edit(viewport) -> None:
         for g in wins:
             rebuild_window(sc, g, params)
 
-    _run(viewport, mutate, f"Windowizer: {len(wins)} window(s) updated.")
+    _run(viewport, mutate, _tr("Windowizer: {n} window(s) updated.", n=len(wins)))
 
 
 def inherit(viewport) -> None:
     scene = viewport.scene
     wins = _selected_windows(scene)
     if not wins:
-        _warn(viewport, "Select a window made with Windowizer.")
+        _warn(viewport, _tr("Select a window made with Windowizer."))
         return
     params = normalize_params(window_data(wins[0])["params"])
 
     def mutate(sc):
         registry(sc)["current"] = dict(params)
 
-    _run(viewport, mutate, f"Windowizer: current settings taken from “{wins[0].name}”.")
+    _run(viewport, mutate, _tr("Windowizer: current settings taken from “{name}”.",
+                               name=wins[0].name))
 
 
 def erase(viewport) -> None:
@@ -861,7 +1379,7 @@ def erase(viewport) -> None:
     scene = viewport.scene
     wins = _selected_windows(scene)
     if not wins:
-        _warn(viewport, "Select a window made with Windowizer.")
+        _warn(viewport, _tr("Select a window made with Windowizer."))
         return
     left_open = []
 
@@ -870,10 +1388,11 @@ def erase(viewport) -> None:
             if not delete_window(sc, g):
                 left_open.append(g.name)
 
-    if _run(viewport, mutate, f"Windowizer: {len(wins)} window(s) deleted."):
+    if _run(viewport, mutate, _tr("Windowizer: {n} window(s) deleted.", n=len(wins))):
         if left_open:
-            _warn(viewport, "The wall has been edited since, so the opening was not closed for: "
-                            + ", ".join(left_open) + ". Close it by hand.")
+            _warn(viewport, _tr("The wall has been edited since, so the opening was not "
+                               "closed for: {names}. Close it by hand.",
+                               names=", ".join(left_open)))
 
 
 # ---------------------------------------------------------------------------
@@ -904,7 +1423,7 @@ def _parse(text):
     from views.viewport import _parse_length_field
     val = _parse_length_field(str(text).replace(" ", "").replace(",", "."))
     if val is None:
-        raise WindowizerError(f"Invalid length: {text!r} (e.g. 5cm, 50mm, 0.05)")
+        raise WindowizerError(_tr("Invalid length: {text} (e.g. 5cm, 50mm, 0.05)", text=repr(text)))
     return val
 
 
@@ -934,14 +1453,14 @@ class WindowizerDialog:
         lay.addLayout(form)
         rows = QLineEdit(str(params["rows"]))
         cols = QLineEdit(str(params["cols"]))
-        rows.setToolTip("Number of rows (from the bottom) or proportions, e.g. 1,3,1")
-        cols.setToolTip("Number of columns (from the left) or proportions, e.g. 2,5,2")
-        form.addRow("Rows", rows)
-        form.addRow("Columns", cols)
+        rows.setToolTip(_tr("Number of rows (from the bottom) or proportions, e.g. 1,3,1"))
+        cols.setToolTip(_tr("Number of columns (from the left) or proportions, e.g. 2,5,2"))
+        form.addRow(_tr("Rows"), rows)
+        form.addRow(_tr("Columns"), cols)
         edits = {}
         for key, label in cls.LENGTHS:
             edits[key] = QLineEdit(_fmt(params[key]))
-            form.addRow(label, edits[key])
+            form.addRow(_tr(label), edits[key])
 
         def combo(value):
             cb = QComboBox()
@@ -950,25 +1469,25 @@ class WindowizerDialog:
             return cb
 
         fmat, gmat = combo(params["frame_mat"]), combo(params["glass_mat"])
-        form.addRow("Frame material", fmat)
-        form.addRow("Glass material", gmat)
+        form.addRow(_tr("Frame material"), fmat)
+        form.addRow(_tr("Glass material"), gmat)
         opening = QComboBox()
         for code, label in OPENINGS:
-            opening.addItem(label, code)
+            opening.addItem(_tr(label), code)
         opening.setCurrentIndex([c for c, _ in OPENINGS].index(params["opening"]))
         wall_max = QLineEdit(_fmt(params["wall_max"]))
-        wall_max.setToolTip("The wall is cut through only if its back face is at most "
-                            "this far behind (a single-plane wall has no back face).")
+        wall_max.setToolTip(_tr("The wall is cut through only if its back face is at most "
+                               "this far behind (a single-plane wall has no back face)."))
         if current is None:            # the opening is cut once, when the window is made
-            form.addRow("Wall opening", opening)
-            form.addRow("Max. wall thickness", wall_max)
+            form.addRow(_tr("Wall opening"), opening)
+            form.addRow(_tr("Max. wall thickness"), wall_max)
             opening.currentIndexChanged.connect(
                 lambda _i: wall_max.setEnabled(opening.currentData() == "auto"))
             wall_max.setEnabled(opening.currentData() == "auto")
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         if current is not None:
-            use_cur = buttons.addButton("Current settings", QDialogButtonBox.ResetRole)
+            use_cur = buttons.addButton(_tr("Current settings"), QDialogButtonBox.ResetRole)
 
             def load_current():
                 rows.setText(str(current["rows"]))
@@ -1019,12 +1538,12 @@ def _fill_menu(sub, viewport_of, faces=True, wins=True, later=False) -> None:
         return lambda: QTimer.singleShot(0, lambda: fn(viewport_of()))
 
     if faces:
-        sub.addAction("Windowize selected faces", run(windowize))
+        sub.addAction(_tr("Windowize selected faces"), run(windowize))
     if wins:
-        sub.addAction("Edit window…", run(edit))
-        sub.addAction("Inherit settings", run(inherit))
+        sub.addAction(_tr("Edit window…"), run(edit))
+        sub.addAction(_tr("Inherit settings"), run(inherit))
         sub.addSeparator()
-        sub.addAction("Erase window", run(erase))
+        sub.addAction(_tr("Erase window"), run(erase))
 
 
 def setup(app) -> None:
