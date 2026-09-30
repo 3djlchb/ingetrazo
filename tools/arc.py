@@ -133,6 +133,7 @@ def commit_arc(viewport, pts: list[QVector3D], close_to=None, trim=None):
 class ArcTool(AxisMagnet, PlaneLock, Tool):
     name = "Arc"
     shortcut = "A"
+    description = "Draw an arc from its two ends, then pull out its bulge."
     vcb_label = "Bulge"
 
     #: Within this many screen pixels of the tangent bulge, the arc snaps
@@ -818,6 +819,7 @@ class ThreePointArcTool(AxisMagnet, PlaneLock, Tool):
     """
     name = "3-Point Arc"
     shortcut = "J"
+    description = "Draw an arc that passes through three points."
 
     def __init__(self) -> None:
         self.start_point: QVector3D | None = None
@@ -910,6 +912,9 @@ class CenterArcTool(AxisMagnet, PlaneLock, Tool):
     #: default key at all. Sharing O made Qt call the shortcut ambiguous and
     #: fire NEITHER — see tests/test_shortcuts.py.
     shortcut = "Shift+O"
+    description = (
+        "Draw an arc from its centre: the centre, where the arc "
+        "starts, then the angle it sweeps.")
     vcb_label = "Angle"
 
     _PITCH_DEG = 15.0
@@ -1049,6 +1054,9 @@ class PieTool(CenterArcTool):
 
     name = "Pie"
     shortcut = None
+    description = (
+        "Draw an arc from its centre whose two radii close it into a "
+        "slice-shaped face.")
 
     def _commit(self, viewport, pts: list[QVector3D]) -> None:
         centre = QVector3D(self.start_point)

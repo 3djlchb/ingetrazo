@@ -495,3 +495,24 @@ def test_warm_up_makes_the_box_and_the_commands_before_f3(ventana):
     QTest.qWait(50)
     assert ventana._command_search is not None
     assert ventana._command_cache
+
+
+def test_every_command_says_what_it_does(ventana):
+    """Blender explains every command on hover; so do both windows."""
+    comp = _composer(ventana)
+    for win in (ventana, comp):
+        bare = [c.name for c in cs.commands(win)
+                if not c.tip and c.action.isEnabled()]
+        assert bare == [], bare
+    comp.close()
+
+
+def test_a_toolbar_button_shows_its_description_under_name_and_keys(
+        ventana):
+    act = ventana._tool_actions["line"]
+    name_keys, desc = act.toolTip().split("\n")
+    assert name_keys == "Line  (L)"
+    assert desc == act.statusTip() == \
+        "Draw edges point by point; closing a loop makes a face."
+    cmd = next(c for c in cs.commands(ventana) if c.action is act)
+    assert cmd.tip == desc                         # F3 shows the same

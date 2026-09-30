@@ -2670,8 +2670,10 @@ class _SheetItem(QGraphicsItem):
         n_sel = len(self.composer._selected_sheet_items())
         arrange_slots: dict = {}
         from views.icons import tool_icon
-        for icon, label, slot in self.composer._arrange_entries()[:8]:
+        arrange.setToolTipsVisible(True)
+        for icon, label, tip, slot in self.composer._arrange_entries()[:8]:
             act = arrange.addAction(tool_icon(icon), label)
+            act.setToolTip(tip)
             act.setEnabled(n_sel >= (3 if label.startswith(tr("Distribute"))
                                      else 2))
             arrange_slots[act] = slot
@@ -5534,10 +5536,12 @@ class ComposerWindow(QMainWindow):
         from PySide6.QtWidgets import QToolBar
         from views.icons import tool_icon
         tb = QToolBar(tr("Composer tools"), self)
+        tb.toggleViewAction().setStatusTip(tr("Show or hide this toolbar."))
         tb.setObjectName("composer_tools")
         tb.setOrientation(Qt.Vertical)
         tb.setIconSize(QSize(toolbar_icon_px(), toolbar_icon_px()))
         draw = QToolBar(tr("Draw"), self)
+        draw.toggleViewAction().setStatusTip(tr("Show or hide this toolbar."))
         draw.setObjectName("composer_draw")
         draw.setIconSize(QSize(toolbar_icon_px(), toolbar_icon_px()))
         group = QActionGroup(self)
@@ -6254,6 +6258,7 @@ class ComposerWindow(QMainWindow):
         from PySide6.QtWidgets import QToolBar
         from views.icons import tool_icon
         tb = QToolBar(tr("Sheet"), self)
+        tb.toggleViewAction().setStatusTip(tr("Show or hide this toolbar."))
         tb.setObjectName("sheet_toolbar")
         tb.setToolButtonStyle(Qt.ToolButtonIconOnly)   # icons, like the tools
         tb.setIconSize(QSize(toolbar_icon_px(), toolbar_icon_px()))
@@ -6800,7 +6805,7 @@ class ComposerWindow(QMainWindow):
                                     self, tr("Colour"))
         if col.isValid():
             self._panel_edit(item, {attr: col.name()})
-            button.setStyleSheet(f"background: {col.name()};")
+            button.setStyleSheet(f"QAbstractButton {{ background: {col.name()}; }}")
 
     def _page_cota(self) -> QWidget:
         w = QWidget()
@@ -8151,7 +8156,7 @@ class ComposerWindow(QMainWindow):
                 self.et_arrow.setChecked(m.arrow)
                 self.et_dot.setChecked(bool(getattr(m, "dot", True)))
                 self.et_stroke.setValue(m.stroke_mm)
-                self.et_color_btn.setStyleSheet(f"background: {m.color};")
+                self.et_color_btn.setStyleSheet(f"QAbstractButton {{ background: {m.color}; }}")
                 self.et_bg_check.setChecked(bool(m.bg_color))
                 self.et_bg_btn.setStyleSheet(
                     f"background: {m.bg_color};" if m.bg_color else "")
@@ -8167,7 +8172,7 @@ class ComposerWindow(QMainWindow):
                 self.ll_shape.setCurrentIndex(max(sidx, 0))
                 self.ll_size.setValue(float(m.size_mm))
                 self.ll_stroke.setValue(float(m.stroke_mm))
-                self.ll_color_btn.setStyleSheet(f"background: {m.color};")
+                self.ll_color_btn.setStyleSheet(f"QAbstractButton {{ background: {m.color}; }}")
                 self.ll_follow.setChecked(bool(m.follow))
                 self.ll_follow.setEnabled(bool(m.frame_uid))
                 self.props.setCurrentIndex(14)
@@ -8189,7 +8194,7 @@ class ComposerWindow(QMainWindow):
                 self.nv_line.setValue(float(m.line_mm))
                 self.nv_mirror.setChecked(bool(m.mirror))
                 self.nv_stroke.setValue(float(m.stroke_mm))
-                self.nv_color_btn.setStyleSheet(f"background: {m.color};")
+                self.nv_color_btn.setStyleSheet(f"QAbstractButton {{ background: {m.color}; }}")
                 self.props.setCurrentIndex(13)
             elif isinstance(item, PerfilItem):
                 m = item.model
@@ -8227,7 +8232,7 @@ class ComposerWindow(QMainWindow):
                 eidx = self.crad_ends.findData(m.ends)
                 self.crad_ends.setCurrentIndex(max(eidx, 0))
                 self.crad_stroke.setValue(m.stroke_mm)
-                self.crad_color_btn.setStyleSheet(f"background: {m.color};")
+                self.crad_color_btn.setStyleSheet(f"QAbstractButton {{ background: {m.color}; }}")
                 self.props.setCurrentIndex(15)
             elif isinstance(item, CotaAngularCanvasItem):
                 m = item.model
@@ -8238,7 +8243,7 @@ class ComposerWindow(QMainWindow):
                 eidx = self.cang_ends.findData(m.ends)
                 self.cang_ends.setCurrentIndex(max(eidx, 0))
                 self.cang_stroke.setValue(m.stroke_mm)
-                self.cang_color_btn.setStyleSheet(f"background: {m.color};")
+                self.cang_color_btn.setStyleSheet(f"QAbstractButton {{ background: {m.color}; }}")
                 self.cang_text_color_btn.setStyleSheet(
                     f"background: {m.text_color or m.color};")
                 abg = getattr(m, "text_bg", "") or ""
@@ -8967,26 +8972,57 @@ class ComposerWindow(QMainWindow):
             tr("{n} item(s) pasted.", n=len(pasted)), 3000)
 
     def _arrange_entries(self) -> list:
-        """(icon key, label, slot) of the Arrange commands — the toolbar and
-        the items' right-click menu share them. Align needs two selected
-        items, distribute three; group / lock / duplicate have keys."""
+        """(icon key, label, what it does, slot) of the Arrange commands —
+        the toolbar and the items' right-click menu share them. Align needs
+        two selected items, distribute three; group / lock / duplicate have
+        keys."""
         return [
-            ("arr_left", tr("Align left"), lambda: self.align_selected("left")),
-            ("arr_right", tr("Align right"), lambda: self.align_selected("right")),
-            ("arr_top", tr("Align top"), lambda: self.align_selected("top")),
-            ("arr_bottom", tr("Align bottom"), lambda: self.align_selected("bottom")),
+            ("arr_left", tr("Align left"),
+             tr("Line up the left edges of the selected items with the "
+                "leftmost one."),
+             lambda: self.align_selected("left")),
+            ("arr_right", tr("Align right"),
+             tr("Line up the right edges of the selected items with the "
+                "rightmost one."),
+             lambda: self.align_selected("right")),
+            ("arr_top", tr("Align top"),
+             tr("Line up the top edges of the selected items with the "
+                "highest one."),
+             lambda: self.align_selected("top")),
+            ("arr_bottom", tr("Align bottom"),
+             tr("Line up the bottom edges of the selected items with the "
+                "lowest one."),
+             lambda: self.align_selected("bottom")),
             ("arr_hcenter", tr("Center horizontally"),
+             tr("Line up the centres of the selected items on one vertical "
+                "line, in the middle of the selection."),
              lambda: self.align_selected("hcenter")),
             ("arr_vcenter", tr("Center vertically"),
+             tr("Line up the centres of the selected items on one "
+                "horizontal line, in the middle of the selection."),
              lambda: self.align_selected("vcenter")),
             ("arr_dist_h", tr("Distribute horizontally"),
+             tr("Space three or more selected items evenly from left to "
+                "right."),
              lambda: self.distribute_selected("x")),
             ("arr_dist_v", tr("Distribute vertically"),
+             tr("Space three or more selected items evenly from top to "
+                "bottom."),
              lambda: self.distribute_selected("y")),
-            ("arr_duplicate", tr("Duplicate (Ctrl+D)"), self.duplicate_selected),
-            ("arr_group", tr("Group (Ctrl+G)"), self.group_selected),
-            ("arr_ungroup", tr("Ungroup (Ctrl+Shift+G)"), self.ungroup_selected),
-            ("arr_lock", tr("Lock / unlock (Ctrl+L)"), self.lock_selected)]
+            ("arr_duplicate", tr("Duplicate (Ctrl+D)"),
+             tr("Place a copy of the selected items a little below and to "
+                "the right."),
+             self.duplicate_selected),
+            ("arr_group", tr("Group (Ctrl+G)"),
+             tr("Join the selected items into a group that moves as one."),
+             self.group_selected),
+            ("arr_ungroup", tr("Ungroup (Ctrl+Shift+G)"),
+             tr("Break the selected group back into its items."),
+             self.ungroup_selected),
+            ("arr_lock", tr("Lock / unlock (Ctrl+L)"),
+             tr("Lock the selected items so they cannot be moved by "
+                "accident; when they all are locked, unlock them."),
+             self.lock_selected)]
 
     def _build_arrange_toolbar(self) -> None:
         """The Arrange toolbar: shown by default since 2026-09-14 (Marco kept
@@ -8998,13 +9034,15 @@ class ComposerWindow(QMainWindow):
         from PySide6.QtGui import QAction
         from PySide6.QtWidgets import QToolBar
         tb = QToolBar(tr("Arrange"), self)
+        tb.toggleViewAction().setStatusTip(tr("Show or hide this toolbar."))
         tb.setObjectName("arrange_toolbar")
         tb.setIconSize(QSize(toolbar_icon_px(), toolbar_icon_px()))
         from views.icons import tool_icon
-        for icon, label, slot in self._arrange_entries():
+        for icon, label, tip, slot in self._arrange_entries():
             act = QAction(tool_icon(icon), label, self)
             act.setProperty("icon_key", icon)
-            act.setToolTip(label)
+            act.setToolTip(f"{label}\n{tip}")
+            act.setStatusTip(tip)
             act.triggered.connect(lambda _c, s=slot: s())
             tb.addAction(act)
         self.addToolBar(Qt.TopToolBarArea, tb)
@@ -10022,7 +10060,7 @@ class ComposerWindow(QMainWindow):
                                     tr("Border colour"))
         if col.isValid():
             self.comp.border_color = col.name()
-            self.border_color_btn.setStyleSheet(f"background: {col.name()};")
+            self.border_color_btn.setStyleSheet(f"QAbstractButton {{ background: {col.name()}; }}")
             self._mark_dirty()
             self._rebuild_canvas()
 
@@ -10433,7 +10471,7 @@ class ComposerWindow(QMainWindow):
         last = getattr(self, "_last_cajetin_fill", "#e9ecf0")
         item.prepareGeometryChange()
         self._panel_edit(item, {"fill_color": last if on else ""})
-        self.caj_fill_btn.setStyleSheet(f"background: {last};" if on else "")
+        self.caj_fill_btn.setStyleSheet(f"QAbstractButton {{ background: {last}; }}" if on else "")
         self._sync_cajetin_design_combo(item.model)
 
     def _on_cajetin_design(self, *_a) -> None:
@@ -10638,7 +10676,7 @@ class ComposerWindow(QMainWindow):
             self._updating = True
             self.text_bg_check.setChecked(True)
             self._updating = False
-            self.text_bg_btn.setStyleSheet(f"background: {col.name()};")
+            self.text_bg_btn.setStyleSheet(f"QAbstractButton {{ background: {col.name()}; }}")
 
     def _on_pick_text_color(self) -> None:
         from PySide6.QtWidgets import QColorDialog
@@ -10649,7 +10687,7 @@ class ComposerWindow(QMainWindow):
                                     tr("Colour"))
         if col.isValid():
             self._panel_edit(item, {"color": col.name()})
-            self.text_color_btn.setStyleSheet(f"background: {col.name()};")
+            self.text_color_btn.setStyleSheet(f"QAbstractButton {{ background: {col.name()}; }}")
 
     def _on_norte_props(self, *_a) -> None:
         item = self._selected_item()
@@ -10838,7 +10876,7 @@ class ComposerWindow(QMainWindow):
         last = getattr(self, "_last_text_bg", "#ffffff")
         item.prepareGeometryChange()
         self._panel_edit(item, {attr: last if on else ""})
-        button.setStyleSheet(f"background: {last};" if on else "")
+        button.setStyleSheet(f"QAbstractButton {{ background: {last}; }}" if on else "")
         if isinstance(item.model, CotaItem):
             self._remember_cota_style(item.model)
 
@@ -10858,7 +10896,7 @@ class ComposerWindow(QMainWindow):
             self._updating = True
             check.setChecked(True)
             self._updating = False
-            button.setStyleSheet(f"background: {col.name()};")
+            button.setStyleSheet(f"QAbstractButton {{ background: {col.name()}; }}")
             if isinstance(item.model, CotaItem):
                 self._remember_cota_style(item.model)
 
@@ -10873,7 +10911,7 @@ class ComposerWindow(QMainWindow):
         if col.isValid():
             item.prepareGeometryChange()
             self._panel_edit(item, {attr: col.name()})
-            button.setStyleSheet(f"background: {col.name()};")
+            button.setStyleSheet(f"QAbstractButton {{ background: {col.name()}; }}")
 
     def _on_pick_cota_text_color(self) -> None:
         from PySide6.QtWidgets import QColorDialog
@@ -10961,7 +10999,7 @@ class ComposerWindow(QMainWindow):
                                     tr("Colour"))
         if col.isValid():
             self._panel_edit(item, {"color": col.name()})
-            self.cota_color_btn.setStyleSheet(f"background: {col.name()};")
+            self.cota_color_btn.setStyleSheet(f"QAbstractButton {{ background: {col.name()}; }}")
 
     def _item_label(self, model) -> str:
         if isinstance(model, EtiquetaItem):
@@ -12270,6 +12308,9 @@ class ComposerWindow(QMainWindow):
         self.addAction(act)
         self._act_sidebar = act
         clean = QAction(tr("Clean screen"), self)
+        clean.setStatusTip(tr(
+            "Fold away every toolbar, panel and bar so only the sheet "
+            "shows; once more brings them all back."))
         clean.setShortcut(QKeySequence("Ctrl+0"))
         clean.setCheckable(True)
         clean.toggled.connect(self._toggle_clean_screen)

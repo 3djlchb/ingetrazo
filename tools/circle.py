@@ -244,10 +244,14 @@ class _RadialTool(AxisMagnet, PlaneLock, Tool):
 class CircleTool(_RadialTool):
     name = "Circle"
     shortcut = "C"
+    description = "Draw a circle from its centre and radius."
     sides = 24
 
 
 class PolygonTool(_RadialTool):
     name = "Polygon"
     shortcut = None  # Polygon has no default; G = Make Component
+    description = (
+        "Draw a regular polygon from its centre and radius; type a "
+        "number followed by «s» to change the sides.")
     sides = 6

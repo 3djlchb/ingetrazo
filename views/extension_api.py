@@ -160,16 +160,20 @@ class ExtensionApp:
         if the user hid it from Window ▸ Panels."""
         self._window.set_tray_shown(dock, True)
 
-    def add_menu_action(self, text: str, fn, shortcut: str | None = None):
+    def add_menu_action(self, text: str, fn, shortcut: str | None = None,
+                        tip: str | None = None):
         """An entry in the Extensions menu that calls ``fn()``; a
-        ``shortcut`` already taken by the app is left off. Returns the
-        QAction (``None`` outside a window with that menu)."""
+        ``shortcut`` already taken by the app is left off, and ``tip`` —
+        what it does, in a sentence — shows in the status bar and in F3.
+        Returns the QAction (``None`` outside a window with that menu)."""
         from PySide6.QtGui import QAction, QKeySequence
         win = self._window
         menu = getattr(win, "_ext_menu", None)
         if menu is None:
             return None
         action = QAction(text, win)
+        if tip:
+            action.setStatusTip(tip)
         if shortcut:
             seq = QKeySequence(shortcut).toString()
             taken = getattr(win, "_ext_taken_keys", set())

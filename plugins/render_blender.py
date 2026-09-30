@@ -1248,6 +1248,8 @@ def setup(app) -> None:
     # shown again if hidden from Window ▸ Panels (Marco: «no aparece en el
     # menú Extensiones»).
     app.add_menu_action(tr("Render with Blender…"),
-                        lambda: app.show_panel(dock))
+                        lambda: app.show_panel(dock), tip=tr(
+                            "Render the model in Blender, from the Render "
+                            "tab of the side tray."))
     app.on_document_changed(panel.refresh_lights)
     app.add_overlay(lambda vp, painter: draw_lights(app, panel, vp, painter))

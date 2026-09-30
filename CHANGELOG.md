@@ -6,12 +6,25 @@ follow [SemVer](https://semver.org).
 
 ## [Sin publicar]
 
+### Añadido
+- **Cada comando dice qué hace**, como las descripciones de Blender: una
+  frase breve en el recuadro del buscador F3, en la barra de estado al
+  pasar por un menú y bajo el nombre y el atajo en el globo de los botones
+  de las barras de herramientas. Cubre los comandos de la ventana
+  principal, los del compositor de láminas y los complementos incluidos
+  (un complemento propio puede dar la suya con `description` o con
+  `tip=` en `add_menu_action`), en español, inglés, portugués, chino e
+  italiano.
+
 ### Corregido
 - **El buscador de comandos (F3) aparece al instante.** En 0.5.6 se veía
   primero la sombra del cuadro y la lista un momento después (~110 ms):
   cada apertura volvía a preparar todos los comandos. Ahora recuerda lo ya
   preparado y deja el cuadro listo mientras la ventana está quieta; se
   dibuja en unos 25 ms, la primera vez incluida.
+- **Los globos de ayuda sobre un botón de color se leen**: en Estilos y en
+  el compositor tomaban el color del botón como fondo (texto claro sobre
+  blanco); ahora tienen el mismo fondo oscuro que los demás.
 
 ## [0.5.6.1] — 2026-09-29
 
