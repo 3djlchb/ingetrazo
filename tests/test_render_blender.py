@@ -93,6 +93,28 @@ def test_the_command_runs_our_script_on_the_job(tmp_path):
     assert argv[-2:] == ["--", str(tmp_path / "job.json")]
 
 
+def test_under_flatpak_the_script_travels_next_to_the_job(tmp_path,
+                                                         monkeypatch):
+    # The sandbox's /app/ingetrazo/… path does not exist for Blender on the
+    # host: «Python file "/app/ingetrazo/resources/blender/render_scene.py"
+    # could not be opened» (Marco, 0.5.6.1 Flatpak).
+    monkeypatch.setattr(rb, "in_flatpak", lambda: True)
+    found = rb.BlenderFound(["flatpak-spawn", "--host", "blender"], "x")
+    job = tmp_path / "job.json"
+    argv = rb.command(found, job)
+    script = argv[argv.index("--python") + 1]
+    assert script == str(tmp_path / "render_scene.py")
+    assert (tmp_path / "render_scene.py").read_bytes() == \
+        rb.render_script().read_bytes()
+
+
+def test_under_flatpak_renders_go_where_the_host_sees_them(tmp_path,
+                                                          monkeypatch):
+    monkeypatch.setattr(rb, "in_flatpak", lambda: True)
+    monkeypatch.setattr(rb.Path, "home", lambda: tmp_path)
+    assert rb.work_base() == tmp_path / ".cache" / "IngeTrazo" / "render"
+
+
 @pytest.mark.parametrize("line, expected", [
     ("INGETRAZO stats Remaining: 00:03.05 | Mem: 77M | Sample 16/64", 0.25),
     ("INGETRAZO stats Rendering 32 / 64 samples", 0.5),
