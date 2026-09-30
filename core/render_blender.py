@@ -451,15 +451,14 @@ def command(found: BlenderFound, job: Path) -> list:
     """The full argv: Blender in the background, without the user's startup
     file or add-ons, running our script on the job.
 
-    Under Flatpak the script travels next to the job: its own path
-    (``/app/ingetrazo/resources/…``) exists only inside the sandbox, and
-    Blender on the host answered «Python file … could not be opened»."""
-    script = render_script()
-    if in_flatpak():
-        import shutil
-        copy = job.parent / script.name
-        shutil.copyfile(script, copy)
-        script = copy
+    The script always travels next to the job, a folder Blender is sure to
+    see. Its own path may exist only for IngeTrazo: inside our Flatpak
+    (``/app/ingetrazo/…``, «Python file … could not be opened»), or under
+    the AppImage's ``/tmp/.mount_…`` when Blender is the Flathub one, whose
+    sandbox sees the home folder but not our /tmp."""
+    import shutil
+    script = job.parent / render_script().name
+    shutil.copyfile(render_script(), script)
     return [*found.command, "-b", "--factory-startup",
             "--python", str(script), "--", str(job)]
 
