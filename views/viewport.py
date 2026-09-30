@@ -3344,7 +3344,7 @@ class Viewport(QOpenGLWidget):
     #: them. Nothing but the document boundary makes them all stale at once.
     _DOCUMENT_CACHES = ("_group_chunks", "_inst_chunks", "_fp_memo",
                         "_proto_wrappers", "_proto_draw", "_faceme_cache",
-                        "_proto_pts_store", "_container_obb",
+                        "_proto_pts_store", "_container_obb", "_placement_frames",
                         # Also keyed by id(): a face-me's placed sprite, the
                         # nested-placement proxies and the arc midpoints per
                         # mesh. A group of the next document born at a dead
