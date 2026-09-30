@@ -2231,5 +2231,7 @@
  "Listening on 127.0.0.1:{port} — connect your MCP client with the lines below.": "Mendengarkan di 127.0.0.1:{port} — hubungkan klien MCP Anda dengan baris di bawah.",
  "Off. Start it to let an AI agent (Claude, Cursor, Antigravity…) model in this document over MCP.": "Mati. Mulai agar agen AI (Claude, Cursor, Antigravity…) memodelkan dalam dokumen ini lewat MCP.",
  "Copied": "Disalin",
- "Render with Blender…": "Render dengan Blender…"
+ "Render with Blender…": "Render dengan Blender…",
+ "Flip Along": "Balik sepanjang",
+ "Blue axis": "Sumbu biru"
 }

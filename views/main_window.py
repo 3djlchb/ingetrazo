@@ -3016,6 +3016,16 @@ class MainWindow(QMainWindow):
                 texm = menu.addMenu(tr("Texture"))
                 texm.addAction(tr("Position"), self._on_texture_position)
                 texm.addAction(tr("Reset Position"), self._on_texture_reset)
+        if has_mesh or has_group:
+            # Flip Along ▸ Red / Green / Blue: a mirror in place about the
+            # selection's centre in one click, the way modelling tutorials
+            # do it (issue #178, Esteban Penzo). The same mirror as the
+            # Flip tool's.
+            flip = menu.addMenu(tr("Flip Along"))
+            for label, axis in ((tr("Red axis"), "x"),
+                                (tr("Green axis"), "y"),
+                                (tr("Blue axis"), "z")):
+                flip.addAction(label, lambda a=axis: self._on_flip_along(a))
         loose_edges = [e for e in sel if isinstance(e, Edge)]
         if loose_edges and all(e in self.viewport.scene.mesh.edges
                                for e in loose_edges):
@@ -3397,6 +3407,11 @@ class MainWindow(QMainWindow):
         self.viewport.update()
         self.statusBar().showMessage(
             tr("Divided into {n} segments", n=n), 3000)
+
+    def _on_flip_along(self, axis: str) -> None:
+        """Right-click ▸ Flip Along ▸ Red / Green / Blue (issue #178)."""
+        from tools.flip import FlipTool
+        FlipTool().flip(self.viewport, axis)
 
     @_repeatable("Reverse Faces")
     def _on_reverse_faces(self) -> None:

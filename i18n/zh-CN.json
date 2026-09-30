@@ -2434,5 +2434,7 @@
  "Pick edges, faces and objects. Shift+click adds or takes away, Ctrl+click adds, Shift+Ctrl+click takes away; the same with a box.": "选取边、面和对象。Shift+点击添加或移除，Ctrl+点击添加，Shift+Ctrl+点击移除；矩形框也一样。",
  "Render the model in Blender, from the Render tab of the side tray.": "从侧边面板的渲染选项卡中，用 Blender 渲染模型。",
  "Show or hide this tab of the side tray.": "显示或隐藏侧边面板的此选项卡。",
- "Start the local bridge through which an AI agent (MCP) drives the open document.": "启动本地网桥，AI 代理 (MCP) 通过它操作打开的文档。"
+ "Start the local bridge through which an AI agent (MCP) drives the open document.": "启动本地网桥，AI 代理 (MCP) 通过它操作打开的文档。",
+ "Flip Along": "沿轴翻转",
+ "Blue axis": "蓝色轴"
 }

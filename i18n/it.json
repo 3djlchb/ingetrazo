@@ -2435,5 +2435,7 @@
  "While a group is edited, the rest of the model shows pale, so the group stands out.": "Mentre si modifica un gruppo, il resto del modello appare sbiadito, così il gruppo risalta.",
  "White faces that hide what lies behind them — a clean line drawing.": "Facce bianche che nascondono ciò che sta dietro — un disegno a linee pulito.",
  "Work the faces out again from the edges: on the plane of the selected faces, or over the whole drawing when it is flat.": "Ricalcola le facce dagli spigoli: sul piano delle facce selezionate, o su tutto il disegno quando è piano.",
- "Wrap the selection in a group that moves as one and keeps apart from the geometry around it.": "Racchiude la selezione in un gruppo che si sposta come uno solo e resta separato dalla geometria circostante."
+ "Wrap the selection in a group that moves as one and keeps apart from the geometry around it.": "Racchiude la selezione in un gruppo che si sposta come uno solo e resta separato dalla geometria circostante.",
+ "Flip Along": "Rifletti lungo",
+ "Blue axis": "Asse blu"
 }

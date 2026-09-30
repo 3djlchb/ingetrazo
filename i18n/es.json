@@ -2434,5 +2434,7 @@
  "Pick edges, faces and objects. Shift+click adds or takes away, Ctrl+click adds, Shift+Ctrl+click takes away; the same with a box.": "Elige aristas, caras y objetos. Mayús+clic añade o quita, Ctrl+clic añade, Mayús+Ctrl+clic quita; igual con la caja de selección.",
  "Render the model in Blender, from the Render tab of the side tray.": "Renderiza el modelo en Blender, desde la pestaña Render del panel lateral.",
  "Show or hide this tab of the side tray.": "Muestra u oculta esta pestaña del panel lateral.",
- "Start the local bridge through which an AI agent (MCP) drives the open document.": "Inicia el puente local por el que un agente de IA (MCP) maneja el documento abierto."
+ "Start the local bridge through which an AI agent (MCP) drives the open document.": "Inicia el puente local por el que un agente de IA (MCP) maneja el documento abierto.",
+ "Flip Along": "Voltear en",
+ "Blue axis": "Eje azul"
 }
