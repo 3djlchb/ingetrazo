@@ -843,7 +843,7 @@ def _from_point_snap(
     """'From point' inference ("Desde el punto"), the single clean version.
 
     Without ``line_dir``, fires only when the draw runs along an axis (within
-    ``axis_deg``), the way SketchUp lights up the red/green/blue axis line. Under
+    ``axis_deg``), the way the red/green/blue axis line lights up. Under
     an explicit directional lock, ``line_dir`` supplies that locked direction
     instead. For every corner (and midpoint) it snaps to the fixed foot of that
     point on the draw line, pinning one spot instead of sliding or scattering.
