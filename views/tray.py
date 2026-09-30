@@ -24,7 +24,6 @@ from PySide6.QtCore import QObject, QPoint, QRect, QSettings, QSize, Qt
 from PySide6.QtGui import QColor, QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
-    QColorDialog,
     QComboBox,
     QDateEdit,
     QDockWidget,
@@ -51,6 +50,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from views.color_dialog import get_color
 from core.i18n import tr
 from views.theme import style as theme_style
 from views.filedialogs import file_dialogs
@@ -2041,8 +2041,12 @@ class MaterialsPanel(QWidget):
         mat = scene.materials.get(name)
         menu = QMenu(button)
         if color is not None:
+            # The dialog opens once the menu has closed: a modal opened
+            # inside the menu's own event loop came back without a colour.
+            from PySide6.QtCore import QTimer
             menu.addAction(tr("Edit colour…"),
-                           lambda: self._edit_named_color(name, color))
+                           lambda: QTimer.singleShot(
+                               0, lambda: self._edit_named_color(name, color)))
         if mat is not None:
             sub = menu.addMenu(tr("Finish for the render"))
             pic = (mat.texture or {}).get("path")
@@ -2081,7 +2085,7 @@ class MaterialsPanel(QWidget):
         existing = scene.materials.get(name)
         base = (existing.color if existing and existing.color
                 else tuple(current_rgb))
-        chosen = QColorDialog.getColor(
+        chosen = get_color(
             QColor.fromRgbF(*base[:3]), self,
             tr("Edit material: {name}", name=name))
         if not chosen.isValid():
@@ -2150,7 +2154,7 @@ class MaterialsPanel(QWidget):
 
     def _on_pick_tint(self) -> None:
         base = self._tint or (0.7, 0.7, 0.7)
-        chosen = QColorDialog.getColor(
+        chosen = get_color(
             QColor.fromRgbF(*base[:3]), self, tr("Tint the texture"))
         if not chosen.isValid():
             return
@@ -2225,7 +2229,7 @@ class MaterialsPanel(QWidget):
 
     def _add_color(self) -> None:
         r, g, b = PaintTool.current_color
-        chosen = QColorDialog.getColor(QColor.fromRgbF(r, g, b), self, tr("Color"))
+        chosen = get_color(QColor.fromRgbF(r, g, b), self, tr("Color"))
         if chosen.isValid():
             # Optional identity: a named colour becomes a registry material
             # (registered on first paint) and shows in per-material takeoffs.
@@ -2385,7 +2389,7 @@ class DimensionStylePanel(QWidget):
 
     def _pick_color(self) -> None:
         c = self._style().get("color", [45, 55, 75])
-        chosen = QColorDialog.getColor(QColor(c[0], c[1], c[2]), _dialog_parent(self),
+        chosen = get_color(QColor(c[0], c[1], c[2]), _dialog_parent(self),
                                        tr("Dimension color"))
         if chosen.isValid():
             self._style()["color"] = [chosen.red(), chosen.green(), chosen.blue()]
@@ -2581,7 +2585,7 @@ class StylesPanel(QWidget):
         if style is None:
             return
         c = self._shown_color(attr)
-        chosen = QColorDialog.getColor(
+        chosen = get_color(
             QColor.fromRgbF(*(float(v) for v in c[:3])), _dialog_parent(self), title)
         if not chosen.isValid():
             return

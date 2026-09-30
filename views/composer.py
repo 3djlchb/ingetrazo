@@ -41,6 +41,7 @@ from core.composition import (COMMON_SCALES, NEW_FRAME_STYLE, PAPER_SIZES_MM, RE
                               apply_frame_camera, cota_line_deg,
                               format_scale, parse_scale,
                               readable_deg, snap_mm)
+from views.color_dialog import get_color
 from core.i18n import tr
 from views.theme import style as theme_style
 from core.composition import pen_px
@@ -6797,11 +6798,10 @@ class ComposerWindow(QMainWindow):
             label.setVisible(visible)
 
     def _pick_forma_color(self, attr: str, button) -> None:
-        from PySide6.QtWidgets import QColorDialog
         item = self._selected_item()
         if not isinstance(item, FormaCanvasItem):
             return
-        col = QColorDialog.getColor(QColor(getattr(item.model, attr)),
+        col = get_color(QColor(getattr(item.model, attr)),
                                     self, tr("Colour"))
         if col.isValid():
             self._panel_edit(item, {attr: col.name()})
@@ -10055,8 +10055,7 @@ class ComposerWindow(QMainWindow):
         self._rebuild_canvas()
 
     def _on_pick_border_color(self) -> None:
-        from PySide6.QtWidgets import QColorDialog
-        col = QColorDialog.getColor(QColor(self.comp.border_color), self,
+        col = get_color(QColor(self.comp.border_color), self,
                                     tr("Border colour"))
         if col.isValid():
             self.comp.border_color = col.name()
@@ -10661,13 +10660,12 @@ class ComposerWindow(QMainWindow):
             f"background: {last};" if on else "")
 
     def _on_pick_text_bg(self) -> None:
-        from PySide6.QtWidgets import QColorDialog
         item = self._selected_item()
         if not isinstance(item, TextItem):
             return
         current = item.model.bg_color or getattr(self, "_last_text_bg",
                                                  "#ffffff")
-        col = QColorDialog.getColor(QColor(current), self,
+        col = get_color(QColor(current), self,
                                     tr("Background colour"))
         if col.isValid():
             self._last_text_bg = col.name()
@@ -10679,11 +10677,10 @@ class ComposerWindow(QMainWindow):
             self.text_bg_btn.setStyleSheet(f"QAbstractButton {{ background: {col.name()}; }}")
 
     def _on_pick_text_color(self) -> None:
-        from PySide6.QtWidgets import QColorDialog
         item = self._selected_item()
         if not isinstance(item, TextItem):
             return
-        col = QColorDialog.getColor(QColor(item.model.color), self,
+        col = get_color(QColor(item.model.color), self,
                                     tr("Colour"))
         if col.isValid():
             self._panel_edit(item, {"color": col.name()})
@@ -10881,13 +10878,12 @@ class ComposerWindow(QMainWindow):
             self._remember_cota_style(item.model)
 
     def _pick_item_bg(self, attr: str, check, button) -> None:
-        from PySide6.QtWidgets import QColorDialog
         item = self._selected_item()
         if item is None or not hasattr(item.model, attr):
             return
         current = getattr(item.model, attr, "") or getattr(
             self, "_last_text_bg", "#ffffff")
-        col = QColorDialog.getColor(QColor(current), self,
+        col = get_color(QColor(current), self,
                                     tr("Background colour"))
         if col.isValid():
             self._last_text_bg = col.name()
@@ -10901,24 +10897,22 @@ class ComposerWindow(QMainWindow):
                 self._remember_cota_style(item.model)
 
     def _pick_item_color(self, attr: str, button) -> None:
-        from PySide6.QtWidgets import QColorDialog
         item = self._selected_item()
         if item is None:
             return
         current = getattr(item.model, attr, "") or getattr(
             item.model, "color", "#1e242c")
-        col = QColorDialog.getColor(QColor(current), self, tr("Colour"))
+        col = get_color(QColor(current), self, tr("Colour"))
         if col.isValid():
             item.prepareGeometryChange()
             self._panel_edit(item, {attr: col.name()})
             button.setStyleSheet(f"QAbstractButton {{ background: {col.name()}; }}")
 
     def _on_pick_cota_text_color(self) -> None:
-        from PySide6.QtWidgets import QColorDialog
         item = self._selected_item()
         if not isinstance(item, CotaCanvasItem):
             return
-        col = QColorDialog.getColor(
+        col = get_color(
             QColor(item.model.text_color or item.model.color), self,
             tr("Text colour"))
         if col.isValid():
@@ -10991,11 +10985,10 @@ class ComposerWindow(QMainWindow):
             if k in self._COTA_STYLE_FIELDS and hasattr(probe, k)}
 
     def _on_pick_cota_color(self) -> None:
-        from PySide6.QtWidgets import QColorDialog
         item = self._selected_item()
         if not isinstance(item, CotaCanvasItem):
             return
-        col = QColorDialog.getColor(QColor(item.model.color), self,
+        col = get_color(QColor(item.model.color), self,
                                     tr("Colour"))
         if col.isValid():
             self._panel_edit(item, {"color": col.name()})
