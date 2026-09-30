@@ -104,7 +104,7 @@ def test_lazy_answers_equal_the_full_index(vp):
 
 def test_only_the_placements_near_the_cursor_are_baked(vp):
     _lazy(vp, True)
-    x, y = vp._world_to_pixel(V(0.5, 0.5, 1.0))
+    x, y = vp._world_to_pixel(_centre(vp, "C10"))
     vp.pick_face_any(x, y)
     live = vp._pick_live
     assert 0 < len(live) < 24

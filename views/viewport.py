@@ -5524,18 +5524,25 @@ class Viewport(QOpenGLWidget):
         # most ~12×/s is visually indistinguishable, and at 100k soft edges
         # the NumPy pass still costs ~4 ms a frame during orbits.
         #
-        # The interval follows the cost: at most a quarter of the time goes
-        # to outlines. A small model keeps the 80 ms; on a model of 21 406
-        # placements, where they cost ~330 ms, an orbit re-derives them
-        # every ~1.3 s instead of on every frame, and a repaint is booked
-        # for when the interval ends, so the still view is always exact
-        # (issue #158). They are world-space segments: between refreshes
+        # On a heavy model (outlines costing over 30 ms) they are kept while
+        # the camera moves and re-derived once it stops, by a booked
+        # repaint (issue #158). They are world-space segments: meanwhile
         # they stay on the geometry, only WHICH edges outline lags.
         import time as _time
         now = _time.monotonic()
         key = (_cache_ver(self), id(self.scene.mesh))
         last = getattr(self, "_sil_last", None)
-        wait = max(0.08, 4.0 * getattr(self, "_sil_cost", 0.0))
+        wait = 0.08
+        # While the camera is moving (it moved since the last frame) and
+        # the outlines are expensive, keep them: re-deriving them mid-orbit
+        # made a 300–440 ms hitch every second or so on the model of #158.
+        # The booked repaint below redraws them once the camera stops.
+        cam = self.camera.projection_matrix() * self.camera.view_matrix()
+        cam = tuple(cam.data())
+        moving = getattr(self, "_sil_cam", None) not in (None, cam)
+        self._sil_cam = cam
+        if moving and getattr(self, "_sil_cost", 0.0) > 0.03:
+            wait = 0.2 + (now - last[1] if last else 0.0)
         if last is not None and last[0] == key and now - last[1] < wait:
             if getattr(self, "_sil_refresh_booked", False) is False:
                 from PySide6.QtCore import QTimer
@@ -8747,6 +8754,20 @@ class Viewport(QOpenGLWidget):
         groups, lo, hi, nf, _ids = table
         if live is None:
             live = self._pick_live = OrderedDict()
+        if near == "skip":
+            return                              # a loose-only query
+        px_at = None
+        if isinstance(near, tuple) and near[0] == "px":
+            px_at = (float(near[1]), float(near[2]))
+            # A pick at a pixel only meets what the ray through it crosses:
+            # the 32 px footprint is for snaps (``("snap", x, y)``), and on a
+            # dense plant it took in thousands of placements per hover.
+            o, d = self._pixel_to_ray(float(near[1]), float(near[2]))
+            if o is None or d is None:
+                return
+            near = ("ray", o, d)
+        elif isinstance(near, tuple) and near[0] == "snap":
+            near = (None, near[1], near[2])
         if near == "all":
             need = np.arange(len(groups))
         elif isinstance(near, tuple) and near[0] == "ray":
@@ -8759,7 +8780,16 @@ class Viewport(QOpenGLWidget):
                 t2 = (hi - o) * inv
             tmin = np.nanmax(np.minimum(t1, t2), axis=1)
             tmax = np.nanmin(np.maximum(t1, t2), axis=1)
-            need = np.flatnonzero((tmax >= np.maximum(tmin, 0.0)))
+            hit = tmax >= np.maximum(tmin, 0.0)
+            if px_at is not None and hit.sum() > 1:
+                # Whatever starts behind the surface the frame shows at this
+                # pixel can be neither picked nor seen.
+                seen = self._depth_world_at(*px_at)
+                if seen is not None and seen[0] == "hit":
+                    t_vis = float(np.linalg.norm(
+                        np.array([seen[1].x(), seen[1].y(), seen[1].z()]) - o))
+                    hit &= tmin <= t_vis * 1.02 + 0.05
+            need = np.flatnonzero(hit)
         else:
             if near is None:
                 pos = getattr(self, "_last_mouse_pos", None)
@@ -9325,7 +9355,7 @@ class Viewport(QOpenGLWidget):
     def _pick_edge(self, screen_x: float, screen_y: float,
                    visible_only: bool):
         import numpy as np
-        idx = self._pick_index(near=("px", screen_x, screen_y))
+        idx = self._pick_index(near="skip")
         if idx.edge_a is None:
             return None
         ax, ay, oka = self._project_px(idx.edge_a)
@@ -9502,7 +9532,7 @@ class Viewport(QOpenGLWidget):
         camera moves. Shared by pick_group's edge fallback and the snap
         prefilter (during a drawing hover the camera is still, so the two
         big projections run once, not per mouse move)."""
-        idx = self._pick_index()
+        idx = self._pick_index(near="skip")
         if idx.gedge_a is None or not len(idx.gedge_a):
             return None
         M = self._np_mvp()
@@ -9546,7 +9576,7 @@ class Viewport(QOpenGLWidget):
         """Screen-projected endpoints of every LOOSE edge — the
         ``_gedge_screen`` twin for the snap prefilter after an explode
         leaves a big loose mesh. Cached until the scene/camera moves."""
-        idx = self._pick_index()
+        idx = self._pick_index(near="skip")
         if idx.edge_a is None or not len(idx.edge_a):
             return None
         M = self._np_mvp()
@@ -9581,7 +9611,7 @@ class Viewport(QOpenGLWidget):
         cand = np.where(d < radius_px)[0]
         if len(cand) > cap:
             cand = cand[np.argsort(d[cand])[:cap]]
-        idx = self._pick_index()
+        idx = self._pick_index(near="skip")
         edges = idx.edges
         n = len(edges)
         return [edges[int(i)] for i in cand if int(i) < n]
@@ -9597,7 +9627,7 @@ class Viewport(QOpenGLWidget):
         the user can actually see."""
         # The placements near THIS pixel enter the index first (lazy mode,
         # #158): the projection below reads the index as it stands.
-        self._pick_index(near=("px", px, py))
+        self._pick_index(near=("snap", px, py))
         proj = self._gedge_screen()
         if proj is None:
             return []
@@ -9609,7 +9639,7 @@ class Viewport(QOpenGLWidget):
         cand = np.where(d < radius_px)[0]
         if len(cand) > cap:
             cand = cand[np.argsort(d[cand])[:cap]]
-        idx = self._pick_index(near=("px", px, py))
+        idx = self._pick_index(near=("snap", px, py))
         ga, gb = idx.gedge_a, idx.gedge_b
         return [_group_pseudo_edge(idx, int(i)) for i in cand]
 
@@ -11176,7 +11206,7 @@ class Viewport(QOpenGLWidget):
             return seen[1]
         if origin is not None and direction is not None and seen is None:
             try:
-                idx = self._pick_index()
+                idx = self._pick_index(near=("px", x, y))
                 if idx.entities:
                     import numpy as np
                     face_t = self._hover_face_t(idx, origin, direction)
@@ -11810,15 +11840,7 @@ class Viewport(QOpenGLWidget):
         q = inv.map(QVector4D(nx, ny, d * 2.0 - 1.0, 1.0))
         if abs(q.w()) < 1e-12:
             return None
-        hit = QVector3D(q.x() / q.w(), q.y() / q.w(), q.z() / q.w())
-        lo, hi = self.scene.bounds()
-        if lo is not None:
-            pad = QVector3D(1.0, 1.0, 1.0) + (hi - lo) * 0.05
-            lo, hi = lo - pad, hi + pad
-            if not (lo.x() <= hit.x() <= hi.x() and lo.y() <= hit.y() <= hi.y()
-                    and lo.z() <= hit.z() <= hi.z()):
-                return ("background", None)   # the ground or the sky, not the model
-        return ("hit", hit)
+        return ("hit", QVector3D(q.x() / q.w(), q.y() / q.w(), q.z() / q.w()))
 
     def _world_under_cursor(self, x: float, y: float) -> Optional[QVector3D]:
         """The world point the cursor points at: nearest geometry hit, else the
@@ -11831,7 +11853,7 @@ class Viewport(QOpenGLWidget):
             else None
         if seen is not None and seen[0] == "hit":
             return seen[1]
-        idx = self._pick_index() if seen is None else None
+        idx = self._pick_index(near=("px", x, y)) if seen is None else None
         if idx is not None and idx.entities:
             import numpy as np
             t = self._ray_hits(idx, origin, direction, idx.ent_vis,
