@@ -4381,7 +4381,14 @@ class MainWindow(QMainWindow):
         to the left of the origin, so the origin stays visible as the
         drawing reference (user request). 1.70 m
         tall. A plain group — select and Delete removes it. Added outside
-        the undo history and without dirtying the document."""
+        the undo history and without dirtying the document. Left out when
+        Preferences say so (#221: parts for a 3D printer start on an empty
+        sheet)."""
+        from PySide6.QtCore import QSettings
+        if str(QSettings().value("new_document/scale_figure", "1")) == "0":
+            # Still a clean new document: nothing to ask about on close.
+            self._saved_version = self.viewport.scene.version
+            return
         # The classic placement, measured by the user: 60-70 cm to the left
         # and 60 cm forward (toward the viewer) of the origin.
         from PySide6.QtGui import QVector3D
