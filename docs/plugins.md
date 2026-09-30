@@ -159,6 +159,14 @@ def setup(app):
     app.add_overlay(lambda viewport, painter: ...)
     px, py, in_front = app.world_to_pixels(points_n_by_3)
 
+    # Your own items, selectable with the Select tool and deleted with
+    # Supr (moving them comes later): `pick` says which item is under a
+    # pixel (asked before the model's geometry), `on_select(id)` hears the
+    # pick and `on_select(None)` its release, `delete(id)` removes it —
+    # through set_document_data, so it is one undo step.
+    app.add_pickable(pick=lambda viewport, px, py: None,
+                     on_select=lambda item: ..., delete=lambda item: ...)
+
     # Offered the snap engine's answer on every hover and click; return a
     # core.snap.SnapResult (its `label` is the ScreenTip) or None.
     app.add_snap_provider(lambda viewport, snap, px, py: None)

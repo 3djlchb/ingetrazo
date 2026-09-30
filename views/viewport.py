@@ -11539,8 +11539,9 @@ class Viewport(QOpenGLWidget):
             tool.on_cancel(self)
             self._release_linear_mode()
             return
-        if self.scene.selection:
+        if self.scene.selection or self.extension_pick is not None:
             self.scene.clear_selection()
+            self.clear_extension_pick()
             self.update()
             return
         if self.scene.edit_group is not None:
@@ -11548,6 +11549,57 @@ class Viewport(QOpenGLWidget):
             return
         if tool is not None:
             tool.on_cancel(self)
+
+    # ---- Items an extension lets the user select (issue #205) ---------------
+    #: The one extension item selected — ``(entry, item_id, scene version)``
+    #: — or None. Kept APART from ``scene.selection``, which only ever holds
+    #: the model's own entities, so nothing that walks the selection (Move,
+    #: layers, zoom, copy) meets a thing it does not know.
+    extension_pick = None
+
+    def pick_extension_item(self, px: float, py: float):
+        """The first extension item under the pixel, as ``(entry, id)``."""
+        for entry in getattr(self, "_ext_pickables", ()):
+            try:
+                item = entry["pick"](self, px, py)
+            except Exception:  # noqa: BLE001 — an extension's bug, not ours
+                import logging
+                logging.getLogger(__name__).exception("pickable failed")
+                continue
+            if item is not None:
+                return entry, item
+        return None
+
+    def set_extension_pick(self, hit) -> None:
+        """Select one extension item (``hit`` from pick_extension_item),
+        telling the extension what was let go and what was taken."""
+        self.clear_extension_pick()
+        entry, item = hit
+        self.extension_pick = (entry, item, self.scene.version)
+        if entry.get("on_select") is not None:
+            entry["on_select"](item)
+        self.update()
+
+    def clear_extension_pick(self, notify: bool = True) -> None:
+        pick = self.extension_pick
+        self.extension_pick = None
+        if pick is not None and notify and pick[0].get("on_select") is not None:
+            pick[0]["on_select"](None)
+
+    def delete_extension_pick(self) -> bool:
+        """Supr on a selected extension item: the extension deletes it (as
+        its own undo step). A pick older than the document's last change
+        is dropped instead — after an undo the id may name another item."""
+        pick = self.extension_pick
+        if pick is None:
+            return False
+        entry, item, version = pick
+        self.clear_extension_pick()
+        if version != self.scene.version or entry.get("delete") is None:
+            return version != self.scene.version
+        entry["delete"](item)
+        self.update()
+        return True
 
     def release_constraints(self) -> bool:
         """Drop the sticky drawing constraints — the arrow-key axis lock and

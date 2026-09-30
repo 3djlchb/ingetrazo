@@ -212,6 +212,34 @@ class ExtensionApp:
         or ``None`` to leave the engine's answer."""
         self.viewport._ext_snap_providers.append(fn)
 
+    def add_pickable(self, pick, on_select=None, delete=None) -> None:
+        """Let the user SELECT this extension's own items with the Select
+        tool and DELETE them with Supr (issue #205; moving comes later).
+
+        ``pick(viewport, px, py)`` → an item id (any value) under that
+        pixel, or ``None``. It is asked before the model's geometry, so an
+        item drawn over the model wins the click. ``on_select(item_id)``
+        is told what was selected, and ``on_select(None)`` when it is let
+        go (a click elsewhere, Esc). ``delete(item_id)`` removes it — do
+        it with :meth:`set_document_data`, so it is one undo step. After
+        any change to the document the pick is dropped, so Supr never
+        deletes by a stale id."""
+        vp = self.viewport
+        if not hasattr(vp, "_ext_pickables"):
+            vp._ext_pickables = []
+        vp._ext_pickables.append(
+            {"key": self.key, "pick": pick, "on_select": on_select,
+             "delete": delete})
+
+    def release_pick(self) -> None:
+        """Let go of this extension's selected item, without telling it
+        back (it already knows): after it changed its own data, say."""
+        vp = self.viewport
+        pick = getattr(vp, "extension_pick", None)
+        if pick is not None and pick[0]["key"] == self.key:
+            vp.clear_extension_pick(notify=False)
+            vp.update()
+
     # ---- Documents of the extension's own -----------------------------------------
     def add_file_opener(self, suffix: str, fn) -> None:
         """Documents ending in ``suffix`` (``".xyz"``) are the extension's:
