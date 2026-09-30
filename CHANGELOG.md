@@ -15,6 +15,11 @@ follow [SemVer](https://semver.org).
   recorrer todas las copias en cada cuadro para firmarlas, expandirlas,
   buscar figuras de frente o leer sus matrices: lo hace solo cuando algo
   cambia. En la plaza, pintar −10 % y orbitar −8 % (@pacaeiro, Ronilson).
+- **El zoom y el giro ya no se cuelgan la primera vez en un modelo
+  enorme**: para saber qué punto hay bajo el cursor leen la profundidad de
+  la imagen en pantalla (unos 15 ms) en vez de construir el índice de
+  selección, que horneaba todas las copias — minutos y 8 GB en el primer
+  giro de rueda con el modelo de la #158.
 
 ## [0.5.7] — 2026-09-30
 

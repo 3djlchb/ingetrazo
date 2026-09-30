@@ -2123,6 +2123,9 @@ class Viewport(QOpenGLWidget):
         self._depth_snap = None
         if self._annotations_need_depth():
             self._capture_depth(w, h)
+        # What the scene FBO now holds: the depth under the cursor can be
+        # read from it while the camera stays here (``_depth_world_at``).
+        self._painted_view = (tuple(mvp.data()), w, h)
 
         # Blit colour from our scene FBO to the widget's default framebuffer.
         # We can't use QOpenGLFramebufferObject.blitFramebuffer(None, src) here
@@ -10950,7 +10953,11 @@ class Viewport(QOpenGLWidget):
         Worked out once per gesture: the pivot stays put while dragging.
         """
         origin, direction = self._pixel_to_ray(x, y)
-        if origin is not None and direction is not None:
+        seen = self._depth_world_at(x, y) if hasattr(self, "_depth_world_at") \
+            else None
+        if seen is not None and seen[0] == "hit":
+            return seen[1]
+        if origin is not None and direction is not None and seen is None:
             try:
                 idx = self._pick_index()
                 if idx.entities:
@@ -11543,6 +11550,59 @@ class Viewport(QOpenGLWidget):
                 tool.on_box_select(self, rect, crossing, additive, mode=mode)
             self.update()
 
+    def _depth_world_at(self, x: float, y: float):
+        """What the last frame shows under widget pixel ``(x, y)``, read from
+        its depth: ``("hit", point)``, ``("background", None)`` or ``None``
+        when there is no frame to read (the camera moved since, an export,
+        no GL). The zoom and the orbit pivot ask this first: finding the
+        point with a ray needs the pick index, and on a model of 21 406
+        placements building it baked every one — minutes and 8 GB on the
+        first wheel notch (issue #158). A read-back is ~8 ms, and it is
+        what is on screen, hidden objects and cuts included."""
+        painted = getattr(self, "_painted_view", None)
+        fbo = getattr(self, "_scene_fbo", None)
+        if painted is None or fbo is None or self.context() is None:
+            return None
+        mvp = self.camera.projection_matrix() * self.camera.view_matrix()
+        if tuple(mvp.data()) != painted[0]:
+            return None
+        w, h = painted[1], painted[2]
+        snap = getattr(self, "_depth_snap", None)
+        if snap is None or tuple(snap[1].data()) != painted[0]:
+            self.makeCurrent()
+            try:
+                self._capture_depth(w, h)
+            finally:
+                self.doneCurrent()
+            snap = getattr(self, "_depth_snap", None)
+            if snap is None:
+                return None
+        buf, _mvp, inv = snap[0], snap[1], snap[2]
+        if float(buf.min()) >= float(buf.max()):
+            return None                  # a blank read-back: this GL gives no depth
+        dpr = w / max(1, self.width())
+        ix = int(x * dpr)
+        iy = int(h - 1 - y * dpr)
+        if not (0 <= ix < w and 0 <= iy < h):
+            return None
+        d = float(buf[iy, ix])
+        if d >= 1.0:
+            return ("background", None)
+        nx = (ix + 0.5) / w * 2.0 - 1.0
+        ny = (iy + 0.5) / h * 2.0 - 1.0
+        q = inv.map(QVector4D(nx, ny, d * 2.0 - 1.0, 1.0))
+        if abs(q.w()) < 1e-12:
+            return None
+        hit = QVector3D(q.x() / q.w(), q.y() / q.w(), q.z() / q.w())
+        lo, hi = self.scene.bounds()
+        if lo is not None:
+            pad = QVector3D(1.0, 1.0, 1.0) + (hi - lo) * 0.05
+            lo, hi = lo - pad, hi + pad
+            if not (lo.x() <= hit.x() <= hi.x() and lo.y() <= hit.y() <= hi.y()
+                    and lo.z() <= hit.z() <= hi.z()):
+                return ("background", None)   # the ground or the sky, not the model
+        return ("hit", hit)
+
     def _world_under_cursor(self, x: float, y: float) -> Optional[QVector3D]:
         """The world point the cursor points at: nearest geometry hit, else the
         ground plane (Z=0), else the focal plane through the target."""
@@ -11550,8 +11610,12 @@ class Viewport(QOpenGLWidget):
         if origin is None or direction is None:
             return None
         best_t = None
-        idx = self._pick_index()
-        if idx.entities:
+        seen = self._depth_world_at(x, y) if hasattr(self, "_depth_world_at") \
+            else None
+        if seen is not None and seen[0] == "hit":
+            return seen[1]
+        idx = self._pick_index() if seen is None else None
+        if idx is not None and idx.entities:
             import numpy as np
             t = self._ray_hits(idx, origin, direction, idx.ent_vis,
                                reduce_global=True)
