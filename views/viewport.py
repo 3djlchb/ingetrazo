@@ -210,6 +210,8 @@ GL_SRC_ALPHA = 0x0302
 GL_ONE_MINUS_SRC_ALPHA = 0x0303
 GL_POLYGON_OFFSET_FILL = 0x8037
 GL_CULL_FACE = 0x0B44
+GL_CW = 0x0900
+GL_CCW = 0x0901
 GL_FRONT = 0x0404
 GL_BACK = 0x0405
 GL_LEQUAL = 0x0203
@@ -2305,13 +2307,13 @@ class Viewport(QOpenGLWidget):
         if (_NO_INSTANCING or getattr(g, "xform", None) is None
                 or getattr(g, "billboard", False)):
             return False
-        if g.xform.determinant() < 0.0:
-            # A MIRRORED placement: the instanced draw runs the prototype's
-            # own triangles through the matrix, which turns them inside out
-            # for GL (front becomes back). The consolidated path draws the
-            # instance chunk, whose winding is put right — see
-            # ``_instance_chunk``. Mirrors are rare; the cost is nothing.
-            return False
+        # A MIRRORED placement turns the prototype's triangles inside out
+        # for GL (front becomes back). It used to fall back to the
+        # consolidated path, one baked copy per placement — «mirrors are
+        # rare», until an industrial model brought 6 203 of them, 4.2
+        # million faces baked one by one (issue #158). It draws instanced
+        # now, in batches of its own under a clockwise front face
+        # (``_front_face``).
         from core.group import effective_material
         base = self._proto_base_chunk(g.mesh, effective_material(g))
         # Translucent / back-side / glass content still rides the
@@ -2494,6 +2496,32 @@ class Viewport(QOpenGLWidget):
         walk(group, getattr(group, "xform", None), hidden=bool(group.hidden))
         return out
 
+    def _placement_bbox(self, g):
+        """World AABB of an instanced placement from its PROTOTYPE's local
+        box and the placement matrix — eight corners, no bake. Reading it
+        off ``_group_chunk(g)`` baked the whole placement to world
+        coordinates only to take its box: on the model of issue #158 that
+        was 21 000 baked copies of geometry the instanced pass never uses."""
+        from core.group import effective_material
+        base = self._proto_base_chunk(g.mesh, effective_material(g))
+        bb = base.get("bbox")
+        if not bb:
+            return None
+        (x0, y0, z0), (x1, y1, z1) = bb
+        m = g.xform
+        pts = [m.map(QVector3D(x, y, z))
+               for x in (x0, x1) for y in (y0, y1) for z in (z0, z1)]
+        return ((min(p.x() for p in pts), min(p.y() for p in pts),
+                 min(p.z() for p in pts)),
+                (max(p.x() for p in pts), max(p.y() for p in pts),
+                 max(p.z() for p in pts)))
+
+    def _front_face(self, mirrored: bool) -> None:
+        """Clockwise front faces for a MIRRORED batch — the mirror flips the
+        winding of every prototype triangle, and GL decides front and back
+        (``gl_FrontFacing``, the culled back-tint pass) by winding."""
+        self._gl.glFrontFace(GL_CW if mirrored else GL_CCW)
+
     def _gather_instanced(self):
         """Visible, eligible instances grouped by prototype mesh — computed
         once per frame (faces pass), reused by the edges pass. Instances are
@@ -2522,7 +2550,7 @@ class Viewport(QOpenGLWidget):
                 if not self._instanced_eligible(g):
                     continue
                 groups.append(g)
-                boxes.append(self._group_chunk(g).get("bbox"))
+                boxes.append(self._placement_bbox(g))
             # Boxless chunks (unknown extents) always draw: give them an
             # infinite box so the vectorised test keeps them.
             lo = np.array([b[0] if b else (-np.inf,) * 3 for b in boxes],
@@ -2554,8 +2582,9 @@ class Viewport(QOpenGLWidget):
         for i in np.flatnonzero(keep):
             g = groups[i]
             paint = effective_material(g)
-            out.setdefault((id(g.mesh), _material_sig(paint)),
-                           (g.mesh, paint, []))[2].append(g)
+            mirrored = g.xform.determinant() < 0.0
+            out.setdefault((id(g.mesh), _material_sig(paint), mirrored),
+                           (g.mesh, paint, [], mirrored))[2].append(g)
         self._frame_instanced = out
         return out
 
@@ -2746,8 +2775,9 @@ class Viewport(QOpenGLWidget):
             self._program.setUniformValue1f(self._loc_opacity,
                                             XRAY_FACE_OPACITY)
             self._gl.glDepthMask(GL_FALSE)
-        for mesh, paint, groups in by_proto.values():
+        for mesh, paint, groups, mirrored in by_proto.values():
             entry = self._ensure_proto_draw(mesh, paint)
+            self._front_face(mirrored)
             for lote, fade in self._instanced_batches(groups):
                 if not lote:
                     continue
@@ -2820,6 +2850,7 @@ class Viewport(QOpenGLWidget):
                         GL_TRIANGLES, 0, entry["dback_count"], n)
                     entry["dback_vao"].release()
                     self._gl.glDisable(GL_CULL_FACE)
+        self._front_face(False)
         self._program.setUniformValue1f(self._loc_fade, 0.0)
         if mode == "xray":
             self._program.setUniformValue1f(self._loc_opacity, 1.0)
@@ -2832,7 +2863,7 @@ class Viewport(QOpenGLWidget):
         if not by_proto:
             return
         extra = self.context().extraFunctions()
-        for mesh, paint, groups in by_proto.values():
+        for mesh, paint, groups, _mirrored in by_proto.values():
             entry = self._ensure_proto_draw(mesh, paint)
             n = self._update_inst_matrices(entry, groups)
             if entry["vcol_count"]:
@@ -2870,7 +2901,7 @@ class Viewport(QOpenGLWidget):
         if not by_proto:
             return
         extra = self.context().extraFunctions()
-        for mesh, paint, groups in by_proto.values():
+        for mesh, paint, groups, _mirrored in by_proto.values():
             entry = self._ensure_proto_draw(mesh, paint)
             if not entry["edge_count"]:
                 continue
@@ -3924,7 +3955,7 @@ class Viewport(QOpenGLWidget):
         finally:
             self._frame_planes = saved
         extra = self.context().extraFunctions()
-        for mesh, paint, groups in by_proto.values():
+        for mesh, paint, groups, _mirrored in by_proto.values():
             entry = self._ensure_proto_draw(mesh, paint)
             n = self._update_inst_matrices(entry, groups)
             prog.bind()                # entry building binds the main program
@@ -5460,6 +5491,12 @@ class Viewport(QOpenGLWidget):
             e_np = np.array([eye.x(), eye.y(), eye.z()])
             planes = getattr(self, "_frame_planes", None)
             for g in groups:
+                if getattr(g, "xform", None) is not None:
+                    got = self._instance_silhouette(g, eye, planes)
+                    if got is not None:
+                        if got:
+                            chunks.append(got)
+                        continue
                 ch = self._group_chunk(g)
                 if ch["soft_pts"] is None:
                     continue
@@ -5484,6 +5521,43 @@ class Viewport(QOpenGLWidget):
         count = len(raw) // 12
         self._sil_last = (key, now, count)
         return count
+
+    def _instance_silhouette(self, g, eye, planes):
+        """Silhouette bytes of a component placement, worked out on the
+        PROTOTYPE's shared arrays — ``None`` when it cannot be (a singular
+        matrix), and the caller bakes as before.
+
+        Which side of a plane the eye is on does not change under the
+        placement's affine map, and a mirror flips BOTH faces of a soft
+        edge at once, so «its faces straddle the view» reads the same with
+        the eye taken into local coordinates. Only the edges that pass are
+        carried to the world. Baking every placement to world coordinates
+        for this test was the last per-placement bake of a frame: with
+        profiles on, the 21 000 placements of issue #158 baked 14 million
+        faces the instanced draw never needed."""
+        import numpy as np
+        from core.group import effective_material
+        base = self._proto_base_chunk(g.mesh, effective_material(g))
+        if base["soft_pts"] is None:
+            return b""
+        if planes is not None:
+            bb = self._placement_bbox(g)
+            if bb is not None and not self._aabb_visible(planes, bb[0], bb[1]):
+                return b""
+        inv, ok = g.xform.inverted()
+        if not ok:
+            return None
+        le = inv.map(eye)
+        e_np = np.array([le.x(), le.y(), le.z()])
+        s0 = np.einsum("ij,ij->i", base["soft_n0"], base["soft_c0"] - e_np)
+        s1 = np.einsum("ij,ij->i", base["soft_n1"], base["soft_c1"] - e_np)
+        mask = base["soft_single"] | ((s0 < 0) != (s1 < 0))
+        if not mask.any():
+            return b""
+        m = np.array(g.xform.data(), dtype=np.float64).reshape(4, 4, order="F")
+        seg = base["soft_pts"].reshape(-1, 6)[mask].astype(np.float64)
+        pts = seg.reshape(-1, 3) @ m[:3, :3].T + m[:3, 3]
+        return pts.astype(np.float32).tobytes()
 
     def _upload_hover_edge(self, edge: Edge) -> int:
         """Upload the hovered edge — or, for a curve segment, its whole contour
