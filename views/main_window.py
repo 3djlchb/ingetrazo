@@ -1135,6 +1135,14 @@ class MainWindow(QMainWindow):
         self._act_style_profiles.toggled.connect(
             lambda on: self._set_style_field("profiles", on))
         style_menu.addAction(self._act_style_profiles)
+        self._act_style_back_edges = QAction(tr("Back edges"), self)
+        self._act_style_back_edges.setShortcut(QKeySequence("K"))
+        self._act_style_back_edges.setStatusTip(tr(
+            "Draw the edges hidden behind faces as dashed lines."))
+        self._act_style_back_edges.setCheckable(True)
+        self._act_style_back_edges.toggled.connect(
+            lambda on: self._set_style_field("back_edges", on))
+        style_menu.addAction(self._act_style_back_edges)
         self._sync_style_menu()
 
         # How the model outside a group reads while you edit it (the usual
@@ -2837,6 +2845,8 @@ class MainWindow(QMainWindow):
             act.setChecked(name == style.name)
         for act, value in ((self._act_style_edges, style.edges),
                            (self._act_style_profiles, style.profiles),
+                           (getattr(self, "_act_style_back_edges", None),
+                            getattr(style, "back_edges", False)),
                            (getattr(self, "_act_section_fill", None),
                             getattr(style, "section_fill", True))):
             if act is None:      # menu still under construction

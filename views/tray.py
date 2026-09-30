@@ -2496,6 +2496,11 @@ class StylesPanel(QWidget):
         self._profiles = QCheckBox(tr("Profiles"))
         self._profiles.toggled.connect(self._apply_edits)
         grid.addWidget(self._profiles, 3, 0)
+        self._back_edges = QCheckBox(tr("Back edges"))
+        self._back_edges.setToolTip(tr(
+            "Draw the edges hidden behind faces as dashed lines."))
+        self._back_edges.toggled.connect(self._apply_edits)
+        grid.addWidget(self._back_edges, 3, 1)
 
         grid.addWidget(QLabel(tr("Front color:")), 4, 0)
         self._front_c = self._swatch(
@@ -2592,6 +2597,7 @@ class StylesPanel(QWidget):
                 self._mode.findData(style.face_mode))
             self._edges.setChecked(style.edges)
             self._profiles.setChecked(style.profiles)
+            self._back_edges.setChecked(getattr(style, "back_edges", False))
             self._sky.setChecked(style.sky)
             self._fill.setChecked(style.section_fill)
             self._edge_c.setStyleSheet(self._css(style.edge_color))
@@ -2624,6 +2630,7 @@ class StylesPanel(QWidget):
         style.face_mode = self._mode.currentData()
         style.edges = self._edges.isChecked()
         style.profiles = self._profiles.isChecked()
+        style.back_edges = self._back_edges.isChecked()
         style.sky = self._sky.isChecked()
         style.section_fill = self._fill.isChecked()
         self._window._sync_style_menu()

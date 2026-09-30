@@ -90,6 +90,7 @@ from PySide6.QtGui import (
     QPen,
     QPolygonF,
     QSurfaceFormat,
+    QVector2D,
     QVector3D,
     QVector4D,
 )
@@ -1191,6 +1192,8 @@ class Viewport(QOpenGLWidget):
         self._loc_shadow_overlay = self._program.uniformLocation(
             "u_shadow_overlay")
         self._loc_stipple = self._program.uniformLocation("u_stipple")
+        self._loc_viewport_px = self._program.uniformLocation("u_viewport_px")
+        self._loc_dash_px = self._program.uniformLocation("u_dash_px")
         self._depth_program = self._compile_depth_program()
         self._loc_d_mvp = self._depth_program.uniformLocation("u_mvp")
         self._loc_d_clip_plane = self._depth_program.uniformLocation(
@@ -2048,6 +2051,9 @@ class Viewport(QOpenGLWidget):
             self._gl.glDepthFunc(GL_LEQUAL)
             self._gl.glDepthMask(GL_TRUE)
             self._gl.glClear(GL_DEPTH_BUFFER_BIT)
+        elif (show_edges and getattr(style, "back_edges", False)
+                and mode != "wireframe"):
+            self._draw_back_edges(tuple(ec[:3]), w, h)
         if len(_jit_e) > 1:
             self._program.setUniformValue(self._loc_mvp, mvp)
 
@@ -2876,6 +2882,32 @@ class Viewport(QOpenGLWidget):
                 for _tk, s0, cnt in entry["tex_runs"]:
                     extra.glDrawArraysInstanced(GL_TRIANGLES, s0, cnt, n)
                 entry["tex_vao"].release()
+
+    def _draw_back_edges(self, color, w: int, h: int) -> None:
+        """Back Edges (K, issue #234): the edges a face hides, dashed, over
+        the opaque model — where a bar or a frame member continues behind
+        a face in a shop drawing. The faces already wrote their depth
+        (pushed back by the polygon offset, so an edge lying ON a face is
+        not «behind» it): what fails that test is drawn with GL_GREATER and
+        a dash measured along each line, without writing depth."""
+        dpr = max(1.0, float(self.devicePixelRatioF()))
+        self._program.setUniformValue(self._loc_viewport_px,
+                                      QVector2D(float(w), float(h)))
+        self._program.setUniformValue1f(self._loc_dash_px, 4.0 * dpr)
+        self._program.setUniformValue(self._loc_stipple, 4)
+        self._gl.glDepthFunc(GL_GREATER)
+        self._gl.glDepthMask(GL_FALSE)
+        self._set_color(*color, 1.0)
+        if self._edges_count > 0:
+            self._edges_vao.bind()
+            for _vs, _vc in getattr(self, "_frame_edge_spans",
+                                    ((0, self._edges_count),)):
+                self._gl.glDrawArrays(GL_LINES, _vs, _vc)
+            self._edges_vao.release()
+        self._draw_instanced_edges()
+        self._gl.glDepthFunc(GL_LEQUAL)
+        self._gl.glDepthMask(GL_TRUE)
+        self._program.setUniformValue(self._loc_stipple, 0)
 
     def _xray_face_depth(self) -> None:
         """Write every face's depth and no colour — X-ray's translucent

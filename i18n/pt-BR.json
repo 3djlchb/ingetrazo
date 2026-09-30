@@ -2454,5 +2454,8 @@
  "Architect. The Windowizer example extension: parametric windows from faces, and the extension API's menus and group data.": "Arquiteto. A extensão de exemplo Windowizer: janelas paramétricas a partir de faces, e os menus e dados por grupo da API de extensões.",
  "Active colour changed — click faces to paint it": "Cor ativa alterada: clique nas faces para pintá-la",
  "Toggle X-ray": "Alternar raio-X",
- "Switch to X-ray, or back to the style you were in.": "Muda para raio-X, ou volta ao estilo em que você estava."
+ "Switch to X-ray, or back to the style you were in.": "Muda para raio-X, ou volta ao estilo em que você estava.",
+ "Back edges": "Arestas de trás",
+ "Draw the edges hidden behind faces as dashed lines.": "Desenha tracejadas as arestas que ficam atrás das faces.",
+ "The Polygon properties example extension: area, centroid and second moments of a face.": "A extensão de exemplo Propriedades do polígono: área, centroide e momentos de segunda ordem de uma face."
 }

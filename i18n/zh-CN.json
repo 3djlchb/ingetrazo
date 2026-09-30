@@ -2455,5 +2455,8 @@
  "Architect. The Windowizer example extension: parametric windows from faces, and the extension API's menus and group data.": "建筑师。示例扩展 Windowizer：由面生成参数化窗户，以及扩展 API 的菜单和按组数据。",
  "Active colour changed — click faces to paint it": "已更改当前颜色：点击面进行涂色",
  "Toggle X-ray": "切换X光",
- "Switch to X-ray, or back to the style you were in.": "切换到X光，或回到之前的样式。"
+ "Switch to X-ray, or back to the style you were in.": "切换到X光，或回到之前的样式。",
+ "Back edges": "背面边线",
+ "Draw the edges hidden behind faces as dashed lines.": "以虚线绘制被面遮挡的边线。",
+ "The Polygon properties example extension: area, centroid and second moments of a face.": "示例扩展“多边形属性”：面的面积、形心和二阶矩。"
 }
