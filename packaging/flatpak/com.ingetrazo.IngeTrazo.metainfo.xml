@@ -75,6 +75,17 @@
   <url type="vcs-browser">https://github.com/ingelibre/ingetrazo</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.5.6.1" date="2026-09-29">
+      <description>
+        <p>The AI assistant, the MCP bridge and Render with Blender load again
+        in the Windows, macOS, AppImage and tar packages; IngeTrazo describes
+        itself on its own terms across the interface and its listings.</p>
+        <p xml:lang="es">El Asistente IA, el puente MCP y Renderizar con
+        Blender vuelven a cargar en los paquetes de Windows, macOS, AppImage
+        y tar; IngeTrazo se describe por sí mismo en la interfaz y sus
+        fichas.</p>
+      </description>
+    </release>
     <release version="0.5.6" date="2026-09-29">
       <description>
         <p>Render with Blender: photorealistic images of the view with the

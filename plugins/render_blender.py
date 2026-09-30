@@ -64,11 +64,8 @@ _SETTINGS = "render/"
 
 
 def _work_dir() -> Path:
-    from PySide6.QtCore import QStandardPaths
-    base = QStandardPaths.writableLocation(
-        QStandardPaths.StandardLocation.GenericCacheLocation)
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    return Path(base) / "IngeTrazo" / "render" / stamp
+    return rb.work_base() / stamp
 
 
 # ---- The document's lights and ambience ---------------------------------------
