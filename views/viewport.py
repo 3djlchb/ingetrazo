@@ -2351,6 +2351,25 @@ class Viewport(QOpenGLWidget):
         memo = getattr(self, "_epoch_memo", None)
         if memo is not None and memo[0] == (tick, _cache_ver(self)):
             return memo[1]
+        # Across ticks: while the version is live (not frozen by a groups
+        # preview, whose matrices move without a version bump) and none of
+        # the cheap switches moved, nothing the walk reads can have changed
+        # — every edit of a group goes through a command that bumps the
+        # version. Orbiting a model of 21 406 placements walked them all on
+        # every frame, ~55 ms (issue #158).
+        cheap = (sc.version, id(sc.edit_group), id(sc.mesh),
+                 getattr(self, "_preview_epoch", 0),
+                 bool(getattr(self, "_preview_groups", None)),
+                 getattr(self, "_edit_rest_mode", None),
+                 bool(getattr(sc, "show_hidden_objects", False)),
+                 bool(getattr(sc, "show_hidden_geometry", False)),
+                 tuple((ly.name, ly.visible, ly.locked) for ly in sc.layers),
+                 len(sc.groups))
+        live = getattr(self, "_frozen_cache_version", None) is None
+        same = getattr(self, "_epoch_same", None)
+        if live and same is not None and same[0] == cheap:
+            self._epoch_memo = ((tick, _cache_ver(self)), same[1])
+            return same[1]
         parts: list = [id(sc.edit_group), id(sc.mesh),
                        getattr(self, "_preview_epoch", 0),
                        bool(getattr(self, "_preview_groups", None)),
@@ -2388,6 +2407,7 @@ class Viewport(QOpenGLWidget):
             walk(g)
         epoch = hash(tuple(parts))
         self._epoch_memo = ((tick, _cache_ver(self)), epoch)
+        self._epoch_same = (cheap, epoch) if live else None
         return epoch
 
     def _placements(self):
@@ -2407,8 +2427,17 @@ class Viewport(QOpenGLWidget):
         A scene with no nested placements returns ``scene.groups`` itself."""
         groups = self.scene.groups
         ctx = self.scene.edit_group
+        # The expansion only changes with the placements (their matrices
+        # included, in the epoch): rebuilt twice a frame it cost ~65 ms on
+        # a model of 21 406 placements (issue #158).
+        epoch_of = getattr(self, "_placements_epoch", None)
+        key = (epoch_of(), id(groups), len(groups)) if epoch_of else None
+        memo = getattr(self, "_placements_memo", None)
+        if key is not None and memo is not None and memo[0] == key:
+            return memo[1]
         anidado = ctx is not None and getattr(ctx, "children", None)
         if not anidado and not any(getattr(g, "children", None) for g in groups):
+            self._placements_memo = (key, groups)
             return groups                      # unchanged for flat scenes
         cache = getattr(self, "_placement_proxies", None)
         if cache is None:
@@ -2424,6 +2453,7 @@ class Viewport(QOpenGLWidget):
                                                   None):
             for k in [k for k in cache if k not in seen]:
                 cache.pop(k, None)
+        self._placements_memo = (key, out)
         return out
 
     def _expand_placements(self, group, out=None, seen=None):
@@ -2760,7 +2790,16 @@ class Viewport(QOpenGLWidget):
                     pass
 
     def _update_inst_matrices(self, entry, groups) -> int:
-        sig = tuple((id(g), tuple(g.xform.data())) for g in groups)
+        # The placements' matrices are in the epoch: with it and the ids,
+        # nothing has to read sixteen numbers per placement per pass
+        # (~20 ms a frame for 21 406 placements, issue #158). A groups
+        # preview moves matrices under a frozen version; the epoch is
+        # walked every tick then, so it still sees them.
+        epoch_of = getattr(self, "_placements_epoch", None)
+        if epoch_of is not None:
+            sig = (epoch_of(), tuple(map(id, groups)))
+        else:
+            sig = tuple((id(g), tuple(g.xform.data())) for g in groups)
         if entry["mat_sig"] != sig:
             import numpy as np
             raw = np.asarray([list(g.xform.data()) for g in groups],
@@ -3379,6 +3418,11 @@ class Viewport(QOpenGLWidget):
                 cache.clear()
         self._edges_version = -1          # rebuild the VBOs from nothing
         self._frozen_cache_version = None
+        self._sil_table = None            # holds the old document's bakes
+        self._sil_groups = None
+        self._billboard_groups = None
+        self._placements_memo = None
+        self._epoch_same = None
 
     def reset_texture_cache(self) -> None:
         """Return the document's cached GL textures to the driver.
@@ -5229,9 +5273,17 @@ class Viewport(QOpenGLWidget):
         """Per-frame pass: each face-me billboard is a textured cutout quad
         turned toward the camera (2D people). Depth-tested, so it
         hides behind walls correctly; the shader discards transparent texels."""
-        groups = [g for g in self._placements()
-                  if getattr(g, "billboard", False)
-                  and self.scene.entity_visible(g)]
+        # The face-me figures are a handful among thousands of placements:
+        # found once per change of the placements, not on every frame.
+        bkey = self._placements_epoch()
+        bmemo = getattr(self, "_billboard_groups", None)
+        if bmemo is not None and bmemo[0] == bkey:
+            groups = bmemo[1]
+        else:
+            groups = [g for g in self._placements()
+                      if getattr(g, "billboard", False)
+                      and self.scene.entity_visible(g)]
+            self._billboard_groups = (bkey, groups)
         if not groups:
             return
         self._program.setUniformValue(self._loc_use_tex, 1)
@@ -5465,11 +5517,29 @@ class Viewport(QOpenGLWidget):
         # Throttle: the silhouette is view-dependent but re-deriving it at
         # most ~12×/s is visually indistinguishable, and at 100k soft edges
         # the NumPy pass still costs ~4 ms a frame during orbits.
+        #
+        # The interval follows the cost: at most a quarter of the time goes
+        # to outlines. A small model keeps the 80 ms; on a model of 21 406
+        # placements, where they cost ~330 ms, an orbit re-derives them
+        # every ~1.3 s instead of on every frame, and a repaint is booked
+        # for when the interval ends, so the still view is always exact
+        # (issue #158). They are world-space segments: between refreshes
+        # they stay on the geometry, only WHICH edges outline lags.
         import time as _time
         now = _time.monotonic()
         key = (_cache_ver(self), id(self.scene.mesh))
         last = getattr(self, "_sil_last", None)
-        if last is not None and last[0] == key and now - last[1] < 0.08:
+        wait = max(0.08, 4.0 * getattr(self, "_sil_cost", 0.0))
+        if last is not None and last[0] == key and now - last[1] < wait:
+            if getattr(self, "_sil_refresh_booked", False) is False:
+                from PySide6.QtCore import QTimer
+                self._sil_refresh_booked = True
+
+                def _refresh():
+                    self._sil_refresh_booked = False
+                    self.update()
+                QTimer.singleShot(int((wait - (now - last[1])) * 1000) + 20,
+                                  self, _refresh)
             return last[2]        # VBO still holds the last upload
 
         # Loose soft edges run the SAME vectorised view test as group
@@ -5536,15 +5606,27 @@ class Viewport(QOpenGLWidget):
         # on exactly the geometry meant to recede. Only the subject profiles.
         skip_context = (self.scene.edit_group is not None
                         and self._edit_rest_mode in ("fade", "hide"))
-        groups = [g for g in self._placements()
-                  if self.scene.entity_visible(g)
-                  and id(g) not in pv_sil
-                  and not getattr(g, "billboard", False)
-                  and not (skip_context and self._draws_in_edit_context(g))]
+        # Which placements get an outline changes with the placements, not
+        # with the camera: the visibility test of every one of them ran on
+        # every frame (~100 ms on 21 406 placements, issue #158).
+        gkey = (self._placements_epoch(), len(pv_sil), skip_context)
+        gmemo = getattr(self, "_sil_groups", None)
+        if gmemo is not None and gmemo[0] == gkey and not pv_sil:
+            groups = gmemo[1]
+        else:
+            groups = [g for g in self._placements()
+                      if self.scene.entity_visible(g)
+                      and id(g) not in pv_sil
+                      and not getattr(g, "billboard", False)
+                      and not (skip_context and self._draws_in_edit_context(g))]
+            self._sil_groups = (gkey, groups)
         if groups:
             import numpy as np
             e_np = np.array([eye.x(), eye.y(), eye.z()])
             planes = getattr(self, "_frame_planes", None)
+            got, groups = self._instanced_silhouettes(groups, eye, planes)
+            if got:
+                chunks.append(got)
             for g in groups:
                 if getattr(g, "xform", None) is not None:
                     got = self._instance_silhouette(g, eye, planes)
@@ -5575,7 +5657,106 @@ class Viewport(QOpenGLWidget):
         self._silhouette_vbo.release()
         count = len(raw) // 12
         self._sil_last = (key, now, count)
+        self._sil_cost = _time.monotonic() - now
         return count
+
+    def _silhouette_table(self, groups):
+        """Per prototype, the arrays the silhouette pass reads for all its
+        placements at once — built when the placements change, not per
+        frame. ``(table, rest)``: ``rest`` are the placements it does not
+        take (loose groups, face-me, a singular matrix)."""
+        import numpy as np
+        from core.group import effective_material
+        key = (self._placements_epoch(), tuple(map(id, groups)))
+        memo = getattr(self, "_sil_table", None)
+        if memo is not None and memo[0] == key:
+            return memo[1], memo[2]
+        by_proto: dict = {}
+        rest: list = []
+        for g in groups:
+            if getattr(g, "xform", None) is None \
+                    or getattr(g, "billboard", False):
+                rest.append(g)
+                continue
+            base = self._proto_base_chunk(g.mesh, effective_material(g))
+            if base["soft_pts"] is None:
+                continue                      # nothing curved to outline
+            box, inv = self._placement_frame(g)
+            if inv is None:
+                rest.append(g)
+                continue
+            ent = by_proto.get(base["uid"])
+            if ent is None:
+                ent = by_proto[base["uid"]] = (base, [], [], [], [])
+            _b, fwds, invs, los, his = ent
+            fwds.append(np.array(g.xform.data(), np.float64)
+                        .reshape(4, 4, order="F")[:3])
+            invs.append(np.array(inv.data(), np.float64)
+                        .reshape(4, 4, order="F")[:3])
+            inf = float("inf")
+            los.append(box[0] if box else (-inf, -inf, -inf))
+            his.append(box[1] if box else (inf, inf, inf))
+        table = []
+        for base, fwds, invs, los, his in by_proto.values():
+            n0 = np.asarray(base["soft_n0"], np.float64)
+            n1 = np.asarray(base["soft_n1"], np.float64)
+            table.append({
+                "seg": np.asarray(base["soft_pts"], np.float64).reshape(-1, 2, 3),
+                "n0": n0, "n1": n1,
+                "d0": np.einsum("ij,ij->i", n0, np.asarray(base["soft_c0"], np.float64)),
+                "d1": np.einsum("ij,ij->i", n1, np.asarray(base["soft_c1"], np.float64)),
+                "single": np.asarray(base["soft_single"], bool),
+                "fwd": np.stack(fwds), "inv": np.stack(invs),
+                "lo": np.asarray(los, np.float64), "hi": np.asarray(his, np.float64),
+            })
+        self._sil_table = (key, table, rest)
+        return table, rest
+
+    def _instanced_silhouettes(self, groups, eye, planes):
+        """Silhouette bytes of every component placement in ``groups``,
+        prototype by prototype: the frustum cull and the «faces straddle
+        the view» test run as one NumPy pass over all the placements of a
+        prototype, with the eye in each one's local coordinates (see
+        ``_instance_silhouette``, the one-placement version they must
+        agree with). A per-placement Python loop cost 1.7 s a frame on a
+        model of 21 406 placements (issue #158). Returns ``(bytes, rest)``
+        with the placements left to the per-group path."""
+        import numpy as np
+        table, rest = self._silhouette_table(groups)
+        if not table:
+            return b"", rest
+        e = np.array([eye.x(), eye.y(), eye.z()])
+        pl = np.asarray(planes, np.float64) if planes is not None else None
+        out = []
+        for t in table:
+            if pl is not None:
+                n = pl[:, :3]
+                pick = np.where(n[:, None, :] >= 0.0, t["hi"][None], t["lo"][None])
+                keep = ((pick * n[:, None, :]).sum(axis=2)
+                        + pl[:, 3][:, None] >= 0.0).all(axis=0)
+                rows = np.flatnonzero(keep)
+                if not len(rows):
+                    continue
+            else:
+                rows = np.arange(len(t["fwd"]))
+            ne = len(t["d0"])
+            step = max(1, int(4_000_000 // max(ne, 1)))
+            for a in range(0, len(rows), step):
+                rr = rows[a:a + step]
+                inv = t["inv"][rr]
+                eye_l = inv[:, :, :3] @ e + inv[:, :, 3]          # (K, 3)
+                s0 = t["d0"][None, :] - eye_l @ t["n0"].T
+                s1 = t["d1"][None, :] - eye_l @ t["n1"].T
+                mask = t["single"][None, :] | ((s0 < 0) != (s1 < 0))
+                r, c = np.nonzero(mask)
+                if not len(r):
+                    continue
+                m = t["fwd"][rr][r]                               # (N, 3, 4)
+                seg = t["seg"][c]                                 # (N, 2, 3)
+                pts = np.einsum("nij,nkj->nki", m[:, :, :3], seg) \
+                    + m[:, None, :, 3]
+                out.append(pts.astype(np.float32).tobytes())
+        return b"".join(out), rest
 
     def _instance_silhouette(self, g, eye, planes):
         """Silhouette bytes of a component placement, worked out on the

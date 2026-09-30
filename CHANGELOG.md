@@ -4,6 +4,18 @@ All notable changes to IngeTrazo are documented here.
 Format inspired by [Keep a Changelog](https://keepachangelog.com); versions
 follow [SemVer](https://semver.org).
 
+## [Sin publicar]
+
+### Rendimiento
+- **Orbitar un modelo con miles de componentes es 11× más fluido**: con la
+  planta industrial de la #158 (21 406 copias) cada cuadro pasaba de 1,3 s
+  a 0,12 s. Las siluetas de las copias se calculan por pieza en una sola
+  pasada de NumPy en vez de copia por copia, y su intervalo se adapta a lo
+  que cuestan (en un modelo pequeño no cambia nada); y el visor deja de
+  recorrer todas las copias en cada cuadro para firmarlas, expandirlas,
+  buscar figuras de frente o leer sus matrices: lo hace solo cuando algo
+  cambia. En la plaza, pintar −10 % y orbitar −8 % (@pacaeiro, Ronilson).
+
 ## [0.5.7] — 2026-09-30
 
 **Ventanas paramétricas, la selección con puntos y una semana de pedidos

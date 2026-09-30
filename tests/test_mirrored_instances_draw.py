@@ -137,3 +137,75 @@ def test_a_placements_silhouette_in_local_space_matches_the_baked_one():
     finally:
         win._saved_version = win.viewport.scene.version
         win.close()
+
+
+def test_the_batched_silhouettes_match_one_placement_at_a_time():
+    """``_instanced_silhouettes`` (all placements of a prototype in one
+    NumPy pass, #158) gives the same edges as ``_instance_silhouette``,
+    placement by placement — rotated, mirrored, scaled, and culled."""
+    import numpy as np
+    from core.group import Group
+    from views.main_window import MainWindow
+    win = MainWindow()
+    try:
+        vp = win.viewport
+        protos = [_prisma(12), _prisma(7, r=0.5, h=3.0)]
+        gs = []
+        for k in range(14):
+            m = QMatrix4x4()
+            m.translate(2.5 * k, (k % 3) * 1.7, 0.2 * k)
+            m.rotate(23.0 * k, 0.1 * (k % 2), 0.3, 1.0)
+            m.scale(-1 if k % 4 == 1 else 1, 1.0 + 0.1 * k, 0.6 + 0.2 * (k % 3))
+            g = Group(protos[k % 2], name=f"P{k}")
+            g.xform = m
+            vp.scene.groups.append(g)
+            gs.append(g)
+        vp.scene.version += 1
+
+        def rows(raw):
+            a = np.frombuffer(raw, np.float32).reshape(-1, 6)
+            return sorted(map(tuple, np.round(a, 3)))
+
+        for eye in (V(20, -15, 8), V(-6, 9, 3), V(4, 1, 30)):
+            got, rest = vp._instanced_silhouettes(gs, eye, None)
+            assert rest == []
+            ref = b"".join(vp._instance_silhouette(g, eye, None) for g in gs)
+            assert rows(got) == rows(ref) and len(rows(got)) > 0
+        # with a cull: a plane keeping x < 10 only
+        planes = [(-1.0, 0.0, 0.0, 10.0)]
+        got, _ = vp._instanced_silhouettes(gs, V(5, -20, 5), planes)
+        ref = b"".join(vp._instance_silhouette(g, V(5, -20, 5), planes)
+                       for g in gs)
+        assert rows(got) == rows(ref)
+    finally:
+        win._saved_version = win.viewport.scene.version
+        win.close()
+
+
+def test_the_placements_signature_survives_an_orbit_and_follows_an_edit():
+    """Orbiting a big model walked every placement on every frame to sign
+    them (#158). The signature is kept while the scene version stands and
+    re-signed when a command moves a placement (and bumps the version)."""
+    from core.group import Group
+    from views.main_window import MainWindow
+    win = MainWindow()
+    try:
+        vp = win.viewport
+        g = Group(_prisma(), name="P")
+        g.xform = QMatrix4x4()
+        vp.scene.groups.append(g)
+        vp.scene.version += 1
+        e0 = vp._placements_epoch()
+        vp._tick = getattr(vp, "_tick", 0) + 1         # next frame
+        vp.camera.orbit(6.0, 2.0, 600)
+        assert vp._placements_epoch() == e0
+        assert vp._placements() is vp._placements()
+        m = QMatrix4x4()
+        m.translate(1.0, 0.0, 0.0)
+        g.xform = m * g.xform
+        vp.scene.version += 1                           # what every tool does
+        vp._tick += 1
+        assert vp._placements_epoch() != e0
+    finally:
+        win._saved_version = win.viewport.scene.version
+        win.close()
