@@ -430,6 +430,9 @@ class MainWindow(QMainWindow):
         from PySide6.QtWidgets import QApplication
         # Housekeeping that rides the same slow tick: a clean collection
         # now and then — never mid-gesture (over a big model it is ~0.3 s).
+        import sys
+        if sys.getallocatedblocks() > 40_000_000:
+            self._gc_too_slow = True       # tens of millions of objects: ~5 s
         if getattr(self.viewport, "_last_pos", None) is None \
                 and not getattr(self, "_gc_too_slow", False):
             import gc

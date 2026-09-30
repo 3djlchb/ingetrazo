@@ -2658,6 +2658,23 @@ class Viewport(QOpenGLWidget):
         cache = getattr(self, "_proto_draw", None)
         if cache is None:
             cache = self._proto_draw = {}
+        # While the placements (and so every prototype's bake) are as they
+        # were, the entry is the one already made: re-deriving the base
+        # chunk's fingerprint per prototype, per pass, per frame was a large
+        # part of drawing 2 722 prototypes (live profile, #158).
+        ckey = (id(mesh), _material_sig(paint))
+        epoch = self._placements_epoch()
+        fast = getattr(self, "_proto_draw_fast", None)
+        if fast is None or fast[0] != epoch:
+            fast = self._proto_draw_fast = (epoch, {})
+        hit = fast[1].get(ckey)
+        if hit is not None and cache.get(ckey) is hit:
+            return hit
+        entry = self._ensure_proto_draw_slow(mesh, paint, cache)
+        fast[1][ckey] = entry
+        return entry
+
+    def _ensure_proto_draw_slow(self, mesh, paint, cache):
         base = self._proto_base_chunk(mesh, paint)
         key = (base["uid"], base.get("rev"))
         ckey = (id(mesh), _material_sig(paint))
@@ -3429,6 +3446,7 @@ class Viewport(QOpenGLWidget):
         self._epoch_same = None
         self._pick_lazy_memo = None
         self._pick_near_memo = None
+        self._proto_draw_fast = None
 
     def reset_texture_cache(self) -> None:
         """Return the document's cached GL textures to the driver.
@@ -11943,8 +11961,7 @@ class Viewport(QOpenGLWidget):
             # A perceptible retreat even from a 2 cm close-up: ~1 % of the
             # model's size per notch when the frame scaling alone would move
             # the eye less than that (the "zoom is stuck" report).
-            lo, hi = self.scene.bounds()
-            diag = (hi - lo).length() if lo is not None else 0.0
+            diag = self._model_diag()
             self.camera.zoom_to(steps, focus,
                                 min_step=max(0.05, 0.01 * diag))
         else:
@@ -11955,6 +11972,24 @@ class Viewport(QOpenGLWidget):
             _plog("wheel", (_time_mod.monotonic() - now) * 1000.0,
                   extra=f"reused={'proj' if reproj else reused}", floor=10.0)
         self.update()
+
+    def _model_diag(self) -> float:
+        """The model's size, for the zoom step. On a huge model it comes
+        from the placement boxes the pick index already holds: the exact
+        box read every vertex, ~2 s on the first wheel notch (#158)."""
+        cached = getattr(self.scene, "_bounds_cache", None)
+        if cached is None or cached[0] != self.scene.version:
+            table = (self._pick_lazy_table()
+                     if hasattr(self, "_pick_lazy_table") else None)
+            if table is not None:
+                import numpy as np
+                lo, hi = table[1], table[2]
+                ok = np.isfinite(lo).all(axis=1) & np.isfinite(hi).all(axis=1)
+                if ok.any():
+                    return float(np.linalg.norm(hi[ok].max(axis=0)
+                                                - lo[ok].min(axis=0)))
+        lo, hi = self.scene.bounds()
+        return (hi - lo).length() if lo is not None else 0.0
 
     _MODIFIER_KEYS = frozenset({Qt.Key_Control, Qt.Key_Shift, Qt.Key_Alt,
                                 Qt.Key_Meta, Qt.Key_AltGr})
