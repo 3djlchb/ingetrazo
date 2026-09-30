@@ -4,27 +4,165 @@ All notable changes to IngeTrazo are documented here.
 Format inspired by [Keep a Changelog](https://keepachangelog.com); versions
 follow [SemVer](https://semver.org).
 
-## [Sin publicar]
+## [0.5.7] — 2026-09-30
+
+**Ventanas paramétricas, la selección con puntos y una semana de pedidos
+atendidos.** Llega Windowizer, la primera extensión de ejemplo aportada por
+un usuario: ventanas con marco y vidrios a partir de una cara, que abren el
+muro y lo vuelven a cerrar. La selección se marca con puntos en vez de un
+tinte, el modo Rayos X deja ver qué aristas tienen una cara delante, las
+aristas traseras (K) se dibujan en discontinua sobre el modelo opaco, las
+pinzas de Escalar enganchan otros objetos, cada comando explica qué hace y
+F3 se abre al instante. Los modelos con miles de copias espejadas abren sin
+agotar la memoria y cerrar es instantáneo. Renderizar con Blender funciona
+en el Flatpak, IngeTrazo habla indonesio, y se resolvieron los pedidos
+pequeños que llegaron por correo y por GitHub.
 
 ### Añadido
+- **Windowizer, extensión de ejemplo** (Extensiones ▸ Extensiones de
+  ejemplo ▸ Windowizer), de Bane Andreev, arquitecto: ventanas paramétricas
+  a partir de caras dibujadas en un muro, con filas y columnas (o
+  proporciones como `1,3,1`), marco, parteluces y vidrios. Cada ventana es
+  un grupo etiquetado `IfcWindow` con sus piezas «Marco» y «Vidrio n», así
+  que el panel Piezas sirve de cuadro de vidrios; el muro se atraviesa (o
+  lleva derrames si es de un solo plano), **Editar ventana** la reconstruye
+  en su sitio aunque se haya movido, y **Borrar ventana** vuelve a cerrar
+  el muro. En los seis idiomas. Es una adaptación del clásico Windowizer 3
+  de Rick Wilson (2004-2005).
+- **La selección se marca con puntos** en vez de un tinte: las caras
+  seleccionadas llevan puntos naranjas y la cara bajo el cursor los mismos
+  puntos, así se distingue también una cara vista por detrás; sobre una
+  cara naranja o roja los puntos salen azules (#218, @canalsecuario-blip).
+- **Rayos X: las aristas detrás de una cara se atenúan** hacia el fondo y
+  las que no tienen nada delante conservan su color; mirando una caja desde
+  arriba se sabe si tiene tapa (#223, @canalsecuario-blip).
 - **Cada comando dice qué hace**, como las descripciones de Blender: una
   frase breve en el recuadro del buscador F3, en la barra de estado al
   pasar por un menú y bajo el nombre y el atajo en el globo de los botones
   de las barras de herramientas. Cubre los comandos de la ventana
   principal, los del compositor de láminas y los complementos incluidos
   (un complemento propio puede dar la suya con `description` o con
-  `tip=` en `add_menu_action`), en español, inglés, portugués, chino e
-  italiano.
+  `tip=` en `add_menu_action`) (#213, @canalsecuario-blip).
+- **Aristas traseras** (Cámara ▸ Estilo ▸ Aristas traseras, **K**): el
+  modelo sigue opaco y las aristas que quedan detrás de una cara se dibujan
+  en discontinua, para ver por dónde sigue una barra o un perfil en un
+  plano de taller. Lo guarda el estilo (también las escenas y el `.igz`) y
+  tiene casilla en el panel Estilos; el Rectángulo girado deja la K y se
+  queda sin atajo (#234, @ales-limon).
+- **Las pinzas de Escalar enganchan puntos de otros objetos**: con la pinza
+  tomada, pasar por un extremo, un punto medio o una arista de otra pieza
+  deja la pinza a su altura, así se escala «hasta» otro objeto sin
+  teclear la medida; lo que se escala no se engancha a sí mismo (#233,
+  @ales-limon).
+- **Alt+X alterna Rayos X** y vuelve al estilo en el que estabas, con sus
+  ajustes (#228, @canalsecuario-blip).
+- **Propiedades del polígono, extensión de ejemplo** (Extensiones ▸
+  Extensiones de ejemplo), de Rony Leonel Janampa Monago: área, perímetro,
+  centroide, momentos de inercia respecto al centroide y a los ejes,
+  momentos principales con su ángulo, radios de giro y caja envolvente de
+  las caras seleccionadas; descuenta los huecos y toma varias caras
+  coplanares como una sola sección, en las unidades del documento (#229).
+- **Campo Nombre en Info de entidad** para el grupo o componente
+  seleccionado: se escribe y Enter, un paso de deshacer (#214).
+- **Clic derecho ▸ Voltear en ▸ Eje rojo / verde / azul**: refleja la
+  selección en su sitio con un clic, como en los tutoriales (#178,
+  reportado por Esteban Penzo).
+- **Luces del render en el visor**: con Seleccionar, un clic en el foquito
+  selecciona la luz (también en la lista del panel) y Supr la borra, un
+  paso de deshacer (#205). Moverlas con M llega más adelante.
+- **Preferencias ▸ Atajos de teclado ▸ Exportar… / Importar…**: los atajos
+  viajan en un archivo a otro equipo, sistema o persona, y valen en
+  cualquier idioma (#142, @pacaeiro).
+- **Preferencias ▸ General ▸ «Poner la figura de escala en los documentos
+  nuevos»**: sin ella, cada documento nuevo empieza vacío (#221).
+- **Traducción al indonesio** (Bahasa Indonesia), el sexto idioma de
+  IngeTrazo (#216, #217, @Rainjalin).
+- **Para extensiones:** `window.import_igz_path(ruta, at=None)` y
+  `app.import_igz` insertan un `.igz` como componente sin el diálogo, al
+  ratón o en un punto (#179, pedido de Georges Le Roux);
+  `app.add_menu(título)` da un submenú propio en Extensiones,
+  `app.add_context_menu(fn)` añade entradas al clic derecho,
+  `app.add_pickable(...)` deja seleccionar y borrar objetos propios, y
+  `group.ext` guarda parámetros de la extensión en sus grupos (se copian y
+  se guardan, aparte de la etiqueta BIM). Todo en `docs/plugins.md`.
+- **Puente MCP desde un contenedor:** el cliente lee `INGETRAZO_AI_HOST`
+  para llegar al puente por un túnel; el puente sigue escuchando solo en
+  local (#130).
 
 ### Corregido
-- **El buscador de comandos (F3) aparece al instante.** En 0.5.6 se veía
-  primero la sombra del cuadro y la lista un momento después (~110 ms):
-  cada apertura volvía a preparar todos los comandos. Ahora recuerda lo ya
-  preparado y deja el cuadro listo mientras la ventana está quieta; se
-  dibuja en unos 25 ms, la primera vez incluida.
+- **Renderizar con Blender no generaba imagen en el Flatpak** («Python file
+  … could not be opened»), ni en el AppImage con el Blender de Flathub: el
+  script de render ahora viaja junto al trabajo, en una carpeta que Blender
+  siempre ve.
+- **Un número a medio escribir se tragaba los atajos con Alt**: Alt+1
+  añadía un «1» en vez de cambiar la vista, y repitiéndolo se llegaba a un
+  número gigante que dejaba la geometría con coordenadas NaN. Ctrl y Alt
+  ya no escriben en el cuadro de medidas y se rechazan los números
+  desorbitados (#185, diagnosticado por Alejandro Limón).
+- **Un documento con una sola coordenada NaN no se podía abrir**: ahora
+  abre, deja fuera solo las piezas dañadas y avisa para guardarlo
+  reparado (#185).
+- **Editar un material no cambiaba los grupos pintados enteros**: la cara
+  suelta cambiaba y la caja agrupada se quedaba con el color viejo (#155,
+  @fafecm).
+- **Un punto enganchado fuera del plano de dibujo ya no aplasta la forma**:
+  al llenar el hueco de una ventana del punto medio de una jamba al de la
+  otra, el Rectángulo salía «0.00 × 2.41 m». Rectángulo, Círculo, Polígono
+  y los tres Arcos toman el plano de los puntos enganchados; el cursor
+  libre y el bloqueo con flechas siguen como antes (#206,
+  @canalsecuario-blip).
+- **Snaps con el bloqueo paralelo/perpendicular** (flecha abajo): ya
+  enganchan extremos, cruces y alineaciones con esquinas, también sobre
+  aristas oblicuas (#209, #215, @pacaeiro).
+- **Rectángulo bloqueado como cuadrado**: un solo valor tecleado basta
+  (#210, #212, @pacaeiro).
+- **El buscador de comandos (F3) aparece al instante**: recuerda lo ya
+  preparado y calcula la lista de comandos mientras la ventana está
+  quieta; se dibuja en unos 20 ms, la primera vez incluida (#211,
+  @canalsecuario-blip).
+- **Los atajos propios de acciones con «/» en el nombre se conservan**
+  al reiniciar: Empujar / Tirar, Alternar perspectiva / paralela, glTF /
+  GLB… se guardaban anidados y volvían a su tecla de fábrica en el
+  siguiente arranque; los ya guardados así se recuperan (#236,
+  @zhang-922).
+- **Una línea bloqueada en un eje toma la altura de una guía**: con Shift
+  o la flecha arriba sobre el eje azul, pasar por una línea guía que la
+  vertical no toca no daba nada; el punto de la guía bajo el cursor se
+  calculaba sin perspectiva y caía metros fuera de la pantalla (#166,
+  @pacaeiro).
+- **Cerrar IngeTrazo con un modelo grande es instantáneo**: el proceso
+  seguía vivo, con sus gigabytes, mientras Python liberaba objeto por
+  objeto — 27 s → 1,2 s con el modelo de la #158 (@pacaeiro).
+- **Modelos con muchas copias espejadas abren y se dibujan**: cada copia
+  espejada de un componente se horneaba entera en memoria, y las demás se
+  horneaban igual para leer su caja y su silueta. Una planta industrial de
+  21 406 grupos (6 203 espejados, 14 millones de caras) pasaba de 14,5 GB
+  en el primer cuadro; ahora abre y se dibuja en 9,7 GB (#158). Seleccionar
+  con el ratón en un modelo así sigue pendiente.
 - **Los globos de ayuda sobre un botón de color se leen**: en Estilos y en
-  el compositor tomaban el color del botón como fondo (texto claro sobre
-  blanco); ahora tienen el mismo fondo oscuro que los demás.
+  el compositor tomaban el color del botón como fondo (#213).
+- **Editar el color de un material de color liso**: la fila Color del panel
+  Materiales lo recolorea al instante, también en lo ya pintado; antes
+  solo cambiaba el tinte de una textura, que un color liso no tiene.
+- **El selector de color es el mismo en todos los sistemas** (el de Qt):
+  el nativo de algunos escritorios Linux no devolvía el color elegido al
+  abrirse desde un menú.
+- **Las descripciones de los menús llegan a la barra de estado** también
+  en los menús que Qt dibuja por su cuenta.
+
+### Pruebas antes de publicar
+`scripts/release_check.sh v0.5.6.1` sobre `plaza.igz`
+(`benchmarks/results/0.5.7.json`): el visor sin cambios (pintar 8,28 →
+8,29 ms, orbitar 8,08 → 8,28 ms, rehacer los búferes 32,9 → 33,0 ms),
+arranque 0,80 → 0,78 s, abrir la plaza 3,98 → 3,79 s, ningún objeto
+filtrado en seis reaperturas; suite rápida 3562 y lenta 804 correctas. La
+comprobación cazó dos cosas antes de publicar: la apertura más lenta por la
+comprobación de NaN (#185; ahora solo recorre el documento si el archivo
+trae algún NaN) y rehacer los búferes 19 % más lento por las siluetas de
+las copias (ahora la caja y la matriz de cada copia se guardan). Y la
+prueba a mano con dos monitores cazó un parpadeo de la ventana en Wayland
+que el buscador F3 provocaba al preparar su ventana por adelantado: ya no
+la prepara.
 
 ## [0.5.6.1] — 2026-09-29
 
@@ -242,14 +380,6 @@ las unidades del documento.
   herramientas la coma sigue siendo el decimal.
 - **Una cara invertida sigue invertida al seguir dibujando**
   (#144, @canalsecuario-blip).
-- **Un punto enganchado fuera del plano de dibujo ya no aplasta la forma**
-  (@canalsecuario-blip): al llenar el hueco de una ventana del punto medio
-  de una jamba al de la otra, el Rectángulo quedaba en el plano de la
-  jamba y salía «0.00 × 2.41 m». Ahora Rectángulo, Círculo, Polígono y los
-  tres Arcos toman el plano de los puntos enganchados (el plano de ejes que
-  los contiene, o el de los tres puntos del arco); el cursor libre y el
-  bloqueo con flechas siguen como antes. La etiqueta del radio muestra el
-  radio dibujado.
 - **Todas las pestañas de la bandeja derecha caben en los 240 px mínimos**
   (#139, @felixriestra): los botones de Capas y los combos de Terreno se
   cortaban.
