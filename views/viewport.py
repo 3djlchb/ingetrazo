@@ -6529,7 +6529,7 @@ class Viewport(QOpenGLWidget):
         cached = getattr(self, "_section_cut_cache", None)
         if cached is not None and cached[0] == key:
             return cached[1]
-        idx = self._pick_index(near="all")
+        idx = self._pick_flat(self._pick_index(near="all"))
         segs = None
         if idx.tri_v0 is not None and len(idx.tri_v0):
             nv = np.array([n.x(), n.y(), n.z()], dtype=np.float64)
@@ -8726,6 +8726,8 @@ class Viewport(QOpenGLWidget):
     _PICK_LAZY_MIN_FACES = 1_000_000
     #: How many faces of lazy placements the index keeps baked at once.
     _PICK_LIVE_MAX_FACES = 600_000
+    #: Lazy placements baked by one query at most (the nearest first).
+    _PICK_NEW_PER_QUERY = 300
     #: Screen margin, in pixels, around the cursor for «near the cursor».
     _PICK_NEAR_PX = 32.0
 
@@ -8841,6 +8843,18 @@ class Viewport(QOpenGLWidget):
                     dist = np.linalg.norm(near_pt - e, axis=1)
                     need = need[dist <= far]
                 self._pick_near_memo = (ckey, need)
+        new = [int(i) for i in need if id(groups[int(i)]) not in live]
+        if len(new) > self._PICK_NEW_PER_QUERY and near != "all":
+            # A first snap over a dense spot met thousands at once (2.3 s):
+            # the nearest to the eye come in now, the rest on the next moves.
+            e = self.camera.eye()
+            e = np.array([e.x(), e.y(), e.z()])
+            nn = np.array(new)
+            dist = np.linalg.norm(np.clip(e, lo[nn], hi[nn]) - e, axis=1)
+            keep_new = set(nn[np.argsort(dist)[:self._PICK_NEW_PER_QUERY]]
+                           .tolist())
+            need = [int(i) for i in need
+                    if id(groups[int(i)]) in live or int(i) in keep_new]
         changed = False
         for i in need:
             g = groups[int(i)]
@@ -8937,7 +8951,17 @@ class Viewport(QOpenGLWidget):
         query comes near them (``near``, see ``_pick_materialize``): the
         rest of the index is the same."""
         if hasattr(self, "_pick_lazy_table"):
-            self._pick_materialize(near)
+            # The snap asks occlusion hundreds of times per mouse move, each
+            # through here: the same cursor query in the same tick has
+            # nothing new to bake (#158).
+            pos = getattr(self, "_last_mouse_pos", None)
+            qkey = (getattr(self, "_tick", 0), _cache_ver(self),
+                    (pos.x(), pos.y()) if near is None and pos is not None
+                    else repr(near) if not isinstance(near, tuple) or
+                    near[0] != "ray" else None)
+            if qkey[2] is None or getattr(self, "_pick_last_q", None) != qkey:
+                self._pick_materialize(near)
+                self._pick_last_q = qkey
         oculto = getattr(self, "_rest_is_hidden", None)
         oculto = bool(oculto()) if callable(oculto) else False
         # The open context decides what a hit RESOLVES to (inside the
@@ -9003,6 +9027,7 @@ class Viewport(QOpenGLWidget):
         # Per-chunk triangle spans (P3): a hover/zoom ray prefilters chunks
         # by AABB and runs Möller-Trumbore only on the spans it crosses.
         tri_spans: list = [(None, 0, len(tris))] if tris else []
+        own_spans: list = []      # lazy placements' own arrays (#158)
         # What the current context lets you TOUCH: the whole scene at the
         # root, the children of the group you are inside otherwise. This
         # used to be `if scene.edit_group is None`, which took EVERY group
@@ -9091,6 +9116,15 @@ class Viewport(QOpenGLWidget):
                 b_gea, b_geb, b_ggi = [], [], []
                 b_gsel: list = []     # per edge: may pick_group land on it
                 b_ggroups: list = []
+                # Lazy placements (#158) keep their triangles in their own
+                # arrays — spans the ray walks as they are — and go after
+                # the static chunks, whose concatenation is kept: joining
+                # every array on each change of the lazy set copied
+                # hundreds of MB per hover.
+                lazy_set = (lazy[4] if lazy is not None else ())
+                chunks.sort(key=lambda c: id(c[0]) in lazy_set)
+                b_own: list = []
+                static_key: list = []
                 for g, chunk, gvis, gsel, gsnap in chunks:
                     n = len(chunk["faces"])
                     off = len(b_entities)
@@ -9109,7 +9143,12 @@ class Viewport(QOpenGLWidget):
                     b_area.append(chunk["areas"])
                     b_vis.append(np.full(n, gvis, dtype=bool))
                     b_sel.append(np.full(n, gsel, dtype=bool))
-                    if chunk["v0"] is not None:
+                    if chunk["v0"] is not None and id(g) in lazy_set:
+                        b_own.append((chunk.get("bbox"), chunk["v0"],
+                                      chunk["e1"], chunk["e2"],
+                                      chunk["tri_ent"], off))
+                    elif chunk["v0"] is not None:
+                        static_key.append((id(chunk), chunk.get("rev"), off))
                         b_v0.append(chunk["v0"])
                         b_e1.append(chunk["e1"])
                         b_e2.append(chunk["e2"])
@@ -9142,10 +9181,9 @@ class Viewport(QOpenGLWidget):
                             else np.empty(0, bool)),
                     "sel": (np.concatenate(b_sel) if b_sel
                             else np.empty(0, bool)),
-                    "v0": np.concatenate(b_v0) if b_v0 else None,
-                    "e1": np.concatenate(b_e1) if b_v0 else None,
-                    "e2": np.concatenate(b_e2) if b_v0 else None,
-                    "te": np.concatenate(b_te) if b_v0 else None,
+                    **Viewport._pick_static_tris(self, tuple(static_key),
+                                                 b_v0, b_e1, b_e2, b_te),
+                    "own": b_own,
                     "gedge_a": np.concatenate(b_gea) if b_gea else None,
                     "gedge_b": np.concatenate(b_geb) if b_gea else None,
                     "gedge_gi": np.concatenate(b_ggi) if b_gea else None,
@@ -9175,6 +9213,8 @@ class Viewport(QOpenGLWidget):
                     tents.append(block["te"] + offset)
                     tri_spans += [(bb, len(tris) + s, n)
                                   for bb, s, n in block.get("spans", ())]
+                own_spans = [(bb, a, b, c, te, o + offset)
+                             for bb, a, b, c, te, o in block.get("own", ())]
 
         gedge_a = gedge_b = gedge_gi = gedge_sel = None
         gedge_groups: list = []
@@ -9237,10 +9277,52 @@ class Viewport(QOpenGLWidget):
         total_tris = len(idx.tri_v0) if idx.tri_v0 is not None else 0
         if tri_spans and sum(n for _, _, n in tri_spans) == total_tris:
             idx.tri_spans = tri_spans
+        idx.own_spans = own_spans
         if _PERF:
             _plog("pick_index", (_time_mod.perf_counter() - _p0) * 1000.0)
         self._pick_index_cache = (key, idx)
         return idx
+
+    def _pick_static_tris(self, key, v0, e1, e2, te) -> dict:
+        """The static chunks' triangles joined, kept while the same chunks
+        sit at the same entity offsets: the lazy set changes on many
+        hovers (#158), the static part does not."""
+        import numpy as np
+        memo = getattr(self, "_pick_static_memo", None)
+        if memo is not None and memo[0] == key:
+            return memo[1]
+        out = {"v0": np.concatenate(v0) if v0 else None,
+               "e1": np.concatenate(e1) if v0 else None,
+               "e2": np.concatenate(e2) if v0 else None,
+               "te": np.concatenate(te) if v0 else None}
+        self._pick_static_memo = (key, out)
+        return out
+
+    @staticmethod
+    def _pick_flat(idx):
+        """``idx`` with the lazy placements' own spans joined into the flat
+        triangle arrays — for the passes that read every triangle (hidden
+        lines, section cuts); kept on the index once made."""
+        own = getattr(idx, "own_spans", None)
+        if not own:
+            return idx
+        flat = getattr(idx, "_flat", None)
+        if flat is not None:
+            return flat
+        import numpy as np
+        from types import SimpleNamespace
+        parts = ([(idx.tri_v0, idx.tri_e1, idx.tri_e2, idx.tri_ent)]
+                 if idx.tri_v0 is not None else [])
+        parts += [(a, b, c, te + o) for _bb, a, b, c, te, o in own]
+        flat = SimpleNamespace(**vars(idx))
+        flat.tri_v0 = np.concatenate([p[0] for p in parts])
+        flat.tri_e1 = np.concatenate([p[1] for p in parts])
+        flat.tri_e2 = np.concatenate([p[2] for p in parts])
+        flat.tri_ent = np.concatenate([p[3] for p in parts])
+        flat.tri_spans = None
+        flat.own_spans = []
+        idx._flat = flat
+        return flat
 
     def ray_distance(self, origin: QVector3D, direction: QVector3D):
         """Distance along ``direction`` (unit) from ``origin`` to the nearest
@@ -9249,7 +9331,8 @@ class Viewport(QOpenGLWidget):
         over the same index every pick uses (hidden objects and hidden
         layers are not there to bump into)."""
         idx = self._pick_index(near=("ray", origin, direction))
-        if idx is None or getattr(idx, "tri_v0", None) is None:
+        if idx is None or (getattr(idx, "tri_v0", None) is None
+                           and not getattr(idx, "own_spans", None)):
             return None
         t = self._ray_hits(idx, origin, direction, idx.ent_vis,
                            reduce_global=True)
@@ -9270,24 +9353,62 @@ class Viewport(QOpenGLWidget):
         chunks it actually crosses (the full 700k-row pass cost 25–45 ms
         per pick against the piscina scene)."""
         import numpy as np
-        if idx.tri_v0 is None:
+        own = getattr(idx, "own_spans", None) or ()
+        if idx.tri_v0 is None and not own:
             return None
         o = np.array([origin.x(), origin.y(), origin.z()])
         d = np.array([direction.x(), direction.y(), direction.z()])
-        spans = getattr(idx, "tri_spans", None) or [(None, 0, len(idx.tri_v0))]
+        if idx.tri_v0 is None:
+            spans = []
+        else:
+            spans = (getattr(idx, "tri_spans", None)
+                     or [(None, 0, len(idx.tri_v0))])
+        # Lazy placements' own arrays (#158) ride the same loop: a span is
+        # then (bbox, v0, e1, e2, local tri_ent, entity offset).
+        spans = list(spans) + list(own)
+        if len(spans) > 64:
+            # Thousands of spans on a huge model: which boxes the ray meets
+            # is one NumPy pass, not a Python test per span (900 000 of
+            # them in one snap hover, #158).
+            boxes = getattr(idx, "_span_boxes", None)
+            if boxes is None or boxes[0] != len(spans):
+                inf = float("inf")
+                blo = np.array([sp[0][0] if sp[0] is not None else (-inf,) * 3
+                                for sp in spans], dtype=np.float64)
+                bhi = np.array([sp[0][1] if sp[0] is not None else (inf,) * 3
+                                for sp in spans], dtype=np.float64)
+                boxes = idx._span_boxes = (len(spans), blo, bhi)
+            _n, blo, bhi = boxes
+            with np.errstate(divide="ignore", invalid="ignore"):
+                inv_d = 1.0 / np.where(np.abs(d) > 1e-12, d, 1e-12)
+                t1 = (blo - o) * inv_d
+                t2 = (bhi - o) * inv_d
+            tmin = np.nanmax(np.minimum(t1, t2), axis=1)
+            tmax = np.nanmin(np.maximum(t1, t2), axis=1)
+            meet = np.flatnonzero(tmax >= np.maximum(tmin, 0.0))
+            spans = [(None,) + tuple(spans[i][1:]) for i in meet]
         o3 = (float(o[0]), float(o[1]), float(o[2]))
         d3 = (float(d[0]), float(d[1]), float(d[2]))
         best = float("inf")
         face_t = None if reduce_global else np.full(len(idx.entities), np.inf)
-        for bb, s0, n in spans:
-            if not n:
-                continue
-            if bb is not None and not _ray_aabb(o3, d3, bb[0], bb[1]):
-                continue
-            v0 = idx.tri_v0[s0:s0 + n]
-            e1 = idx.tri_e1[s0:s0 + n]
-            e2 = idx.tri_e2[s0:s0 + n]
-            te = idx.tri_ent[s0:s0 + n]
+        for span in spans:
+            if len(span) == 3:
+                bb, s0, n = span
+                if not n:
+                    continue
+                if bb is not None and not _ray_aabb(o3, d3, bb[0], bb[1]):
+                    continue
+                v0 = idx.tri_v0[s0:s0 + n]
+                e1 = idx.tri_e1[s0:s0 + n]
+                e2 = idx.tri_e2[s0:s0 + n]
+                te = idx.tri_ent[s0:s0 + n]
+            else:
+                bb, v0, e1, e2, te_local, eoff = span
+                if not len(v0):
+                    continue
+                if bb is not None and not _ray_aabb(o3, d3, bb[0], bb[1]):
+                    continue
+                te = te_local + eoff
             p = np.cross(d, e2)
             det = np.einsum("ij,ij->i", e1, p)
             ok = np.abs(det) > 1e-6
@@ -10358,7 +10479,7 @@ class Viewport(QOpenGLWidget):
         open surface (no second face)."""
         import numpy as np
         scene = self.scene
-        idx = self._pick_index(near="all")
+        idx = self._pick_flat(self._pick_index(near="all"))
         if getattr(idx, "tri_v0", None) is not None and len(idx.tri_v0):
             keep = idx.ent_vis[idx.tri_ent]
             v0 = idx.tri_v0[keep]
@@ -10546,7 +10667,8 @@ class Viewport(QOpenGLWidget):
         if self._effective_style().face_mode in ("xray", "wireframe"):
             return False
         idx = self._pick_index()
-        if getattr(idx, "tri_v0", None) is None:
+        if getattr(idx, "tri_v0", None) is None \
+                and not getattr(idx, "own_spans", None):
             return False
         origin = self.camera.eye()
         delta = world - origin

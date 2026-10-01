@@ -373,7 +373,10 @@ def test_construir_el_dibujo_de_un_prototipo_deja_el_programa_puesto():
     suite, así que se fija sobre el texto del método."""
     import inspect
     from views.viewport import Viewport
-    fuente = inspect.getsource(Viewport._ensure_proto_draw)
+    # The building half moved to _ensure_proto_draw_slow (#158); both are
+    # read.
+    fuente = (inspect.getsource(Viewport._ensure_proto_draw)
+              + inspect.getsource(Viewport._ensure_proto_draw_slow))
     assert "self._program.bind()" in fuente
     assert "self._program.release()" not in fuente, (
         "la entrada del prototipo se construye a mitad del cuadro: soltar el "
