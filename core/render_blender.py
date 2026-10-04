@@ -276,6 +276,24 @@ def ground_dict(scene) -> Optional[dict]:
             "color": [0.42, 0.42, 0.40]}
 
 
+def section_dict(scene) -> Optional[dict]:
+    """The section cut the viewport is showing, for Blender: the active
+    plane's point and normal (the normal points to the side that is cut
+    away, as in :mod:`core.section`). ``None`` when no cut is active or
+    View > Section Cuts is off. The glTF carries no clipping, so the
+    render script rebuilds the cut from this."""
+    if not getattr(scene, "show_section_cuts", True):
+        return None
+    active = getattr(scene, "active_section", None)
+    sp = active() if callable(active) else None
+    if sp is None:
+        return None
+    return {"mode": "boolean",
+            "planes": [{"point": [sp.point.x(), sp.point.y(), sp.point.z()],
+                        "normal": [sp.normal.x(), sp.normal.y(),
+                                   sp.normal.z()]}]}
+
+
 # ---- Ambience and lights --------------------------------------------------------
 
 #: Day = the sun of the Shadows panel; night = no sun, a dark sky and the
@@ -426,6 +444,9 @@ def write_job(scene, camera, work: Path, *, engine: str = "eevee",
         "lights": [lt for lt in clean_lights(list(lights)) if lt["on"]],
         "ground": ground_dict(scene) if ground else None,
     }
+    section = section_dict(scene)
+    if section:
+        job["section"] = section
     if serve:
         job["serve"] = True
         job["blend"] = None

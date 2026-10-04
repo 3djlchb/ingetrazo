@@ -358,12 +358,119 @@ def set_engine(scene, engine, samples):
     say("engine", scene.render.engine)
 
 
+def _plane_list(section):
+    """``[(point, unit normal)]`` from the job's ``section`` entry. The
+    normal points toward the side that is CUT AWAY."""
+    out = []
+    for pl in (section or {}).get("planes", []):
+        n = Vector(pl["normal"])
+        if n.length < 1e-9:
+            continue
+        out.append((Vector(pl["point"]), n.normalized()))
+    return out
+
+
+def _scene_radius(objs):
+    pts = [o.matrix_world @ Vector(c) for o in objs for c in o.bound_box]
+    if not pts:
+        return 100.0
+    lo = Vector((min(p.x for p in pts), min(p.y for p in pts), min(p.z for p in pts)))
+    hi = Vector((max(p.x for p in pts), max(p.y for p in pts), max(p.z for p in pts)))
+    return max((hi - lo).length, 1.0)
+
+
+def _cut_boolean(scene, objs, planes):
+    """Geometry cut: a huge box whose face lies on the plane is subtracted
+    from every mesh. Leaves a real cut (the section is visible) but needs
+    reasonably closed meshes."""
+    size = _scene_radius(objs) * 4.0
+    for i, (p, n) in enumerate(planes):
+        bpy.ops.mesh.primitive_cube_add(size=1.0)
+        cutter = bpy.context.active_object
+        cutter.name = f"IngeTrazo section {i + 1}"
+        cutter.scale = (size, size, size)
+        up = "X" if abs(n.y) > 0.99 else "Y"
+        cutter.rotation_euler = n.to_track_quat("Z", up).to_euler()
+        cutter.location = p + n * (size / 2.0)   # the box sits on the cut side
+        cutter.display_type = "WIRE"
+        cutter.hide_render = True
+        for obj in objs:
+            mod = obj.modifiers.new(f"section {i + 1}", "BOOLEAN")
+            mod.operation = "DIFFERENCE"
+            mod.object = cutter
+            for solver in ("EXACT", "FAST"):
+                try:
+                    mod.solver = solver
+                    break
+                except TypeError:
+                    continue
+    say("section", len(planes), "plane(s), boolean")
+
+
+def _cut_shader(objs, planes):
+    """Shading cut: every material turns transparent beyond the plane.
+    Works with any mesh (open, non-manifold) but does not cap the cut."""
+    mats = {s.material for o in objs for s in o.material_slots if s.material}
+    for mat in mats:
+        if not mat.node_tree:
+            continue
+        nt = mat.node_tree
+        out = next((n for n in nt.nodes if n.type == "OUTPUT_MATERIAL"
+                    and n.is_active_output), None)
+        if out is None or not out.inputs["Surface"].links:
+            continue
+        src = out.inputs["Surface"].links[0].from_socket
+        for p, n in planes:
+            geo = nt.nodes.new("ShaderNodeNewGeometry")
+            sub = nt.nodes.new("ShaderNodeVectorMath")
+            sub.operation = "SUBTRACT"
+            sub.inputs[1].default_value = p
+            dot = nt.nodes.new("ShaderNodeVectorMath")
+            dot.operation = "DOT_PRODUCT"
+            dot.inputs[1].default_value = n
+            gt = nt.nodes.new("ShaderNodeMath")
+            gt.operation = "GREATER_THAN"
+            gt.inputs[1].default_value = 0.0
+            clear = nt.nodes.new("ShaderNodeBsdfTransparent")
+            mix = nt.nodes.new("ShaderNodeMixShader")
+            nt.links.new(geo.outputs["Position"], sub.inputs[0])
+            nt.links.new(sub.outputs["Vector"], dot.inputs[0])
+            nt.links.new(dot.outputs["Value"], gt.inputs[0])
+            nt.links.new(gt.outputs["Value"], mix.inputs["Fac"])
+            nt.links.new(src, mix.inputs[1])
+            nt.links.new(clear.outputs["BSDF"], mix.inputs[2])
+            src = mix.outputs["Shader"]
+        nt.links.new(src, out.inputs["Surface"])
+        for attr, value in (("surface_render_method", "DITHERED"),
+                            ("blend_method", "HASHED")):
+            if hasattr(mat, attr):
+                try:
+                    setattr(mat, attr, value)
+                except (TypeError, ValueError):
+                    pass
+    say("section", len(planes), "plane(s), shader")
+
+
+def apply_section(scene, objs, section):
+    """Section (clipping) planes from the job: ``{"planes": [{"point":
+    [x, y, z], "normal": [x, y, z]}], "mode": "boolean" | "shader"}``.
+    The glTF carries no clipping, so the cut is rebuilt here."""
+    planes = _plane_list(section)
+    if not planes:
+        return
+    if section.get("mode", "boolean") == "shader":
+        _cut_shader(objs, planes)
+    else:
+        _cut_boolean(scene, objs, planes)
+
+
 def main():
     job = load_job()
     bpy.ops.wm.read_factory_settings(use_empty=True)
     scene = bpy.context.scene
-    import_model(job["glb"])
+    objs = import_model(job["glb"])
     apply_finishes()
+    apply_section(scene, objs, job.get("section"))
     figures = find_figures()
     w, h = int(job["width"]), int(job["height"])
     set_camera(scene, job["camera"], w, h)
