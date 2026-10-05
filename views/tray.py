@@ -3503,8 +3503,8 @@ class ScenesPanel(QWidget):
 
     def __init__(self, window) -> None:
         super().__init__()
-        from PySide6.QtWidgets import (QHBoxLayout, QLabel, QListWidget,
-                                       QPushButton, QVBoxLayout)
+        from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel,
+                                       QListWidget, QPushButton, QVBoxLayout)
         self._window = window
         self._updating = False
         lay = QVBoxLayout(self)
@@ -3513,6 +3513,10 @@ class ScenesPanel(QWidget):
         hint.setStyleSheet("color: gray;")
         lay.addWidget(hint)
         self.list = QListWidget()
+        # Double-click already SHOWS the scene, so it must not also open the
+        # name editor (the two fought: the scene change refreshed the list
+        # and killed the editor). Rename = F2 here, or the Rename button.
+        self.list.setEditTriggers(QAbstractItemView.EditKeyPressed)
         self.list.itemDoubleClicked.connect(self._on_activate)
         self.list.itemChanged.connect(self._on_item_changed)
         lay.addWidget(self.list)
@@ -3523,12 +3527,16 @@ class ScenesPanel(QWidget):
         upd_btn = QPushButton(tr("Update"))
         upd_btn.setToolTip(tr("Update the selected scene from the current view"))
         upd_btn.clicked.connect(self._on_update)
+        ren_btn = QPushButton(tr("Rename"))
+        ren_btn.setToolTip(tr("Rename the selected scene (or press F2)"))
+        ren_btn.clicked.connect(self._on_rename)
         del_btn = QPushButton(tr("−"))
         del_btn.setToolTip(tr("Delete the selected scene"))
         del_btn.clicked.connect(self._on_delete)
         row = FlowLayout(spacing=4)          # wraps in a narrow tray (see Layers)
         row.addWidget(add_btn)
         row.addWidget(upd_btn)
+        row.addWidget(ren_btn)
         row.addWidget(del_btn)
         lay.addLayout(row)
         self.refresh()
@@ -3538,7 +3546,9 @@ class ScenesPanel(QWidget):
 
     # ---- Model → view --------------------------------------------------------
     def refresh(self) -> None:
-        from PySide6.QtWidgets import QListWidgetItem
+        from PySide6.QtWidgets import QAbstractItemView, QListWidgetItem
+        if self.list.state() == QAbstractItemView.EditingState:
+            return                      # a rename in progress: leave it be
         self._updating = True
         self.list.clear()
         for view in self._scene().saved_views:
@@ -3576,11 +3586,45 @@ class ScenesPanel(QWidget):
         if self._updating:
             return
         view = item.data(Qt.UserRole)
+        if view is None:
+            return
+        scene = self._scene()
         new_name = item.text().strip()
-        if view is not None and new_name:
-            view.name = new_name
-        self.refresh()
-        self._touch()
+        if new_name and new_name != view.name:
+            if any(v is not view and v.name == new_name
+                   for v in scene.saved_views):
+                # Sheets find a scene by its name: two with one name would
+                # be ambiguous (the same rule Layers apply).
+                self._window.statusBar().showMessage(
+                    tr("A scene named '{name}' already exists",
+                       name=new_name), 3000)
+            else:
+                self._rename(view, new_name)
+                self._touch()
+        # Show the name the scene really has (an empty or repeated entry
+        # goes back to what it was).
+        self._updating = True
+        item.setText(view.name)
+        self._updating = False
+
+    def _rename(self, view, new_name: str) -> None:
+        """Rename a scene — and the sheet frames that show it: a frame
+        finds its scene by name (``view_key`` = ``scene:<name>``)."""
+        old_key, new_key = f"scene:{view.name}", f"scene:{new_name}"
+        for comp in self._scene().compositions:
+            for frame in comp.frames:
+                if frame.view_key == old_key:
+                    frame.view_key = new_key
+        view.name = new_name
+
+    def _on_rename(self) -> None:
+        """The Rename button: edit the name of the scene that has the focus
+        (the highlighted row) in place."""
+        item = self.list.currentItem()
+        if item is None:
+            return
+        self.list.setFocus()
+        self.list.editItem(item)
 
     def _on_add(self) -> None:
         from core.saved_views import SavedView

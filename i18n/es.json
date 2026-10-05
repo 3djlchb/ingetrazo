@@ -2458,5 +2458,7 @@
  "Switch to X-ray, or back to the style you were in.": "Pasa a rayos X, o vuelve al estilo en que estabas.",
  "Back edges": "Aristas traseras",
  "Draw the edges hidden behind faces as dashed lines.": "Dibuja en discontinua las aristas que quedan detrás de las caras.",
- "The Polygon properties example extension: area, centroid and second moments of a face.": "La extensión de ejemplo Propiedades del polígono: área, centroide y momentos de segundo orden de una cara."
+ "The Polygon properties example extension: area, centroid and second moments of a face.": "La extensión de ejemplo Propiedades del polígono: área, centroide y momentos de segundo orden de una cara.",
+ "Rename the selected scene (or press F2)": "Renombra la escena seleccionada (o pulsa F2)",
+ "A scene named '{name}' already exists": "Ya existe una escena llamada '{name}'"
 }
