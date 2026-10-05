@@ -18,6 +18,7 @@ and the Blender side in ``resources/blender/render_scene.py``.
 """
 from __future__ import annotations
 
+import json
 import math
 import time
 from pathlib import Path
@@ -383,7 +384,8 @@ class SyncSession(QObject):
         self.state.emit(tr("Rendering the view…"))
         self._proc.write(rb.sync_request(
             self.panel.app.viewport.camera, out, rb.SYNC_WIDTH,
-            self._height(), self.panel._engine.currentData()).encode())
+            self._height(), self.panel._engine.currentData(),
+            scene=self.panel.app.scene).encode())
 
     def _read(self) -> None:
         if self._proc is None:
@@ -1184,8 +1186,11 @@ class RenderPanel(QWidget):
         (its lights and ambience included — they are document data) and
         the image settings."""
         scene = self.app.scene
+        # The section is baked into the loaded scene (the cut and its fill),
+        # so changing the plane, its fill or the cut toggle must reload it.
         return (id(scene), scene.content_version, self._engine.currentData(),
-                self._ground.isChecked(), round(self._aspect(), 3))
+                self._ground.isChecked(), round(self._aspect(), 3),
+                json.dumps(rb.section_dict(scene), sort_keys=True))
 
     def _synced(self, path: Path) -> None:
         if not self._sync.active or not Path(path).is_file():

@@ -132,6 +132,17 @@ def apply_finishes():
 
 
 def set_camera(scene, cam_cfg, width, height):
+    """Put the render camera where the viewport's is, in the viewport's own
+    terms (see ``core.render_blender.camera_dict``):
+
+    * perspective — vertical field of view, whatever the picture's shape;
+    * two-point perspective — the camera looks along the LEVEL sight line
+      (``level``) and the frame is lifted by ``shift_y`` (a lens shift in
+      frame heights) so the target stays on the centre;
+    * parallel — ``half_height`` is half the VISIBLE HEIGHT (the width
+      follows the picture's shape), and the camera is pulled back by
+      ``ortho_back`` because the viewport's parallel view has no near plane:
+      what lies behind the eye point still shows."""
     cam = scene.camera
     if cam is None or cam.name != "IngeTrazo camera":
         data = bpy.data.cameras.new("IngeTrazo")
@@ -141,8 +152,13 @@ def set_camera(scene, cam_cfg, width, height):
     data = cam.data
     eye = Vector(cam_cfg["eye"])
     target = Vector(cam_cfg["target"])
-    up = Vector(cam_cfg["up"])
-    fwd = (target - eye).normalized()
+    level = cam_cfg.get("level")
+    if level:
+        fwd = Vector(level).normalized()
+        up = Vector((0.0, 0.0, 1.0))
+    else:
+        fwd = (target - eye).normalized()
+        up = Vector(cam_cfg["up"])
     right = fwd.cross(up)
     if right.length < 1e-9:                    # looking straight along "up"
         right = fwd.cross(Vector((0.0, 1.0, 0.0)))
@@ -150,17 +166,24 @@ def set_camera(scene, cam_cfg, width, height):
     true_up = right.cross(fwd).normalized()
     # A Blender camera looks down its local -Z with +Y up.
     rot = Matrix((right, true_up, -fwd)).transposed()
-    cam.matrix_world = Matrix.Translation(eye) @ rot.to_4x4()
     data.sensor_fit = "VERTICAL"
+    data.shift_x = 0.0
+    data.shift_y = float(cam_cfg.get("shift_y", 0.0)) if level else 0.0
+    far = max(cam_cfg.get("far", 1e5), 1.0)
     if cam_cfg.get("perspective", True):
+        pos = eye
         data.type = "PERSP"
         data.angle_y = math.radians(cam_cfg["fov_deg"])
+        data.clip_start = max(cam_cfg.get("near", 0.05), 1e-4)
+        data.clip_end = max(far, data.clip_start * 10)
     else:
+        back = max(float(cam_cfg.get("ortho_back", 0.0)), 0.0)
+        pos = eye - fwd * back
         data.type = "ORTHO"
-        data.ortho_scale = 2.0 * cam_cfg["half_height"] * max(
-            1.0, width / max(height, 1))
-    data.clip_start = max(cam_cfg.get("near", 0.05), 1e-4)
-    data.clip_end = max(cam_cfg.get("far", 1e5), data.clip_start * 10)
+        data.ortho_scale = 2.0 * cam_cfg["half_height"]
+        data.clip_start = 1e-3
+        data.clip_end = back + far
+    cam.matrix_world = Matrix.Translation(pos) @ rot.to_4x4()
     return cam
 
 
@@ -297,9 +320,30 @@ def add_lights(scene, lights):
         say("lights", len(lights))
 
 
+def _srgb_to_linear(c):
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+#: What a ray that starts UNDER the ground sees, as an emission strength on
+#: the ground colour (measured: lands ≈ the lit ground, (161, 172, 182), under
+#: the day sky at AgX / exposure -0.6).
+GROUND_UNDER = (0.62, 0.71, 0.78)
+GROUND_UNDER_STRENGTH = 1.5
+
+
 def add_ground(scene, z, size, color):
-    bpy.ops.mesh.primitive_plane_add(size=size, location=(0.0, 0.0, z))
+    """A matte ground under the model, to catch its shadow.
+
+    A thick slab, not a plane. A parallel camera is a WINDOW as tall as the
+    view, so in a low or level view the lower part of it starts under the
+    ground; those rays never touch a plane (they run away from it) and used
+    to land on the sky below the horizon — a dark band along the bottom of
+    the picture. Inside the slab they meet the ground instead: its inside
+    shows the ground colour, flat."""
+    depth = max(size * 0.25, 100.0)
+    bpy.ops.mesh.primitive_cube_add(size=1.0, location=(0.0, 0.0, z - depth / 2))
     ground = bpy.context.active_object
+    ground.scale = (size, size, depth)
     ground.name = "IngeTrazo ground"
     mat = bpy.data.materials.new("IngeTrazo ground")
     if hasattr(mat, "use_nodes"):
@@ -308,6 +352,19 @@ def add_ground(scene, z, size, color):
     if bsdf is not None:
         bsdf.inputs["Base Color"].default_value = (*color, 1.0)
         bsdf.inputs["Roughness"].default_value = 0.9
+        nt = mat.node_tree
+        out = next((n for n in nt.nodes if n.type == "OUTPUT_MATERIAL"), None)
+        if out is not None:
+            inside = nt.nodes.new("ShaderNodeEmission")
+            inside.inputs["Color"].default_value = (
+                *[_srgb_to_linear(c) for c in GROUND_UNDER], 1.0)
+            inside.inputs["Strength"].default_value = GROUND_UNDER_STRENGTH
+            geo = nt.nodes.new("ShaderNodeNewGeometry")
+            mix = nt.nodes.new("ShaderNodeMixShader")
+            nt.links.new(geo.outputs["Backfacing"], mix.inputs["Fac"])
+            nt.links.new(bsdf.outputs["BSDF"], mix.inputs[1])
+            nt.links.new(inside.outputs["Emission"], mix.inputs[2])
+            nt.links.new(mix.outputs["Shader"], out.inputs["Surface"])
     ground.data.materials.append(mat)
 
 
@@ -487,11 +544,91 @@ def _cut_shader(objs, planes):
     say("section", len(planes), "plane(s), shader")
 
 
+#: Section Fill, as the viewport paints it: wherever the surface the eye sees
+#: is a BACK face, the eye is looking into a solid the plane opened, and the
+#: plane's colour fills it — a flat colour, not lit. Kept between cameras: a
+#: serving Blender re-aims the same scene at new cameras (see update_fill).
+_FILL = {"switches": [], "emitters": [], "plane": None}
+
+#: Emission strength that lands the fill on the colour of the style's swatch
+#: once the view transform has had its say — measured with AgX at the day's
+#: exposure (-0.6): the swatch (0.35, 0.37, 0.41) renders as ≈ (89, 94, 105).
+FILL_STRENGTH = 1.7
+FILL_EXPOSURE = -0.6
+
+
+def _add_fill(objs, plane, color):
+    """Paint the cut faces: in every material, a back face shows ``color``
+    (flat) instead of the surface. Whether it does is decided per camera by
+    :func:`update_fill` — it starts off."""
+    mats = {s.material for o in objs for s in o.material_slots if s.material}
+    lin = [_srgb_to_linear(float(c)) for c in list(color)[:3]]
+    for mat in mats:
+        nt = mat.node_tree
+        if nt is None:
+            continue
+        out = next((n for n in nt.nodes if n.type == "OUTPUT_MATERIAL"
+                    and n.is_active_output), None)
+        if out is None or not out.inputs["Surface"].links:
+            continue
+        src = out.inputs["Surface"].links[0].from_socket
+        geo = nt.nodes.new("ShaderNodeNewGeometry")
+        switch = nt.nodes.new("ShaderNodeMath")        # backfacing × on/off
+        switch.operation = "MULTIPLY"
+        switch.inputs[1].default_value = 0.0
+        flat = nt.nodes.new("ShaderNodeEmission")
+        flat.inputs["Color"].default_value = (lin[0], lin[1], lin[2], 1.0)
+        flat.inputs["Strength"].default_value = FILL_STRENGTH
+        _FILL["emitters"].append(flat)
+        mix = nt.nodes.new("ShaderNodeMixShader")
+        nt.links.new(geo.outputs["Backfacing"], switch.inputs[0])
+        nt.links.new(switch.outputs["Value"], mix.inputs["Fac"])
+        nt.links.new(src, mix.inputs[1])
+        nt.links.new(flat.outputs["Emission"], mix.inputs[2])
+        nt.links.new(mix.outputs["Shader"], out.inputs["Surface"])
+        _FILL["switches"].append(switch)
+        # A back face has to be drawn to be painted.
+        if hasattr(mat, "use_backface_culling"):
+            mat.use_backface_culling = False
+    _FILL["plane"] = plane
+    say("section fill", len(_FILL["switches"]), "material(s)")
+
+
+def set_fill_exposure(exposure):
+    """Keep the fill on its colour when the ambience changes the exposure
+    (day −0.6, overcast −0.3, night 0): one stop of exposure doubles what
+    the camera sees, so the emission steps the other way."""
+    for flat in _FILL["emitters"]:
+        flat.inputs["Strength"].default_value = FILL_STRENGTH * 2.0 ** (
+            FILL_EXPOSURE - float(exposure))
+
+
+def update_fill(cam_cfg):
+    """Turn the fill on or off for THIS camera. The viewport draws the plane
+    in front of what is behind it, so a fill only shows when the eye is on
+    the side that is cut away — from the kept side the plane is behind the
+    model and paints nothing. A perspective eye is a point; a parallel one is
+    a direction."""
+    if not _FILL["switches"] or _FILL["plane"] is None:
+        return
+    point, normal = _FILL["plane"]
+    eye = Vector(cam_cfg["eye"])
+    if cam_cfg.get("perspective", True):
+        on = normal.dot(eye - point) > 0.0
+    else:
+        on = normal.dot(Vector(cam_cfg["target"]) - eye) < 0.0
+    for switch in _FILL["switches"]:
+        switch.inputs[1].default_value = 1.0 if on else 0.0
+    say("section fill", "on" if on else "off (camera on the kept side)")
+
+
 def apply_section(scene, objs, section):
     """Section (clipping) planes from the job: ``{"planes": [{"point":
     [x, y, z], "normal": [x, y, z]}], "mode": "clip" | "shader" |
-    "boolean"}``. The glTF carries no clipping, so the cut is rebuilt here;
-    ``clip`` (the default) trims the geometry like the viewport does."""
+    "boolean", "fill": bool, "fill_color": [r, g, b]}``. The glTF carries no
+    clipping, so the cut is rebuilt here; ``clip`` (the default) trims the
+    geometry like the viewport does, and ``fill`` is the style's Section
+    Fill (the cut faces painted a flat colour)."""
     planes = _plane_list(section)
     if not planes:
         return
@@ -499,9 +636,12 @@ def apply_section(scene, objs, section):
     if mode == "shader":
         _cut_shader(objs, planes)
     elif mode == "boolean":
-        _cut_boolean(scene, objs, planes)
+        _cut_boolean(scene, objs, planes)     # its caps are real faces
     else:
         _cut_clip(objs, planes)
+    if section.get("fill") and mode != "boolean":
+        _add_fill(objs, planes[0], section.get("fill_color")
+                  or (0.35, 0.37, 0.41))
 
 
 def main():
@@ -514,6 +654,7 @@ def main():
     figures = find_figures()
     w, h = int(job["width"]), int(job["height"])
     set_camera(scene, job["camera"], w, h)
+    update_fill(job["camera"])
     face_figures(figures, job["camera"])
     ambience = job.get("ambience", "day")
     sun_dir = job.get("sun") if ambience == "day" else None
@@ -540,6 +681,7 @@ def main():
     # take the punchier look when this Blender has it.
     view = scene.view_settings
     view.exposure = float(job.get("exposure", -0.6))
+    set_fill_exposure(view.exposure)
     for look in ("AgX - Medium High Contrast", "Medium High Contrast",
                  "AgX - Punchy", "Punchy"):
         try:
@@ -589,6 +731,7 @@ def serve(scene, figures):
             break
         w, h = int(req["width"]), int(req["height"])
         set_camera(scene, req["camera"], w, h)
+        update_fill(req["camera"])
         face_figures(figures, req["camera"])
         set_samples(scene, int(req.get("samples", 16)))
         r.resolution_x, r.resolution_y = w, h

@@ -247,15 +247,58 @@ def sun_toward(scene) -> Optional[tuple]:
     return tuple(float(v) for v in d)
 
 
-def camera_dict(camera) -> dict:
-    """The viewport camera, in the terms the Blender script uses."""
+def _scene_reach(scene, camera) -> float:
+    """How far behind the eye the model can reach along the view — what a
+    parallel camera has to be pulled back by. The viewport's parallel
+    projection has no near plane (its depth range runs both ways), so a
+    model that sits partly behind the eye point still shows; Blender's
+    orthographic camera clips at its position."""
+    lo, hi = scene.bounds() if scene is not None else (None, None)
+    if lo is None:
+        return 1000.0
+    centre = (lo + hi) * 0.5
+    diag = (hi - lo).length()
+    return float((camera.eye() - centre).length() + diag + 1.0)
+
+
+def camera_dict(camera, scene=None) -> dict:
+    """The viewport camera, in the terms the Blender script uses.
+
+    ``scene`` (optional) sizes how far a parallel camera is pulled back so
+    nothing of the model lies behind it; without one a generous default is
+    used.
+
+    Two-point perspective is described by what the viewport does for it
+    (``Camera.view_matrix`` / ``projection_matrix``): the camera looks along
+    the LEVEL sight line (``level``) and the frame is lifted by ``shift_y``
+    — a Blender lens shift, in units of the frame height — so the target
+    stays on the centre of the screen. ``level`` is ``None`` for an ordinary
+    view (the mode off, parallel, or looking too steeply down or up)."""
     eye, target, up = camera.eye(), camera.target, camera.up_vector()
-    half_h = camera.distance * math.tan(math.radians(camera.fov_deg) / 2.0)
+    t = math.tan(math.radians(camera.fov_deg) / 2.0)
+    half_h = camera.distance * t
+    level = camera._level_forward() if camera.perspective else None
+    shift_y = 0.0
+    if level is not None:
+        rel = target - eye
+        depth = (rel.x() * level.x() + rel.y() * level.y()
+                 + rel.z() * level.z())
+        shift_y = rel.z() / (depth * 2.0 * t)
+    if camera.perspective:
+        back = 0.0
+    else:
+        back = _scene_reach(scene, camera) if scene is not None \
+            else max(camera.distance * 4.0, 1000.0)
     return {
         "eye": [eye.x(), eye.y(), eye.z()],
         "target": [target.x(), target.y(), target.z()],
         "up": [up.x(), up.y(), up.z()],
         "perspective": bool(camera.perspective),
+        "two_point": level is not None,
+        "level": ([level.x(), level.y(), level.z()]
+                  if level is not None else None),
+        "shift_y": float(shift_y),
+        "ortho_back": float(back),
         "fov_deg": float(camera.fov_deg),
         "half_height": float(half_h),
         "near": float(min(getattr(camera, "znear", 0.1),
@@ -277,18 +320,27 @@ def ground_dict(scene) -> Optional[dict]:
 
 
 def section_dict(scene) -> Optional[dict]:
-    """The section cut the viewport is showing, for Blender: the active
-    plane's point and normal (the normal points to the side that is cut
-    away, as in :mod:`core.section`). ``None`` when no cut is active or
-    View > Section Cuts is off. The glTF carries no clipping, so the
-    render script rebuilds the cut from this."""
+    """The section the viewport is showing, for Blender: the active plane's
+    point and normal (the normal points to the side that is cut away, as in
+    :mod:`core.section`) and the Section Fill of the active style — whether
+    it is on and its colour. ``None`` when no cut is active or View ▸
+    Section Cuts is off (then the model shows whole, and there is no fill
+    either). The glTF carries no clipping, so the render script rebuilds the
+    cut from this.
+
+    The fill is the style's, as in the viewport: switched off, the model is
+    still sliced and the cut faces stay open."""
     if not getattr(scene, "show_section_cuts", True):
         return None
     active = getattr(scene, "active_section", None)
     sp = active() if callable(active) else None
     if sp is None:
         return None
+    style = getattr(scene, "display_style", None)
+    colour = getattr(style, "section_fill_color", (0.35, 0.37, 0.41))
     return {"mode": "clip",
+            "fill": bool(getattr(style, "section_fill", True)),
+            "fill_color": [float(c) for c in colour[:3]],
             "planes": [{"point": [sp.point.x(), sp.point.y(), sp.point.z()],
                         "normal": [sp.normal.x(), sp.normal.y(),
                                    sp.normal.z()]}]}
@@ -436,7 +488,7 @@ def write_job(scene, camera, work: Path, *, engine: str = "eevee",
         "width": int(width), "height": int(height),
         "engine": engine,
         "samples": SAMPLES[engine][max(0, min(2, int(quality)))],
-        "camera": camera_dict(camera),
+        "camera": camera_dict(camera, scene),
         "ambience": ambience,
         "exposure": EXPOSURE[ambience],
         "sun": sun_toward(scene) if ambience == "day" else None,
@@ -495,9 +547,10 @@ SYNC_REST_MS = 700
 
 
 def sync_request(camera, output, width: int, height: int,
-                 engine: str = "eevee") -> str:
+                 engine: str = "eevee", scene=None) -> str:
     """One line for a serving Blender: render this camera to ``output``."""
-    return json.dumps({"camera": camera_dict(camera), "output": str(output),
+    return json.dumps({"camera": camera_dict(camera, scene),
+                       "output": str(output),
                        "width": int(width), "height": int(height),
                        "samples": SYNC_SAMPLES.get(engine, 8)}) + "\n"
 
@@ -507,7 +560,7 @@ def camera_key(camera) -> tuple:
     redraw with the camera untouched never asks for a new one."""
     d = camera_dict(camera)
     return (tuple(round(v, 3) for v in d["eye"] + d["target"] + d["up"]),
-            d["perspective"], round(d["fov_deg"], 2),
+            d["perspective"], d["two_point"], round(d["fov_deg"], 2),
             round(d["half_height"], 3))
 
 
