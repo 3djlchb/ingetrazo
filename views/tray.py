@@ -3515,8 +3515,11 @@ class ScenesPanel(QWidget):
         self.list = QListWidget()
         # Double-click already SHOWS the scene, so it must not also open the
         # name editor (the two fought: the scene change refreshed the list
-        # and killed the editor). Rename = F2 here, or the Rename button.
-        self.list.setEditTriggers(QAbstractItemView.EditKeyPressed)
+        # and killed the editor). Rename = F2, the Rename button, or — as
+        # renaming a file in Windows — a click, a pause, and a second click
+        # on the row already selected (a quick double-click cancels that).
+        self.list.setEditTriggers(QAbstractItemView.EditKeyPressed
+                                  | QAbstractItemView.SelectedClicked)
         self.list.itemDoubleClicked.connect(self._on_activate)
         self.list.itemChanged.connect(self._on_item_changed)
         lay.addWidget(self.list)

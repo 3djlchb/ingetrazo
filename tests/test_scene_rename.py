@@ -112,7 +112,8 @@ def test_double_click_still_shows_the_scene_without_the_editor():
         rect = panel.list.visualItemRect(panel.list.item(0))
         QTest.mouseDClick(panel.list.viewport(), Qt.LeftButton,
                           pos=rect.center())
-        _app.processEvents()
+        # Long enough for a delayed (click-pause-click) edit to have fired.
+        QTest.qWait(_app.doubleClickInterval() + 150)
         assert panel.list.state() != QAbstractItemView.EditingState
     finally:
         _close(win)
@@ -126,5 +127,25 @@ def test_refresh_leaves_a_rename_in_progress_alone():
         panel._on_rename()
         win.tray.on_scene_changed()                  # e.g. a version bump
         assert panel.list.state() == QAbstractItemView.EditingState
+    finally:
+        _close(win)
+
+
+def _click_row(panel, row=0):
+    rect = panel.list.visualItemRect(panel.list.item(row))
+    QTest.mouseClick(panel.list.viewport(), Qt.LeftButton, pos=rect.center())
+
+
+def test_click_pause_click_renames_like_windows():
+    win = _window_with_scenes("Planta")
+    try:
+        panel = win.tray.scenes
+        _click_row(panel)                          # selects the row
+        QTest.qWait(_app.doubleClickInterval() + 150)
+        _click_row(panel)                          # second, slow click
+        QTest.qWait(_app.doubleClickInterval() + 150)
+        assert panel.list.state() == QAbstractItemView.EditingState
+        _type_name(panel, "Fachada")
+        assert win.viewport.scene.saved_views[0].name == "Fachada"
     finally:
         _close(win)
