@@ -100,53 +100,73 @@ def _facing_quad(mesh, toward):
     return out
 
 
-class _Painted:
-    """A face as the viewport DRAWS it inside a painted container: the same
-    face, only its ``attrs`` carry the container's paint where the face has
-    none of its own (:func:`core.materials.effective_attrs`). Everything else
-    is the real face's, so the exporters read it as one."""
+class _FaceView:
+    """A face as an export must read it. The same face, with two things
+    that depend on the PLACEMENT it came out of:
 
-    __slots__ = ("_face", "attrs")
+    * ``attrs`` — the container's paint where the face has none of its own
+      (:func:`core.materials.effective_attrs`), as the viewport draws it;
+    * ``mirrored`` — the placement is a mirror image (a negative-determinant
+      transform), which turns every face inside out: its loop winds the
+      wrong way round and its normal points into the solid.
 
-    def __init__(self, face, attrs):
+    Everything else is the real face's."""
+
+    __slots__ = ("_face", "attrs", "mirrored")
+
+    def __init__(self, face, attrs, mirrored=False):
         self._face = face
         self.attrs = attrs
+        self.mirrored = mirrored
 
     def __getattr__(self, name):
         return getattr(self._face, name)
 
 
-def _painted(faces, paint):
-    """``faces`` seen through ``paint``, the paint a group or component
-    instance gives the faces that wear the default material (issue #47): the
-    viewport shows it, so an export must too — otherwise a column painted
-    orange as a whole leaves the file with only the few faces somebody
-    painted by hand, and the rest come out the default grey."""
-    if not paint:
+def _is_mirrored(matrix) -> bool:
+    return matrix is not None and matrix.determinant() < 0.0
+
+
+def _painted(faces, paint, mirrored: bool = False):
+    """``faces`` seen through ``paint`` — the paint a group or component
+    instance gives the faces that wear the default material (issue #47), which
+    the viewport shows, so an export must too: otherwise a column painted
+    orange as a whole leaves the file with only the few faces somebody painted
+    by hand — and, for a ``mirrored`` placement, flagged so its triangles are
+    turned the right way out (see :func:`_add_face`)."""
+    if not paint and not mirrored:
         yield from faces
         return
     from core.materials import effective_attrs
     for face in faces:
         attrs = effective_attrs(face.attrs, paint)
-        yield face if attrs is face.attrs else _Painted(face, attrs)
+        if attrs is face.attrs and not mirrored:
+            yield face
+        else:
+            yield _FaceView(face, attrs, mirrored)
 
 
 def _group_faces(group):
     """A top-level group's faces in WORLD space, each with the paint it is
-    drawn with. The fast way (one welded mesh) when only the group carries a
-    paint; placement by placement when a nested piece has a paint of its own,
-    which the weld would flatten into its parent's."""
+    drawn with and whether its placement is a mirror. The fast way (one
+    welded mesh) when every placement agrees and only the group carries a
+    paint; placement by placement otherwise — the weld would flatten a nested
+    piece's own paint into its parent's, and mix mirrored copies with plain
+    ones."""
     from core.group import (effective_material, iter_placements,
                             transformed_mesh, world_mesh)
+    placements = list(iter_placements(group))
     nested_paint = any(getattr(g, "material", None)
-                       for g, _m in iter_placements(group) if g is not group)
-    if not nested_paint:
+                       for g, _m in placements if g is not group)
+    signs = {_is_mirrored(m) for _g, m in placements}
+    if not nested_paint and len(signs) == 1:
         yield from _painted(world_mesh(group).faces,
-                            effective_material(group))
+                            effective_material(group), signs.pop())
         return
-    for g, m in iter_placements(group):
+    for g, m in placements:
         mesh = g.mesh if m is None else transformed_mesh(g.mesh, m)
-        yield from _painted(mesh.faces, effective_material(g))
+        yield from _painted(mesh.faces, effective_material(g),
+                            _is_mirrored(m))
 
 
 def _placements_facing(group, toward, figures: bool = True):
@@ -165,7 +185,9 @@ def _placements_facing(group, toward, figures: bool = True):
             mesh = _turned_toward(mesh, toward)
         elif kind:
             mesh = _facing_quad(mesh, toward)
-        yield from _painted(mesh.faces, effective_material(g))
+        # (a figure rebuilt to face the camera is not a mirror image)
+        yield from _painted(mesh.faces, effective_material(g),
+                            _is_mirrored(m) and not kind)
 
 
 def _feet(mesh):
@@ -304,6 +326,14 @@ def _add_face(face, materials, prims) -> None:
     """One face's triangles into ``prims`` under its material's key."""
     from core.texture import affine_uv, planar_uv
     n = face.normal()
+    # A mirrored placement is inside out: its loop winds the wrong way and
+    # ``n`` points into the solid. The texture is laid out with the normal as
+    # it comes (so it lands as before); what is WRITTEN is the outward one,
+    # with the triangles turned to match — otherwise a renderer takes the
+    # outside for a back face (Blender painted it with the section fill) and
+    # lights it from the wrong side.
+    mirrored = bool(getattr(face, "mirrored", False))
+    out_n, order = (-n, (0, 2, 1)) if mirrored else (n, (0, 1, 2))
     op = face.attrs.get("opacity")
     op = None if op is None or float(op) >= 0.999 else round(float(op), 3)
     tex = face.attrs.get("texture")
@@ -323,7 +353,7 @@ def _add_face(face, materials, prims) -> None:
             pts = list(tri)
             uv = affine_uv(uvw, pts) if uvw else planar_uv(n, pts, sw, sh, rot)
             prims.setdefault(key, []).append(
-                (n, [(pts[k], (uv[k][0], uv[k][1])) for k in range(3)]))
+                (out_n, [(pts[k], (uv[k][0], uv[k][1])) for k in order]))
     else:
         col = tuple(face.attrs.get("color") or _DEFAULT_COLOR)
         key = ("color", col) if op is None else ("color", col, op)
@@ -334,7 +364,7 @@ def _add_face(face, materials, prims) -> None:
         for tri in face.triangulate():
             pts = list(tri)
             prims.setdefault(key, []).append(
-                (n, [(pts[k], None) for k in range(3)]))
+                (out_n, [(pts[k], None) for k in order]))
 
 
 def _resolve_finishes(scene, materials) -> None:

@@ -2946,13 +2946,21 @@ class Viewport(QOpenGLWidget):
         self._gl.glDisable(GL_POLYGON_OFFSET_FILL)
 
     def _draw_instanced_raw(self) -> None:
-        """Geometry-only instanced draw — the section-fill stencil pass."""
+        """Geometry-only instanced draw — the section-fill stencil pass.
+
+        A MIRRORED batch is drawn under a clockwise front face, like every
+        other instanced pass (``_front_face``): the stencil pass keeps only
+        the BACK faces, and GL tells back from front by winding, which a
+        mirror turns inside out. Without it the mirrored copies' outer faces
+        were taken for the inside of a solid and painted with the section
+        fill's colour — whole columns, whether or not the plane cut them."""
         by_proto = getattr(self, "_frame_instanced", None)
         if not by_proto:
             return
         extra = self.context().extraFunctions()
-        for mesh, paint, groups, _mirrored in by_proto.values():
+        for mesh, paint, groups, mirrored in by_proto.values():
             entry = self._ensure_proto_draw(mesh, paint)
+            self._front_face(mirrored)
             n = self._update_inst_matrices(entry, groups)
             if entry["vcol_count"]:
                 entry["vcol_vao"].bind()
@@ -2964,6 +2972,7 @@ class Viewport(QOpenGLWidget):
                 for _tk, s0, cnt in entry["tex_runs"]:
                     extra.glDrawArraysInstanced(GL_TRIANGLES, s0, cnt, n)
                 entry["tex_vao"].release()
+        self._front_face(False)
 
     def _draw_back_edges(self, color, w: int, h: int) -> None:
         """Back Edges (K, issue #234): the edges a face hides, dashed, over
