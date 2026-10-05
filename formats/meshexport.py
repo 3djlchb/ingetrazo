@@ -100,12 +100,62 @@ def _facing_quad(mesh, toward):
     return out
 
 
+class _Painted:
+    """A face as the viewport DRAWS it inside a painted container: the same
+    face, only its ``attrs`` carry the container's paint where the face has
+    none of its own (:func:`core.materials.effective_attrs`). Everything else
+    is the real face's, so the exporters read it as one."""
+
+    __slots__ = ("_face", "attrs")
+
+    def __init__(self, face, attrs):
+        self._face = face
+        self.attrs = attrs
+
+    def __getattr__(self, name):
+        return getattr(self._face, name)
+
+
+def _painted(faces, paint):
+    """``faces`` seen through ``paint``, the paint a group or component
+    instance gives the faces that wear the default material (issue #47): the
+    viewport shows it, so an export must too — otherwise a column painted
+    orange as a whole leaves the file with only the few faces somebody
+    painted by hand, and the rest come out the default grey."""
+    if not paint:
+        yield from faces
+        return
+    from core.materials import effective_attrs
+    for face in faces:
+        attrs = effective_attrs(face.attrs, paint)
+        yield face if attrs is face.attrs else _Painted(face, attrs)
+
+
+def _group_faces(group):
+    """A top-level group's faces in WORLD space, each with the paint it is
+    drawn with. The fast way (one welded mesh) when only the group carries a
+    paint; placement by placement when a nested piece has a paint of its own,
+    which the weld would flatten into its parent's."""
+    from core.group import (effective_material, iter_placements,
+                            transformed_mesh, world_mesh)
+    nested_paint = any(getattr(g, "material", None)
+                       for g, _m in iter_placements(group) if g is not group)
+    if not nested_paint:
+        yield from _painted(world_mesh(group).faces,
+                            effective_material(group))
+        return
+    for g, m in iter_placements(group):
+        mesh = g.mesh if m is None else transformed_mesh(g.mesh, m)
+        yield from _painted(mesh.faces, effective_material(g))
+
+
 def _placements_facing(group, toward, figures: bool = True):
     """Every placement of ``group`` in world space, face-me figures (at any
     depth) turned toward the camera: a cut-out outline (``"mesh"``) by
     :func:`_turned_toward`, a simple quad rebuilt by :func:`_facing_quad`.
     ``figures=False`` leaves the figures out (:func:`faceme_figures`)."""
-    from core.group import iter_placements, transformed_mesh
+    from core.group import (effective_material, iter_placements,
+                            transformed_mesh)
     for g, m in iter_placements(group):
         kind = getattr(g, "billboard", False)
         if kind and not figures:
@@ -115,7 +165,7 @@ def _placements_facing(group, toward, figures: bool = True):
             mesh = _turned_toward(mesh, toward)
         elif kind:
             mesh = _facing_quad(mesh, toward)
-        yield from mesh.faces
+        yield from _painted(mesh.faces, effective_material(g))
 
 
 def _feet(mesh):
@@ -173,29 +223,34 @@ def world_faces(scene, face_me=None, figures: bool = True):
         for f in scene.loose_mesh.faces:
             if scene.entity_visible(f):
                 yield f
-        from core.group import world_mesh
         for g in getattr(scene, "groups", []):
             if not scene.entity_visible(g):
                 continue
             if _has_billboard(g):
                 yield from _placements_facing(g, face_me, figures)
             else:
-                yield from world_mesh(g).faces
+                yield from _group_faces(g)
         return
     if hasattr(scene, "render_faces"):
         groups = getattr(scene, "groups", [])
         if not any(getattr(g, "xform", None) is not None
                    or getattr(g, "children", None) for g in groups):
-            yield from scene.render_faces()
+            # Classic groups: their meshes already sit in world coordinates.
+            # (``scene.render_faces()``, but with each group's paint.)
+            from core.group import effective_material
+            for f in scene.loose_mesh.faces:
+                if scene.entity_visible(f):
+                    yield f
+            for g, _m in scene.placements():
+                yield from _painted(g.mesh.faces, effective_material(g))
             return
-        from core.group import world_mesh
         for f in scene.loose_mesh.faces:
             if scene.entity_visible(f):
                 yield f
         for g in groups:
             if not scene.entity_visible(g) or getattr(g, "billboard", False):
                 continue
-            yield from world_mesh(g).faces
+            yield from _group_faces(g)
     elif hasattr(scene, "mesh"):
         yield from scene.mesh.faces
     else:
