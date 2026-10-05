@@ -183,6 +183,13 @@ class Scene:
         return self.mesh.faces
 
     # ---- Layers --------------------------------------------------------------
+    def layer_by_uid(self, uid: str):
+        """The layer with this identity (survives renames), or ``None``."""
+        for ly in self.layers:
+            if ly.uid == uid:
+                return ly
+        return None
+
     def layer(self, name: str):
         for ly in self.layers:
             if ly.name == name:

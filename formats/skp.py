@@ -320,6 +320,7 @@ def _apply_payload_inner(scene, payload) -> str:
                 perspective=not raw.get("parallel", False),
                 ortho_height=raw.get("ortho_height") or None,
                 hidden_layers=raw.get("hidden_layers")))
+            scene.saved_views[-1].bind_layers(scene)   # by uid, when it can
             existing.add(raw["name"])
 
     # Linear dimensions (.skp dimension entities): world endpoints + an

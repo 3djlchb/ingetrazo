@@ -680,10 +680,11 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
     _load_mesh(scene.mesh, payload)
     raw_layers = payload.get("layers")
     if raw_layers:
-        from core.layers import DEFAULT_LAYER, Layer
+        from core.layers import DEFAULT_LAYER, Layer, ensure_unique_uids
         scene.layers = [Layer.from_dict(r) for r in raw_layers]
         if not any(ly.name == DEFAULT_LAYER for ly in scene.layers):
             scene.layers.insert(0, Layer(DEFAULT_LAYER))
+        ensure_unique_uids(scene.layers)
     raw_tiles = payload.get("tile_layer")
     if raw_tiles:
         from georef.tiles import TileLayer
@@ -700,6 +701,8 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
     from core.saved_views import SavedView
     scene.saved_views = [SavedView.from_dict(r)
                          for r in payload.get("saved_views", [])]
+    for _view in scene.saved_views:      # names-only (older) views go by uid
+        _view.bind_layers(scene)
     from core.composition import Composicion
     scene.compositions = []
     for r in payload.get("compositions", []):

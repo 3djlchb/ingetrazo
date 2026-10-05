@@ -91,6 +91,10 @@ def layers_held_by_scenes(scene) -> set[str]:
     held: set[str] = set()
     for view in getattr(scene, "saved_views", None) or ():
         held.update(getattr(view, "hidden_layers", None) or ())
+        ids = set(getattr(view, "hidden_layer_ids", None) or ())
+        if ids:                       # by uid: whatever the layer is called now
+            held.update(ly.name for ly in getattr(scene, "layers", None) or ()
+                        if ly.uid in ids)
     return held
 
 

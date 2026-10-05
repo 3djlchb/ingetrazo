@@ -727,11 +727,16 @@ class AssignLayerCommand(Command):
         self._layer = layer
         self._prev: list = []
         self._created = False
+        #: The layer this command made, kept so a redo puts back the SAME
+        #: layer (same uid) instead of a look-alike.
+        self._made = None
 
     def do(self, scene) -> None:
         from core.layers import Layer, assign_layer, layer_of
         if scene.layer(self._layer) is None:
-            scene.layers.append(Layer(self._layer))
+            if self._made is None:
+                self._made = Layer(self._layer)
+            scene.layers.append(self._made)
             self._created = True
         self._prev = [layer_of(e) for e in self._entities]
         for e in self._entities:
@@ -1485,13 +1490,16 @@ class AddImagePlaneCommand(Command):
     def __init__(self, image) -> None:
         self.image = image
         self._made_layer = False
+        self._layer_obj = None      # kept so a redo restores the same uid
 
     def do(self, scene) -> None:
         from core.layers import Layer
         name = getattr(self.image, "layer", None)
         self._made_layer = False
         if name and scene.layer(name) is None:
-            scene.layers.append(Layer(name))
+            if self._layer_obj is None:
+                self._layer_obj = Layer(name)
+            scene.layers.append(self._layer_obj)
             self._made_layer = True
         scene.image_planes.append(self.image)
         scene.selection.clear()

@@ -23,7 +23,7 @@ class SavedView:
                  fov_deg: float = 45.0, perspective: bool = True,
                  two_point: bool = False, hidden_layers=None, style=None, section=None,
                  georef=None, shadows=None, hidden_objects=None,
-                 hidden_shown=None) -> None:
+                 hidden_shown=None, hidden_layer_ids=None) -> None:
         self.name = name
         self.target = tuple(target)
         self.distance = float(distance)
@@ -36,6 +36,15 @@ class SavedView:
         #: Layer NAMES hidden in this view. Every other layer shows — a layer
         #: created after the view was saved defaults to visible.
         self.hidden_layers = list(hidden_layers or [])
+        #: The same layers by UID — what a view really goes by once it has
+        #: one, because a uid survives a rename and a name does not. ``None``
+        #: = a view that has only names (an old document, an importer):
+        #: ``hidden_layers`` rules it until :meth:`bind_layers` upgrades it.
+        #: A list, even empty, is authoritative and ``hidden_layers`` is just
+        #: the readable copy (kept in step by a rename, and what a .igz read
+        #: by an older IngeTrazo still understands).
+        self.hidden_layer_ids = (list(hidden_layer_ids)
+                                 if hidden_layer_ids is not None else None)
         #: Display-style snapshot (core.style.Style.to_dict()) or ``None`` —
         #: a scene remembers the style it was saved with.
         self.style = dict(style) if style else None
@@ -87,6 +96,8 @@ class SavedView:
                    two_point=bool(getattr(camera, "two_point", False)),
                    hidden_layers=[ly.name for ly in scene.layers
                                   if not ly.visible],
+                   hidden_layer_ids=[ly.uid for ly in scene.layers
+                                     if not ly.visible],
                    style=(scene.display_style.to_dict()
                           if getattr(scene, "display_style", None) else None),
                    section={
@@ -109,6 +120,21 @@ class SavedView:
                        "geometry": bool(getattr(scene, "show_hidden_geometry",
                                                 False))})
 
+    def bind_layers(self, scene) -> None:
+        """Upgrade a names-only view to go by layer uid, so a later rename
+        cannot lose its hidden layers. Done only when EVERY hidden name is
+        a layer the document has: a name with no layer yet (an imported
+        scene hiding a tag not created) stays name-based, as it always was."""
+        if self.hidden_layer_ids is not None:
+            return
+        ids = []
+        for name in self.hidden_layers:
+            ly = scene.layer(name)
+            if ly is None:
+                return
+            ids.append(ly.uid)
+        self.hidden_layer_ids = ids
+
     def recapture(self, scene, camera) -> None:
         """Update this view in place from the live state (keeps the name)."""
         fresh = SavedView.capture(self.name, scene, camera)
@@ -125,9 +151,14 @@ class SavedView:
         camera.fov_deg = self.fov_deg
         camera.perspective = self.perspective
         camera.two_point = self.two_point
-        hidden = set(self.hidden_layers)
-        for ly in scene.layers:
-            ly.visible = ly.name not in hidden
+        if self.hidden_layer_ids is not None:
+            hidden_ids = set(self.hidden_layer_ids)
+            for ly in scene.layers:
+                ly.visible = ly.uid not in hidden_ids
+        else:
+            hidden = set(self.hidden_layers)
+            for ly in scene.layers:
+                ly.visible = ly.name not in hidden
         if self.style:
             from core.style import Style
             scene.display_style = Style.from_dict(self.style)
@@ -174,6 +205,8 @@ class SavedView:
             entry["two_point"] = True
         if self.hidden_layers:
             entry["hidden_layers"] = list(self.hidden_layers)
+        if self.hidden_layer_ids:
+            entry["hidden_layer_ids"] = list(self.hidden_layer_ids)
         if self.style:
             entry["style"] = dict(self.style)
         if self.section is not None:
@@ -200,6 +233,7 @@ class SavedView:
                    perspective=not raw.get("parallel", False),
                    two_point=bool(raw.get("two_point", False)),
                    hidden_layers=raw.get("hidden_layers"),
+                   hidden_layer_ids=raw.get("hidden_layer_ids"),
                    style=raw.get("style"),
                    section=raw.get("section"),
                    georef=raw.get("georef"),
