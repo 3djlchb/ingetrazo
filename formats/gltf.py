@@ -268,14 +268,18 @@ def save_glb(scene, path, face_me=None) -> None:
 
     json_bytes = json.dumps(gltf, separators=(",", ":")).encode("utf-8")
     json_bytes += b" " * ((-len(json_bytes)) % 4)          # pad with spaces
-    bin_bytes = bytes(buf)
-    bin_bytes += b"\x00" * ((-len(bin_bytes)) % 4)          # pad with zeros
+    # The binary chunk is written straight from ``buf``: ``bytes(buf)`` plus
+    # the padded concatenation held two more copies of the whole model in
+    # memory — on a multi-million-triangle render export, gigabytes.
+    pad = (-len(buf)) % 4                                   # pad with zeros
+    bin_len = len(buf) + pad
 
-    total = 12 + 8 + len(json_bytes) + (8 + len(bin_bytes) if bin_bytes else 0)
+    total = 12 + 8 + len(json_bytes) + (8 + bin_len if bin_len else 0)
     with open(Path(path), "wb") as f:
         f.write(struct.pack("<III", 0x46546C67, 2, total))  # "glTF", v2, length
         f.write(struct.pack("<II", len(json_bytes), 0x4E4F534A))  # "JSON"
         f.write(json_bytes)
-        if bin_bytes:
-            f.write(struct.pack("<II", len(bin_bytes), 0x004E4942))  # "BIN\0"
-            f.write(bin_bytes)
+        if bin_len:
+            f.write(struct.pack("<II", bin_len, 0x004E4942))  # "BIN\0"
+            f.write(buf)
+            f.write(b"\x00" * pad)

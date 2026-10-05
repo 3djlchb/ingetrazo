@@ -329,6 +329,40 @@ def test_upload_vbo_shrinking_keeps_the_prefix_and_the_count():
     assert vbo.calls == [("write", 40, 8)]           # capacity still fits
 
 
+def test_upload_vbo_sends_a_big_tail_in_batches(monkeypatch):
+    """The changed tail goes up in bounded batches, never as one joined
+    copy of the whole buffer — and lands byte for byte where it belongs."""
+    import views.viewport as vpmod
+    monkeypatch.setattr(vpmod, "_VBO_WRITE_BATCH", 10)
+    vp, vbo = _UploadStub(), _FakeVBO()
+    parts = [b"a" * 4, b"b" * 4, b"c" * 4, b"d" * 4, b"", b"e" * 3]
+    total = vp._upload_vbo(vbo, "e", parts)
+    assert total == 19
+    writes = [c for c in vbo.calls if c[0] == "write"]
+    assert writes == [("write", 0, 12), ("write", 12, 7)]
+    assert bytes(vbo.data[:19]) == b"".join(parts)
+    vbo.calls.clear()
+    parts2 = parts[:2] + [b"x" * 4, b"d" * 4, b"", b"e" * 3]
+    vp._upload_vbo(vbo, "e", parts2)
+    assert [c for c in vbo.calls if c[0] == "write"] == [("write", 8, 11)]
+    assert bytes(vbo.data[:19]) == b"".join(parts2)
+
+
+def test_mesh_id_sets_follow_the_mesh():
+    """The alive check's id sets are rebuilt when the mesh changes and
+    reused while it does not."""
+    from PySide6.QtGui import QVector3D as V
+    from core.mesh import Mesh
+    from views.viewport import _mesh_id_sets
+    m = Mesh()
+    e = m.add_edge(V(0, 0, 0), V(1, 0, 0))
+    edges, faces = _mesh_id_sets(m)
+    assert id(e) in edges and not faces
+    assert _mesh_id_sets(m)[0] is edges              # cached
+    m.remove_edge(e)
+    assert id(e) not in _mesh_id_sets(m)[0]          # rebuilt
+
+
 # ---- oriented selection box -------------------------------------------------
 #
 # A group's box is drawn in the group's OWN axes, so it hugs the object.

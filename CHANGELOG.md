@@ -27,6 +27,24 @@ follow [SemVer](https://semver.org).
   Con el modelo de la #158, pasar el ratón con Seleccionar pasó de colgarse
   por encima de 18 GB a 32 ms por movimiento y 11,7 GB; con Línea, 71 ms.
   Los modelos normales usan el índice de siempre.
+- **Render ▸ sincronizar con la vista es casi el doble de rápido desde el
+  segundo cuadro**: Blender conserva la escena preparada (la BVH de Cycles y
+  las texturas) entre una cámara y la siguiente en vez de reconstruirla. Con
+  el arco de ejemplo en Cycles, cada vista pasó de 1,45 s a 0,84 s; en un
+  modelo pesado la diferencia crece con el modelo.
+- **El corte de sección en el render solo trabaja lo que el plano cruza**:
+  cada objeto se juzga primero por su caja; lo que queda entero del lado que
+  se conserva no se toca (y sus copias siguen compartiendo la malla) y lo
+  que queda entero del lado cortado se oculta. Antes se copiaba y recortaba
+  cada objeto del modelo.
+- **Menos memoria con modelos grandes**: el visor ya no arma una segunda
+  copia de toda la geometría en cada actualización para subirla a la tarjeta
+  gráfica (envía solo lo que cambió, por tandas), y la exportación para
+  Blender ya no duplica el modelo dos veces al escribir el `.glb`.
+- **Editar con selección o cursor sobre un modelo de millones de aristas ya
+  no recorre todo el modelo**: comprobar si lo seleccionado sigue existiendo
+  buscaba cada elemento en las listas de todas las mallas en cada
+  actualización; ahora es una consulta directa.
 
 ## [0.5.7] — 2026-09-30
 

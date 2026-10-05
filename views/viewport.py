@@ -42,6 +42,7 @@ import os
 import inspect
 import re
 import time as _time_mod
+import weakref
 from array import array
 from pathlib import Path
 from typing import Optional
@@ -325,6 +326,29 @@ def _cache_ver(vp):
     Module-level so the stub viewports in tests hit it too."""
     frozen = getattr(vp, "_frozen_cache_version", None)
     return frozen if frozen is not None else vp.scene.version
+
+
+#: Bytes gathered into one ``glBufferSubData`` by ``Viewport._upload_vbo``.
+_VBO_WRITE_BATCH = 8 << 20
+
+_MESH_ID_SETS = weakref.WeakKeyDictionary()
+
+
+def _mesh_id_sets(mesh):
+    """``(edge ids, face ids)`` of ``mesh`` as sets, rebuilt only when the
+    mesh changed: every mutation primitive bumps ``_mut_serial``, and the
+    counts guard anything that slips past it. Weakly keyed, so a closed
+    document's meshes take their sets with them."""
+    key = (getattr(mesh, "_mut_serial", None), len(mesh.edges),
+           len(mesh.faces))
+    try:
+        hit = _MESH_ID_SETS.get(mesh)
+    except TypeError:                 # not weak-referenceable (test stubs)
+        return set(map(id, mesh.edges)), set(map(id, mesh.faces))
+    if hit is None or hit[0] != key:
+        hit = (key, set(map(id, mesh.edges)), set(map(id, mesh.faces)))
+        _MESH_ID_SETS[mesh] = hit
+    return hit[1], hit[2]
 
 
 #: How the rest of the model reads while a group is open for editing.
@@ -4601,27 +4625,47 @@ class Viewport(QOpenGLWidget):
         magnitude under the transfer it saves. The buffer is over-allocated so
         a growing tail usually fits without a reallocation (which would
         discard the prefix along with everything else)."""
-        raw = b"".join(parts)
-        total = len(raw)
+        parts = list(parts)
+        total = sum(map(len, parts))
         prev = self._vbo_parts.get(slot)
         keep = 0
+        first = 0                  # index of the first part to (re)send
         cap = prev[1] if prev is not None else 0
         if prev is not None and total <= cap:
             for a, b in zip(parts, prev[0]):
                 if a is b or a == b:
                     keep += len(a)
+                    first += 1
                 else:
                     break
-            keep = min(keep, total)
         vbo.bind()
         if total > cap:
             cap = max(int(total * 1.25) + 4096, empty)
             vbo.allocate(cap)      # reserve; a realloc keeps no contents
-            keep = 0
-        if total > keep:
-            vbo.write(keep, raw[keep:], total - keep)
+            keep = first = 0
+        # The changed tail goes up in batches: joining the WHOLE buffer
+        # first (it used to) held a second copy of the model in RAM on
+        # every sync — hundreds of MB on a multi-million-face scene —
+        # while one write per part means thousands of tiny GL calls.
+        offset = keep
+        batch: list = []
+        batch_len = 0
+        for part in parts[first:]:
+            if not part:
+                continue
+            batch.append(part)
+            batch_len += len(part)
+            if batch_len >= _VBO_WRITE_BATCH:
+                raw = batch[0] if len(batch) == 1 else b"".join(batch)
+                vbo.write(offset, raw, batch_len)
+                offset += batch_len
+                batch = []
+                batch_len = 0
+        if batch_len:
+            raw = batch[0] if len(batch) == 1 else b"".join(batch)
+            vbo.write(offset, raw, batch_len)
         vbo.release()
-        self._vbo_parts[slot] = (list(parts), cap)
+        self._vbo_parts[slot] = (parts, cap)
         return total
 
     def _sync_edges(self) -> None:
@@ -4666,14 +4710,18 @@ class Viewport(QOpenGLWidget):
                     return (self.scene.entity_visible(ent)
                             or self.scene.entity_selectable(ent))
 
+                # Membership by id sets cached per mesh (_mesh_id_sets): the
+                # `ent in mesh.edges` list scans were O(entities) per
+                # candidate per mesh — 64 candidates × millions of edges on
+                # every sync of a heavy model.
+                loose = self.scene.loose_mesh
+
                 def alive(ent):
-                    if isinstance(ent, Edge):
-                        if ent in self.scene.loose_mesh.edges:
-                            return shown(ent)
-                        return any(ent in gm.edges for gm in gmeshes)
-                    if ent in self.scene.loose_mesh.faces:
+                    k = 0 if isinstance(ent, Edge) else 1
+                    if id(ent) in _mesh_id_sets(loose)[k]:
                         return shown(ent)
-                    return any(ent in gm.faces for gm in gmeshes)
+                    return any(id(ent) in _mesh_id_sets(gm)[k]
+                               for gm in gmeshes)
 
             if isinstance(hover, (Edge, Face)) and not alive(hover):
                 self._hover_entity = None

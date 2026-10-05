@@ -450,7 +450,32 @@ def _cut_clip(objs, planes):
     plane each vertex is on, so it cannot go wrong that way."""
     import bmesh
     bpy.context.view_layer.update()        # matrix_world of what was just imported
+    kept = gone = 0
     for obj in objs:
+        # The bounding box settles most objects without touching their
+        # mesh: wholly on the kept side of every plane → left as it is
+        # (and its data stays shared with its instances); wholly on the
+        # cut side of one → hidden, as the bisect would have emptied it.
+        # Only what straddles a plane pays for the copy and the bisect —
+        # on a big model that is a handful of objects, not all of them.
+        corners = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
+        crossing = []
+        removed = False
+        for p, n in planes:
+            ds = [n.dot(c - p) for c in corners]
+            if min(ds) > 1e-6:
+                removed = True
+                break
+            if max(ds) > 1e-6:
+                crossing.append((p, n))
+        if removed:
+            obj.hide_render = True
+            obj.hide_viewport = True
+            gone += 1
+            continue
+        if not crossing:
+            kept += 1
+            continue
         mesh = obj.data
         if mesh.users > 1:                 # shared data: trim THIS object's copy
             obj.data = mesh = mesh.copy()
@@ -459,7 +484,7 @@ def _cut_clip(objs, planes):
         lin = world.to_3x3().transposed()  # a plane's normal moves by Mᵀ
         bm = bmesh.new()
         bm.from_mesh(mesh)
-        for p, n in planes:
+        for p, n in crossing:
             bmesh.ops.bisect_plane(
                 bm, geom=bm.verts[:] + bm.edges[:] + bm.faces[:], dist=1e-6,
                 plane_co=inv @ p, plane_no=(lin @ n).normalized(),
@@ -467,7 +492,8 @@ def _cut_clip(objs, planes):
         bm.to_mesh(mesh)
         bm.free()
         mesh.update()
-    say("section", len(planes), "plane(s), clip")
+    say("section", len(planes), "plane(s), clip:",
+        len(objs) - kept - gone, "cut,", kept, "untouched,", gone, "hidden")
 
 
 def _cut_boolean(scene, objs, planes):
@@ -716,8 +742,14 @@ def main():
 
 def serve(scene, figures):
     """Render each camera IngeTrazo sends until told to stop."""
-    say("ready")
     r = scene.render
+    # Keep the render data (Cycles' BVH, loaded textures) between cameras:
+    # only the camera and the face-me figures change from one request to
+    # the next, and rebuilding the whole scene for every view was most of
+    # each sync render on a heavy model.
+    if hasattr(r, "use_persistent_data"):
+        r.use_persistent_data = True
+    say("ready")
     for line in sys.stdin:
         line = line.strip()
         if not line:

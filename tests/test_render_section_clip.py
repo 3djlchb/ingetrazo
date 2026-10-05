@@ -126,8 +126,22 @@ def test_shared_mesh_is_trimmed_per_object(rs):
     bpy.context.view_layer.update()
     rs._cut_clip([a, b], [(Vector((1, 0, 0)), Vector((1, 0, 0)))])
     assert max(p.x for p in _world(a)) <= 1 + 1e-5
-    assert not _world(b)            # b lies wholly on the cut side
+    # b lies wholly on the cut side: hidden by its box, mesh not touched.
+    assert b.hide_render
     assert a.data is not b.data
+
+
+def test_objects_the_plane_misses_keep_their_shared_mesh(rs):
+    """Instances wholly on the kept side are not copied nor bisected: on a
+    big model the clip only pays for what straddles the plane."""
+    a = _soup([((0, 0, 0), (2, 2, 2))])
+    b = bpy.data.objects.new("b", a.data)
+    bpy.context.scene.collection.objects.link(b)
+    b.location = (5, 0, 0)
+    bpy.context.view_layer.update()
+    rs._cut_clip([a, b], [(Vector((100, 0, 0)), Vector((1, 0, 0)))])
+    assert a.data is b.data
+    assert not a.hide_render and not b.hide_render
 
 
 def test_two_planes_keep_only_what_both_allow(rs):
