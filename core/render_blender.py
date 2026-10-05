@@ -288,7 +288,7 @@ def section_dict(scene) -> Optional[dict]:
     sp = active() if callable(active) else None
     if sp is None:
         return None
-    return {"mode": "boolean",
+    return {"mode": "clip",
             "planes": [{"point": [sp.point.x(), sp.point.y(), sp.point.z()],
                         "normal": [sp.normal.x(), sp.normal.y(),
                                    sp.normal.z()]}]}

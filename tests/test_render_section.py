@@ -33,6 +33,9 @@ def _scene_with_plane(active=True):
 
 def test_section_dict_active_plane():
     sec = rb.section_dict(_scene_with_plane())
+    # "clip" trims the geometry like the viewport; "boolean" needs closed
+    # solids and breaks on the loose-triangle soup the glTF import makes.
+    assert sec["mode"] == "clip"
     assert sec["planes"] == [{"point": [0.0, 0.0, 1.0],
                               "normal": [0.0, 0.0, 1.0]}]
 

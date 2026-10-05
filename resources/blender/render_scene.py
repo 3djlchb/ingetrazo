@@ -379,10 +379,46 @@ def _scene_radius(objs):
     return max((hi - lo).length, 1.0)
 
 
+def _cut_clip(objs, planes):
+    """The viewport's cut: everything on the normal's side of the plane goes,
+    faces crossing it are trimmed exactly at it, nothing is capped.
+
+    This is a clip of the geometry itself, so it needs no closed solid —
+    and models are full of open geometry: a wall drawn as two sheets with
+    no edge, top or bottom, a lone face, a surface. A Boolean cannot tell
+    inside from outside on those; in a real document two such wall faces
+    (0.15 m apart) were enough for it to leave the cut side uncut and drag
+    the cutter's own corners into the result, and the floor went missing
+    from that scene's render. A plane bisect only asks which side of the
+    plane each vertex is on, so it cannot go wrong that way."""
+    import bmesh
+    bpy.context.view_layer.update()        # matrix_world of what was just imported
+    for obj in objs:
+        mesh = obj.data
+        if mesh.users > 1:                 # shared data: trim THIS object's copy
+            obj.data = mesh = mesh.copy()
+        world = obj.matrix_world
+        inv = world.inverted()
+        lin = world.to_3x3().transposed()  # a plane's normal moves by Mᵀ
+        bm = bmesh.new()
+        bm.from_mesh(mesh)
+        for p, n in planes:
+            bmesh.ops.bisect_plane(
+                bm, geom=bm.verts[:] + bm.edges[:] + bm.faces[:], dist=1e-6,
+                plane_co=inv @ p, plane_no=(lin @ n).normalized(),
+                use_snap_center=False, clear_outer=True, clear_inner=False)
+        bm.to_mesh(mesh)
+        bm.free()
+        mesh.update()
+    say("section", len(planes), "plane(s), clip")
+
+
 def _cut_boolean(scene, objs, planes):
     """Geometry cut: a huge box whose face lies on the plane is subtracted
-    from every mesh. Leaves a real cut (the section is visible) but needs
-    reasonably closed meshes."""
+    from every mesh. Leaves a real cut (the section is visible) but ONLY
+    works when every piece is a closed solid — open geometry (a wall as two
+    sheets) makes it fail, see :func:`_cut_clip` — so it is opt-in
+    (``"mode": "boolean"``) and not what a render uses."""
     size = _scene_radius(objs) * 4.0
     for i, (p, n) in enumerate(planes):
         bpy.ops.mesh.primitive_cube_add(size=1.0)
@@ -453,15 +489,19 @@ def _cut_shader(objs, planes):
 
 def apply_section(scene, objs, section):
     """Section (clipping) planes from the job: ``{"planes": [{"point":
-    [x, y, z], "normal": [x, y, z]}], "mode": "boolean" | "shader"}``.
-    The glTF carries no clipping, so the cut is rebuilt here."""
+    [x, y, z], "normal": [x, y, z]}], "mode": "clip" | "shader" |
+    "boolean"}``. The glTF carries no clipping, so the cut is rebuilt here;
+    ``clip`` (the default) trims the geometry like the viewport does."""
     planes = _plane_list(section)
     if not planes:
         return
-    if section.get("mode", "boolean") == "shader":
+    mode = section.get("mode", "clip")
+    if mode == "shader":
         _cut_shader(objs, planes)
-    else:
+    elif mode == "boolean":
         _cut_boolean(scene, objs, planes)
+    else:
+        _cut_clip(objs, planes)
 
 
 def main():
