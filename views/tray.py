@@ -45,6 +45,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSlider,
     QSpinBox,
+    QStyledItemDelegate,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -3280,6 +3281,15 @@ def _scrolled(sections) -> QScrollArea:
 
 
 
+class _NoEditDelegate(QStyledItemDelegate):
+    """For the columns that only carry a check box: a click on a selected
+    row must never open a text editor on them (rename is the Name column's
+    alone)."""
+
+    def createEditor(self, parent, option, index):
+        return None
+
+
 class LayersPanel(QWidget):
     """Layers / tags (Fase 6): one row per layer with visibility and lock
     checkboxes; buttons to add / remove layers and to move the current
@@ -3301,6 +3311,16 @@ class LayersPanel(QWidget):
         self.tree.setRootIsDecorated(False)
         self.tree.setColumnWidth(0, 120)
         self.tree.setColumnWidth(1, 52)
+        # Rename the way Windows renames a file: click a row, pause, click
+        # it again (F2 and double-click work too). Typing a letter does NOT
+        # start an edit, as it would by default.
+        from PySide6.QtWidgets import QAbstractItemView
+        self.tree.setEditTriggers(QAbstractItemView.DoubleClicked
+                                  | QAbstractItemView.EditKeyPressed
+                                  | QAbstractItemView.SelectedClicked)
+        self._no_edit = _NoEditDelegate(self.tree)
+        self.tree.setItemDelegateForColumn(1, self._no_edit)
+        self.tree.setItemDelegateForColumn(2, self._no_edit)
         self.tree.itemChanged.connect(self._on_item_changed)
         lay.addWidget(self.tree)
         row = QHBoxLayout()
@@ -3309,6 +3329,9 @@ class LayersPanel(QWidget):
         del_btn = QPushButton(tr("−"))
         del_btn.setToolTip(tr("Delete layer (its entities go to the default)"))
         del_btn.clicked.connect(self._on_delete)
+        ren_btn = QPushButton(tr("Rename"))
+        ren_btn.setToolTip(tr("Rename the selected layer (or press F2)"))
+        ren_btn.clicked.connect(self._on_rename_layer)
         purge_btn = QPushButton(tr("Purge"))
         purge_btn.setToolTip(tr("Delete every layer no entity carries "
                                 "(a layer a scene hides is kept)"))
@@ -3323,6 +3346,7 @@ class LayersPanel(QWidget):
         row = FlowLayout(spacing=4)
         row.addWidget(add_btn)
         row.addWidget(del_btn)
+        row.addWidget(ren_btn)
         row.addWidget(purge_btn)
         row.addWidget(assign_btn)
         lay.addLayout(row)
@@ -3330,8 +3354,10 @@ class LayersPanel(QWidget):
 
     # ---- Model → view --------------------------------------------------------
     def refresh(self) -> None:
-        from PySide6.QtWidgets import QTreeWidgetItem
+        from PySide6.QtWidgets import QAbstractItemView, QTreeWidgetItem
         from core.layers import DEFAULT_LAYER
+        if self.tree.state() == QAbstractItemView.EditingState:
+            return                      # a rename in progress: leave it be
         self._updating = True
         self.tree.clear()
         for ly in self._window.viewport.scene.layers:
@@ -3361,9 +3387,19 @@ class LayersPanel(QWidget):
             return
         if column == 0:
             new_name = item.text(0).strip()
-            if new_name and new_name != old_name \
-                    and scene.layer(new_name) is None:
-                self._rename(ly, old_name, new_name)
+            if new_name and new_name != old_name:
+                if scene.layer(new_name) is None:
+                    self._rename(ly, old_name, new_name)
+                    item.setData(0, Qt.UserRole, new_name)  # the row's key
+                else:
+                    self._window.statusBar().showMessage(
+                        tr("A layer named '{name}' already exists",
+                           name=new_name), 3000)
+            # Show the name the layer really has (an empty or repeated
+            # entry goes back to what it was).
+            self._updating = True
+            item.setText(0, ly.name)
+            self._updating = False
             self.refresh()
             self._touch()
             return
@@ -3374,13 +3410,39 @@ class LayersPanel(QWidget):
         self._touch()
 
     def _rename(self, ly, old_name: str, new_name: str) -> None:
+        """Rename a layer and everything that carries or names it — the
+        same set Delete walks: every mesh (nested groups included) and the
+        annotations — plus the scenes that hide it by name."""
         from core.layers import layer_of, assign_layer
+        from core.purge import iter_groups, iter_meshes
         scene = self._scene()
         ly.name = new_name
-        for ent in list(scene.mesh.faces) + list(scene.mesh.edges) \
-                + list(scene.groups):
+        ents = []
+        for mesh in iter_meshes(scene):
+            ents += list(mesh.faces) + list(mesh.edges)
+        ents += list(iter_groups(scene.groups))
+        for coll in ("dimensions", "text_labels", "image_planes",
+                     "section_planes"):
+            ents += list(getattr(scene, coll, None) or [])
+        for ent in ents:
             if layer_of(ent) == old_name:
                 assign_layer(ent, new_name)
+        for view in scene.saved_views:
+            view.hidden_layers = [new_name if n == old_name else n
+                                  for n in view.hidden_layers]
+
+    def _on_rename_layer(self) -> None:
+        """The Rename button: edit the name of the layer that has the focus
+        (the highlighted row) in place. The default layer is permanent."""
+        item = self.tree.currentItem()
+        if item is None:
+            return
+        if not (item.flags() & Qt.ItemIsEditable):
+            self._window.statusBar().showMessage(
+                tr("The default layer cannot be renamed"), 3000)
+            return
+        self.tree.setFocus()
+        self.tree.editItem(item, 0)
 
     def _prune_selection(self, name: str) -> None:
         from core.layers import layer_of

@@ -2460,5 +2460,8 @@
  "Draw the edges hidden behind faces as dashed lines.": "Dibuja en discontinua las aristas que quedan detrás de las caras.",
  "The Polygon properties example extension: area, centroid and second moments of a face.": "La extensión de ejemplo Propiedades del polígono: área, centroide y momentos de segundo orden de una cara.",
  "Rename the selected scene (or press F2)": "Renombra la escena seleccionada (o pulsa F2)",
- "A scene named '{name}' already exists": "Ya existe una escena llamada '{name}'"
+ "A scene named '{name}' already exists": "Ya existe una escena llamada '{name}'",
+ "Rename the selected layer (or press F2)": "Renombra la capa seleccionada (o pulsa F2)",
+ "A layer named '{name}' already exists": "Ya existe una capa llamada '{name}'",
+ "The default layer cannot be renamed": "La capa por defecto no se puede renombrar"
 }
