@@ -1850,13 +1850,14 @@ class MaterialsPanel(QWidget):
                 b = _swatch_button(_color_pixmap(c["rgb"]), label)
                 b.clicked.connect(
                     lambda _=False, col=c: self._apply_color(
-                        col["rgb"], "%s %s" % (col["code"], _ral_name(col))))
+                        col["rgb"], "%s %s" % (col["code"], _ral_name(col)),
+                        category="colors"))
                 grid.addWidget(b, row // self.COLS, row % self.COLS)
                 row += 1
 
         section("%s  (%d)" % (tr("Colors"), len(ral_colors)), fill_colors)
 
-        def fill_items(grid, items):
+        def fill_items(grid, items, category=None):
             row = 0
             for item in items:
                 path = _TEX_DIR / "library" / item["file"]
@@ -1869,7 +1870,8 @@ class MaterialsPanel(QWidget):
                     self._apply_texture(p, sw=it.get("sw"),
                                         sh=it.get("sh"),
                                         name=tr(it["name"]),
-                                        opacity=it.get("opacity")))
+                                        opacity=it.get("opacity"),
+                                        category=category))
                 grid.addWidget(b, row // self.COLS, row % self.COLS)
                 row += 1
 
@@ -1882,7 +1884,7 @@ class MaterialsPanel(QWidget):
                     continue
                 title = tr(self.CATEGORY_NAMES.get(cat["id"], cat["id"]))
                 section("%s  (%d)" % (title, len(items)),
-                        lambda g, it=items: fill_items(g, it))
+                        lambda g, it=items, c=cat["id"]: fill_items(g, it, c))
 
         def fill_loose(grid, paths):
             for i, path in enumerate(paths):
@@ -2021,13 +2023,14 @@ class MaterialsPanel(QWidget):
             QTimer.singleShot(0, lambda b=bar, v=keep: b.setValue(v))
 
     # ---- Apply / add --------------------------------------------------------
-    def _apply_color(self, rgb, name: str | None = None) -> None:
+    def _apply_color(self, rgb, name: str | None = None,
+                     category: str | None = None) -> None:
         PaintTool.current_is_default = False
         PaintTool.current_color = tuple(rgb)
         PaintTool.current_texture = None
         PaintTool.current_opacity = None
         PaintTool.current_material = self._material_for(
-            name, color=tuple(rgb))
+            name, color=tuple(rgb), category=category)
         self._window._activate_tool("paint")
         self._refresh_preview()
 
@@ -2102,7 +2105,8 @@ class MaterialsPanel(QWidget):
             tr("Material '{name}' updated on every face that wears it",
                name=name), 3000)
 
-    def _material_for(self, name, color=None, texture=None, opacity=None):
+    def _material_for(self, name, color=None, texture=None, opacity=None,
+                      category=None):
         """The Material identity for the active swatch: the registry's
         entry when the name already exists (keeps its full recipe), a fresh
         one otherwise — registered lazily by the paint command itself, so
@@ -2111,8 +2115,12 @@ class MaterialsPanel(QWidget):
             return None
         from core.materials import Material
         existing = self._window.viewport.scene.materials.get(name)
-        return existing or Material(name, color=color, texture=texture,
-                                    opacity=opacity)
+        if existing is not None:
+            if existing.category is None and category is not None:
+                existing.category = category   # learnt from the library
+            return existing
+        return Material(name, color=color, texture=texture, opacity=opacity,
+                        category=category)
 
     def _load_texture_fields(self) -> None:
         tex = PaintTool.current_texture
@@ -2264,7 +2272,8 @@ class MaterialsPanel(QWidget):
                        sw: float | None = None,
                        sh: float | None = None,
                        name: str | None = None,
-                       opacity: float | None = None) -> None:
+                       opacity: float | None = None,
+                       category: str | None = None) -> None:
         w = sw if sw is not None else (size or self._tile_size)
         h = sh if sh is not None else (size or self._tile_size)
         PaintTool.current_is_default = False
@@ -2272,7 +2281,8 @@ class MaterialsPanel(QWidget):
                                      "rot": 0.0}
         PaintTool.current_opacity = opacity
         PaintTool.current_material = self._material_for(
-            name, texture=dict(PaintTool.current_texture), opacity=opacity)
+            name, texture=dict(PaintTool.current_texture), opacity=opacity,
+            category=category)
         self._window._activate_tool("paint")
         self._load_texture_fields()
         self._refresh_preview()

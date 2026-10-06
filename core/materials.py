@@ -49,6 +49,10 @@ class Material:
     #: How the surface answers light in a render (core.finish): one of
     #: ``core.finish.FINISHES``, or ``None`` = guessed from the name.
     finish: Optional[str] = None
+    #: The library category it was taken from (``core.finish``:
+    #: "colors", "brick", "wood", "wall", …) — what the automatic finish
+    #: reads first. ``None`` for a material made by hand.
+    category: Optional[str] = None
 
     def face_attrs(self) -> dict:
         """The attrs this material stamps on a face (its own name included)."""
@@ -72,6 +76,8 @@ class Material:
             entry["opacity"] = float(self.opacity)
         if self.finish is not None:
             entry["finish"] = self.finish
+        if self.category is not None:
+            entry["category"] = self.category   # older builds ignore it
         return entry
 
     @classmethod
@@ -83,6 +89,7 @@ class Material:
             texture=dict(raw["texture"]) if raw.get("texture") else None,
             opacity=raw.get("opacity"),
             finish=raw.get("finish") or None,
+            category=raw.get("category") or None,
         )
 
 

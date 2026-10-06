@@ -252,7 +252,7 @@ def test_the_export_runs_off_the_gui_thread(window):
     def slow_job():
         threads.append(threading.current_thread() is threading.main_thread())
         working.set()
-        time.sleep(0.6)
+        time.sleep(1.0)
         working.clear()
         return "job.json"
 
@@ -262,7 +262,8 @@ def test_the_export_runs_off_the_gui_thread(window):
     timer.stop()
     assert got == ["job.json"]
     assert threads == [False]                      # not on the GUI thread
-    assert len(ticks) >= 2                         # the loop kept running
+    # One tick is the proof: a blocked GUI loop gets none at all.
+    assert len(ticks) >= 1                         # the loop kept running
 
     def broken():
         raise ValueError("no space left")

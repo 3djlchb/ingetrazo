@@ -69,26 +69,131 @@ _RX = [(f, re.compile(r"(?:^|[^a-záéíóúñç])(?:" + pat + r")", re.IGNORECA
        for f, pat in _WORDS]
 
 
-def guess(name: str | None, picture: str | None = None,
-          opacity: float | None = None) -> str:
-    """The finish a material most likely has, from what it is called."""
+#: A RAL Classic colour ("RAL 1018 Amarillo zinc"): a PAINT, whatever its
+#: name says. 29 of the palette's names read as something else to the
+#: keywords — «Amarillo zinc», «Azul acero», «Gris hierro», «Pardo cobre»,
+#: «Aluminio blanco» as polished metal, «Azul agua» / «Azul océano» as water,
+#: «brillante» (RAL's *luminous*, a fluorescent paint) as gloss — and a wall
+#: painted RAL 1018 rendered as a mirror-polished metal, its reflections
+#: smearing dark bands into every corner (EEVEE and Cycles).
+_RAL = re.compile(r"^\s*RAL[\s_-]*\d{3,4}(?!\d)", re.IGNORECASE)
+
+
+#: The material library's CATEGORY decides first (the user's choice aside):
+#: a name alone misleads — RAL «Amarillo zinc» read as metal, the wall tile
+#: «Swimming pool ceramic» as water, the floor «Woven sea rush» as water —
+#: and library names are translated, so the same texture guessed one way in
+#: English and another in Spanish. The category does not move.
+#:
+#: Categories that ARE a material type fix the finish outright.
+CATEGORY_FINISH = {
+    "colors": "matte",          # paint (RAL Classic)
+    "brick": "matte", "concrete": "matte", "stone": "matte",
+    "ground": "matte", "fabric": "matte", "wallpaper": "matte",
+    "rug": "matte", "sky": "matte", "roof": "matte",
+    "wood": "satin",
+    "metal": "metal", "glass": "glass", "water": "water",
+}
+#: Categories that say WHERE a material goes (a wall, a floor) mix
+#: materials, so the name decides — but never a finish that cannot be that
+#: surface: no wall or floor is water or clear glass (a «glass mosaic» tile
+#: is a glossy tile).
+CATEGORY_EXCLUDES = {
+    "wall": {"water", "glass"},
+    "floor": {"water", "glass"},
+}
+#: An excluded finish the name asked for: glass on a wall or floor is a
+#: glass MOSAIC — glossy and opaque; water is a misread word («Swimming pool
+#: ceramic», «Woven sea rush»), so the rest of the name decides instead.
+_EXCLUDED_AS = {"glass": "gloss"}
+
+_HASHED = re.compile(r"^[0-9a-f]{16}-", re.IGNORECASE)
+_LIBRARY: dict | None = None
+
+
+def _library_index() -> dict:
+    """``{key: category}`` from the bundled texture library, keyed by the
+    picture's file name (``old_wood.jpg``) and by the item's English name,
+    lower-cased — how a document made before materials carried their
+    category still finds it. Built once."""
+    global _LIBRARY
+    if _LIBRARY is None:
+        _LIBRARY = {}
+        try:
+            import json
+            from pathlib import Path
+            path = (Path(__file__).resolve().parents[1] / "resources"
+                    / "textures" / "library.json")
+            data = json.loads(path.read_text(encoding="utf-8"))
+            for cat in data.get("categories", []):
+                for item in cat.get("items", []):
+                    for key in (Path(item.get("file", "")).name,
+                                item.get("name", "")):
+                        if key:
+                            _LIBRARY.setdefault(key.lower(), cat["id"])
+        except Exception:  # noqa: BLE001 — no library: names decide
+            pass
+    return _LIBRARY
+
+
+def category_of(name: str | None, picture: str | None = None):
+    """The library category a material comes from — a RAL name is a
+    colour; otherwise its picture's file (the document's embedded copy is
+    ``<hash>-<file>``) or its name in the bundled library. ``None`` when it
+    is not a library material."""
+    if name and _RAL.match(str(name)):
+        return "colors"
+    index = _library_index()
+    if picture:
+        from pathlib import Path
+        base = _HASHED.sub("", Path(str(picture)).name).lower()
+        if base in index:
+            return index[base]
+    if name and str(name).lower() in index:
+        return index[str(name).lower()]
+    return None
+
+
+def _by_name(name, picture, exclude=()) -> Optional[str]:
     for text in (name, picture):
         if not text:
             continue
         low = str(text).replace("-", "_")
         for finish, rx in _RX:
             if rx.search(low):
-                return finish
-    if opacity is not None and opacity < 0.999:
-        return "glass"
-    return "matte"
+                if finish not in exclude:
+                    return finish
+                if finish in _EXCLUDED_AS:
+                    return _EXCLUDED_AS[finish]
+                # otherwise: keep reading the name for another finish
+    return None
+
+
+def guess(name: str | None, picture: str | None = None,
+          opacity: float | None = None,
+          category: str | None = None) -> str:
+    """The finish a material most likely has: from its library CATEGORY
+    (given, or looked up), then from what it is called."""
+    translucent = opacity is not None and opacity < 0.999
+    cat = category or category_of(name, picture)
+    fixed = CATEGORY_FINISH.get(cat)
+    if fixed is not None:
+        # A see-through paint is glass; any other category keeps its own.
+        if translucent and fixed == "matte" and cat == "colors":
+            return "glass"
+        return fixed
+    named = _by_name(name, picture, CATEGORY_EXCLUDES.get(cat, ()))
+    if named is not None:
+        return named
+    return "glass" if translucent else "matte"
 
 
 def resolve(chosen: Optional[str], name: str | None,
             picture: str | None = None,
-            opacity: float | None = None) -> str:
-    """The finish to use: the user's choice, or the guess when it is
-    ``auto``/absent/unknown."""
+            opacity: float | None = None,
+            category: str | None = None) -> str:
+    """The finish to use: the user's choice, or the guess (category first)
+    when it is ``auto``/absent/unknown."""
     if chosen in FINISHES:
         return chosen
-    return guess(name, picture, opacity)
+    return guess(name, picture, opacity, category)

@@ -463,9 +463,10 @@ def _resolve_finishes(scene, materials) -> None:
     registry = getattr(scene, "materials", None) or {}
     for info in materials.values():
         name = info.get("mat")
-        chosen = getattr(registry.get(name), "finish", None) if name else None
-        info["finish"] = resolve(chosen, name, info.get("map"),
-                                 info.get("opacity"))
+        mat = registry.get(name) if name else None
+        info["finish"] = resolve(getattr(mat, "finish", None), name,
+                                 info.get("map"), info.get("opacity"),
+                                 getattr(mat, "category", None))
 
 
 def export_names(materials) -> dict:
