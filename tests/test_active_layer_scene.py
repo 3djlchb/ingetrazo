@@ -370,12 +370,14 @@ def test_the_scene_label_paints_top_left_and_pushes_the_other_labels_down():
     try:
         vp = win.viewport
         scene = vp.scene
-        img = QImage(400, 200, QImage.Format_ARGB32)
+        img = QImage(600, 200, QImage.Format_ARGB32)
         img.fill(0xFFFFFFFF)
         p = QPainter(img)
-        assert vp._draw_active_scene_label(p) == 0.0    # nothing to say
+        # No scenes: the active-layer pill alone, at the corner.
+        assert vp._draw_active_scene_label(p) > 10.0
         scene.saved_views.append(SavedView.capture("Planta", scene, vp.camera))
         scene.active_view = scene.saved_views[0]
+        img.fill(0xFFFFFFFF)
         bottom = vp._draw_active_scene_label(p)
         p.end()
         assert bottom > 10.0
@@ -508,5 +510,53 @@ def test_update_saves_everything_a_scene_holds_not_only_the_camera():
         panel._on_activate(_row(panel.tree, "Corte"))
         assert scene.layer("Muros").visible is False
         assert scene.display_style.edges is False and g.hidden is True
+    finally:
+        _close(win)
+
+
+def test_the_active_layer_label_sits_right_of_the_scene_label():
+    """«Active layer: <name>» in the same grey pill, to the right of the
+    scene pill (at the corner when there is no scene label), following the
+    active layer."""
+    from PySide6.QtGui import QImage, QPainter
+    from core.saved_views import SavedView
+    win = _window()
+    try:
+        vp = win.viewport
+        scene = vp.scene
+        prefix, name = vp.active_layer_label()
+        assert prefix in ("Active layer:", "Capa activa:")
+        assert name == DEFAULT_LAYER
+        scene.layers.append(Layer("Muros"))
+        win.tray.layers.refresh()
+        win.tray.layers.set_active("Muros")
+        assert vp.active_layer_label()[1] == "Muros"
+
+        def pills():
+            """x spans of the grey pills along the label row."""
+            img = QImage(700, 60, QImage.Format_ARGB32)
+            img.fill(0xFFFFFFFF)
+            p = QPainter(img)
+            vp._draw_active_scene_label(p)
+            p.end()
+            row = [img.pixelColor(x, 13) for x in range(700)]
+            grey = [c.red() < 200 and abs(c.red() - c.blue()) < 60
+                    for c in row]
+            spans, start = [], None
+            for x, g in enumerate(grey + [False]):
+                if g and start is None:
+                    start = x
+                elif not g and start is not None:
+                    spans.append((start, x))
+                    start = None
+            return spans
+
+        assert len(pills()) == 1                      # no scenes: layer only
+        assert pills()[0][0] < 16
+        scene.saved_views.append(SavedView.capture("Planta", scene, vp.camera))
+        scene.active_view = scene.saved_views[0]
+        spans = pills()
+        assert len(spans) == 2                        # scene, then layer
+        assert spans[0][0] < 16 and spans[1][0] > spans[0][1]
     finally:
         _close(win)

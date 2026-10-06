@@ -2476,5 +2476,14 @@
  "The active layer cannot be hidden or locked — make another layer active first": "La capa activa no se puede ocultar ni bloquear: primero activa otra capa",
  "No scene": "Sin escena",
  "Update the active scene from the current view": "Actualizar la escena activa con la vista actual",
- "Show a scene (or pick one in the list) to update it": "Muestra una escena (o elige una en la lista) para actualizarla"
+ "Show a scene (or pick one in the list) to update it": "Muestra una escena (o elige una en la lista) para actualizarla",
+ "Active layer:": "Capa activa:",
+ "component": "componente",
+ "Paint component": "Pintar componente",
+ "Paint group": "Pintar grupo",
+ "Apply the material «{mat}» to the whole {kind} «{name}»?": "¿Aplicar el material «{mat}» a todo el {kind} «{name}»?",
+ "Remove the material from the whole {kind} «{name}»?": "¿Quitar el material de todo el {kind} «{name}»?",
+ "Its {n} faces will be painted, also the ones that already have a material.": "Se pintarán sus {n} caras, también las que ya tienen un material.",
+ "Its {n} other copies change too: they share the definition.": "También cambian sus otras {n} copias: comparten la definición.",
+ "{what} «{name}» painted: {n} faces": "{what} «{name}» pintado: {n} caras"
 }

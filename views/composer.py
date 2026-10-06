@@ -11102,15 +11102,26 @@ class ComposerWindow(QMainWindow):
                     f.setExpanded(True)
         tree.blockSignals(False)
 
-    def _item_rows(self):
-        """Every item row of the list, folders or not."""
+    def _item_rows(self) -> list:
+        """Every item row of the list, folders or not.
+
+        A list, walked to the end before returning — never a generator. A
+        ``next(r for r in _item_rows() ...)`` left the generator suspended
+        with its ``QTreeWidgetItemIterator`` alive and registered on the
+        tree; the next ``tree.clear()`` (the deferred list refresh) then ran
+        with an iterator pointing at the rows it was freeing — an access
+        violation whenever the garbage collector had not reaped the
+        generator first."""
         from PySide6.QtWidgets import QTreeWidgetItemIterator
+        rows = []
         it = QTreeWidgetItemIterator(self.items_list)
         while it.value() is not None:
             row = it.value()
             if row.data(0, Qt.UserRole) is not None:
-                yield row
+                rows.append(row)
             it += 1
+        del it
+        return rows
 
     def _sync_items_list(self, item) -> None:
         self.items_list.blockSignals(True)

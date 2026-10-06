@@ -57,3 +57,31 @@ def test_write_job_without_cut_has_no_section(tmp_path):
     scene = _scene_with_plane(active=False)
     job = json.loads(rb.write_job(scene, OrbitCamera(), tmp_path).read_text())
     assert "section" not in job
+
+
+def test_the_render_export_keeps_each_top_level_object_apart(tmp_path):
+    """Render with Blender gets one mesh per group or component (not the
+    whole model merged), so a section can cap every solid on its own: a
+    wall standing on a slab, merged with it, made their coincident faces
+    fight at the cut."""
+    import json
+    from PySide6.QtGui import QVector3D as V
+    from core.camera import OrbitCamera
+    from core.group import Group
+    from core.mesh import Mesh
+    from core.scene import Scene
+    import core.render_blender as rb
+    scene = Scene()
+    for name, z0 in (("Losa", -0.2), ("Muro", 0.0)):
+        m = Mesh()
+        m.add_face([V(0, 0, z0), V(1, 0, z0), V(1, 1, z0), V(0, 1, z0)])
+        scene.groups.append(Group(m, name))
+    scene.loose_mesh.add_face([V(3, 0, 0), V(4, 0, 0), V(4, 1, 0)])
+    cam = OrbitCamera()
+    rb.write_job(scene, cam, tmp_path)
+    data = (tmp_path / "model.glb").read_bytes()
+    n = int.from_bytes(data[12:16], "little")
+    gltf = json.loads(data[20:20 + n])
+    names = [nd["name"] for nd in gltf["nodes"]]
+    assert "Losa" in names and "Muro" in names
+    assert len([nd for nd in gltf["nodes"] if "mesh" in nd]) == 3

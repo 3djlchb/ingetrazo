@@ -322,6 +322,43 @@ def collect_geometry_split(scene, face_me):
     return materials, prims, figures
 
 
+def collect_geometry_parts(scene, face_me):
+    """:func:`collect_geometry_split`, with the rest of the model kept apart
+    PER TOP-LEVEL OBJECT: returns ``(materials, parts, figures)`` where
+    ``parts`` is ``[(name, prims)]`` — the loose geometry first (``None``),
+    then each visible group or component. A renderer then holds each solid
+    as an object of its own: a section can close every one with a cap of
+    its own instead of looking into one merged mesh where the faces two
+    solids share (a wall standing on a slab) fight at the cut."""
+    materials: dict[tuple, dict] = {}
+    parts: list = []
+    loose: dict[tuple, list] = {}
+    for f in scene.loose_mesh.faces:
+        if scene.entity_visible(f):
+            _add_face(f, materials, loose)
+    if loose:
+        parts.append((None, loose))
+    for g in getattr(scene, "groups", []):
+        if not scene.entity_visible(g):
+            continue
+        own: dict[tuple, list] = {}
+        faces = (_placements_facing(g, face_me, figures=False)
+                 if _has_billboard(g) else _group_faces(g))
+        for face in faces:
+            _add_face(face, materials, own)
+        if own:
+            parts.append((getattr(g, "name", None) or None, own))
+    figures = []
+    for faces, feet, yaw in faceme_figures(scene, face_me):
+        own = {}
+        for face in faces:
+            _add_face(face, materials, own)
+        if own:
+            figures.append({"prims": own, "feet": feet, "yaw": yaw})
+    _resolve_finishes(scene, materials)
+    return materials, parts, figures
+
+
 def _add_face(face, materials, prims) -> None:
     """One face's triangles into ``prims`` under its material's key."""
     from core.texture import affine_uv, planar_uv

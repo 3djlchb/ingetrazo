@@ -1163,6 +1163,14 @@ class Viewport(QOpenGLWidget):
 
     # ---- GL lifecycle -------------------------------------------------------
     def initializeGL(self) -> None:
+        if getattr(self, "_gl", None) is not None:
+            # A SECOND initializeGL: the native context was torn down and a
+            # new one made (Windows does it when the window is reparented,
+            # moves to another screen, or the driver resets — switching to
+            # another app and back was enough on one user's machine). Every
+            # GL object of the old context is gone; forget them so this one
+            # rebuilds them (the destroy-time hook below may not have run).
+            self._drop_gl_state()
         self._gl = QOpenGLFunctions(self.context())
         self._gl.initializeOpenGLFunctions()
         # Who is drawing: the GPU driver or a software rasteriser. Recorded
@@ -1183,6 +1191,7 @@ class Viewport(QOpenGLWidget):
         # (initializeGL re-runs if the context is ever recreated; each context
         # gets its own connection, which is precisely what we want.)
         self.context().aboutToBeDestroyed.connect(self.release_gl_textures)
+        self.context().aboutToBeDestroyed.connect(self._on_context_lost)
         self._gl.glClearColor(0.93, 0.94, 0.96, 1.0)
         self._gl.glClearDepthf(1.0)
         self._gl.glEnable(GL_DEPTH_TEST)
@@ -1379,6 +1388,12 @@ class Viewport(QOpenGLWidget):
         self._sync_axes()
         if self._gl is None or self._program is None:
             return
+        if getattr(self, "_gl_reupload", False):
+            # A new context: terrain and survey go back up right after this
+            # frame (the uploads make the context current and release it,
+            # which must not happen in the middle of a paint).
+            self._gl_reupload = False
+            QTimer.singleShot(0, self._reupload_after_context_loss)
         _pt0 = _time_mod.perf_counter() if _PERF else 0.0
 
         # Render the 3D scene into our own FBO (which has a real depth buffer)
@@ -3546,6 +3561,74 @@ class Viewport(QOpenGLWidget):
         finally:
             self.doneCurrent()
 
+    def _on_context_lost(self) -> None:
+        """The context's farewell: free the per-prototype GPU entries while
+        it can still take them back, then forget every GL-bound object."""
+        draws = getattr(self, "_proto_draw", None)
+        if draws:
+            self.makeCurrent()
+            try:
+                for entry in draws.values():
+                    try:
+                        self._destroy_proto_draw_entry(entry)
+                    except Exception:  # noqa: BLE001 — never block teardown
+                        pass
+            finally:
+                self.doneCurrent()
+        self._drop_gl_state()
+
+    def _drop_gl_state(self) -> None:
+        """Forget every object that lives in the CURRENT GL context, so the
+        next paint rebuilds it in whatever context it gets.
+
+        Without this a recreated context drew with the old one's buffers:
+        the instanced components (their own VAOs per prototype) crashed the
+        app with an access violation or lost their textures, and the
+        consolidated buffers believed they were already uploaded
+        (``_vbo_parts``) and sent nothing. CPU-side caches (chunks, pick
+        index) stay: only what the GPU held is dropped."""
+        draws = getattr(self, "_proto_draw", None)
+        if isinstance(draws, dict):
+            draws.clear()                 # objects die with their context
+        self._proto_draw_fast = None
+        parts = getattr(self, "_vbo_parts", None)
+        if isinstance(parts, dict):
+            parts.clear()
+        self._edges_version = -1          # resync every consolidated VBO
+        cache = getattr(self, "_tex_cache", None)
+        if isinstance(cache, dict):
+            cache.clear()
+        tiles = getattr(self, "_tile_textures", None)
+        if isinstance(tiles, dict):
+            tiles.clear()
+        self._terrain_texture = None
+        self._photo_textures = []
+        for name in ("_scene_fbo", "_fbo_size", "_shadow_fbo", "_shadow_key",
+                     "_depth_fbo", "_tile_geom", "_sil_last", "_ghost_key",
+                     "_img_vao", "_img_vbo",
+                     "_pv_edges_vao", "_pv_edges_vbo", "_pv_vcol_vao",
+                     "_pv_vcol_vbo", "_pv_tex_vao", "_pv_tex_vbo",
+                     "_ghost_edges_vao", "_ghost_edges_vbo",
+                     "_ghost_vcol_vao", "_ghost_vcol_vbo",
+                     "_ghost_tex_vao", "_ghost_tex_vbo"):
+            if hasattr(self, name):
+                setattr(self, name, None)
+        # Terrain and survey live in their own VBOs: upload them again into
+        # the new context on the next paint.
+        self._gl_reupload = True
+        self.update()
+
+    def _reupload_after_context_loss(self) -> None:
+        """Put the terrain and the photogrammetric survey back on the GPU
+        after a context change (``_drop_gl_state``)."""
+        self._gl_reupload = False
+        terrain = getattr(self, "_terrain_src", None)
+        if terrain is not None:
+            self.upload_terrain(terrain)
+        photo = getattr(self, "_photo_src", None)
+        if photo is not None:
+            self.upload_photo_mesh(*photo)
+
     def reset_tiles(self) -> None:
         """Drop cached GL textures + pending images (source/datum changed)."""
         if self._tile_textures:
@@ -3622,6 +3705,7 @@ class Viewport(QOpenGLWidget):
     def upload_terrain(self, terrain) -> None:
         """Build the terrain VBO (pos+uv) and its mosaic texture from a
         :class:`~georef.terrain.TerrainObject`."""
+        self._terrain_src = terrain       # re-uploaded after a context loss
         if terrain is None or not terrain.vertices or not terrain.triangles:
             self._terrain_count = 0
             return
@@ -3708,6 +3792,7 @@ class Viewport(QOpenGLWidget):
         is slow enough that the caller does it off the GUI thread); anything
         missing simply draws untextured rather than blocking here.
         """
+        self._photo_src = (mesh, images) if mesh is not None else None
         if mesh is None or mesh.triangle_count == 0:
             self.release_photo_textures()
             self._photo_count = 0
@@ -6259,19 +6344,23 @@ class Viewport(QOpenGLWidget):
         when one is showing."""
         return getattr(self, "_top_left_y", 0.0)
 
-    def _draw_active_scene_label(self, painter: QPainter) -> float:
-        """«Scene: <name>» on a grey pill at the top-left — which scene you
-        are looking at was never said anywhere. Returns the y the next
-        top-left label should start from (0 when there is no label)."""
-        label = self.active_scene_label()
-        if label is None:
-            return 0.0
-        prefix, name = label
+    def active_layer_label(self):
+        """``(«Active layer:», name)`` for the top-left layer label — the
+        layer new geometry is drawn on (see ``core.layers.active_layer``)."""
+        from core.layers import active_layer
+        return tr("Active layer:"), active_layer(self.scene)
+
+    def _draw_label_pill(self, painter: QPainter, x: float, y: float,
+                         prefix: str, name) -> tuple:
+        """One top-left label: a grey pill with ``prefix`` in white and
+        ``name`` in light blue — or, when ``name`` is ``None``, ``prefix``
+        alone in orange (the «No scene» state). Returns ``(right, bottom)``
+        of the pill."""
         font = QFont()
         font.setPointSize(9)
         font.setBold(True)
         fm = QFontMetrics(font)
-        pad_x, pad_y, x, y = 10.0, 5.0, 10.0, 10.0
+        pad_x, pad_y = 10.0, 5.0
         gap = fm.horizontalAdvance(" ")
         w_prefix = fm.horizontalAdvance(prefix)
         w = pad_x * 2 + w_prefix
@@ -6284,7 +6373,7 @@ class Viewport(QOpenGLWidget):
         painter.drawRoundedRect(QRectF(x, y, w, h), 6.0, 6.0)
         painter.setFont(font)
         base = y + pad_y + fm.ascent()
-        if name is None:                       # off every scene: «No scene»
+        if name is None:
             painter.setPen(QPen(SCENE_LABEL_NONE))
             painter.drawText(QPointF(x + pad_x, base), prefix)
         else:
@@ -6293,7 +6382,23 @@ class Viewport(QOpenGLWidget):
             painter.setPen(QPen(SCENE_LABEL_NAME))
             painter.drawText(QPointF(x + pad_x + w_prefix + gap, base), name)
         painter.restore()
-        return y + h
+        return x + w, y + h
+
+    def _draw_active_scene_label(self, painter: QPainter) -> float:
+        """The top-left labels, side by side: «Scene: <name>» (or «No
+        scene»; absent in a document without scenes) and, to its right,
+        «Active layer: <name>» — which scene you are looking at and which
+        layer you are drawing on were never said anywhere. Returns the y
+        the transient top-left labels should start from."""
+        x, y, spacing = 10.0, 10.0, 8.0
+        bottom = 0.0
+        scene_label = self.active_scene_label()
+        if scene_label is not None:
+            right, bottom = self._draw_label_pill(painter, x, y, *scene_label)
+            x = right + spacing
+        _right, b = self._draw_label_pill(painter, x, y,
+                                          *self.active_layer_label())
+        return max(bottom, b)
 
     def _draw_linear_mode_label(self, painter: QPainter) -> None:
         # The mirror image of the bug above: these had the Spanish written

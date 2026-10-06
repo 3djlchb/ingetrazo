@@ -28,8 +28,41 @@ follow [SemVer](https://semver.org).
   etiqueta pasa a «Sin escena» en naranja; «Actualizar» guarda la vista
   actual en la escena activa y la etiqueta vuelve a nombrarla. Se guarda
   con el documento.
+- **El visor nombra la capa activa**: a la derecha de la etiqueta de escena,
+  «Capa activa: <nombre>» con el mismo formato (gris, «Capa activa:» en
+  blanco y el nombre en azul). Sin escenas en el documento, queda sola en
+  la esquina.
 
 ### Correcciones
+- **Las texturas de grupos y componentes ya no desaparecen (ni la app se
+  cierra) al volver de otra ventana**: cuando Windows recrea el contexto
+  OpenGL del visor (al cambiar de ventana o de pantalla, minimizar o si el
+  driver se reinicia), el visor seguía dibujando con los buffers del
+  contexto anterior: los componentes instanciados provocaban un cierre por
+  violación de acceso o perdían sus texturas. Ahora suelta todo lo que
+  vivía en la tarjeta gráfica y lo reconstruye en el contexto nuevo
+  (también el terreno y la fotogrametría).
+- **Render con Blender: los cortes de sección ya no muestran vetas en las
+  uniones**: donde dos sólidos se apoyan cara contra cara (un muro sobre una
+  losa, una losa sobre el muro) el corte dejaba ver franjas y puntos, en
+  EEVEE y en Cycles. El relleno de sección se hacía pintando las caras
+  traseras, que dejaba ver el interior de los sólidos, y todo el modelo iba
+  a Blender como una sola malla. Ahora cada grupo o componente va como
+  objeto propio y el corte cierra cada sólido con una tapa real sobre el
+  plano, del color de relleno de sección del estilo (un hueco, como una
+  ventana cortada, queda abierto).
+- **Láminas: un cierre intermitente de la lista de elementos**: recorrer
+  la lista dejaba vivo un iterador de Qt registrado en ella; la siguiente
+  actualización de la lista borraba las filas con ese iterador apuntándolas
+  y la app podía cerrarse por violación de acceso (según cuándo pasara el
+  recolector de basura). La lista se recorre ahora de una vez.
+- **Pintar un grupo o componente desde fuera pinta todas sus caras**:
+  antes solo tomaban el material las caras «sin material», y como casi
+  todas las caras de un modelo ya tienen uno, desde fuera parecía que el
+  material no se quedaba. Ahora pregunta primero, nombrando el objeto:
+  «¿Aplicar el material «Ladrillo» a todo el componente «Silla»?», con
+  cuántas caras cambian y, en un componente, cuántas copias cambian con
+  él. «No» no aplica nada; con deshacer.
 - Partir una arista que estaba en una capa (dibujando una línea que la
   cruza) dejaba sus dos mitades en la capa por defecto; ahora conservan su
   capa. Lo mismo al copiar con Mover una arista suelta de otra capa.

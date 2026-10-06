@@ -436,9 +436,116 @@ def _scene_radius(objs):
     return max((hi - lo).length, 1.0)
 
 
-def _cut_clip(objs, planes):
+def _cap_loops(segments, tol=1e-5):
+    """Closed loops from the cut ``segments`` (pairs of local ``Vector``s):
+    endpoints within ``tol`` are one point, each segment is walked once (a
+    duplicate -- two coincident faces cut along the same line -- counts as
+    the one), and only CLOSED chains come back: an open sheet's cut is a
+    line, not an outline, and gets no cap."""
+    def key(v):
+        return (round(v.x / tol), round(v.y / tol), round(v.z / tol))
+    adj, pos = {}, {}
+    for a, b in segments:
+        ka, kb = key(a), key(b)
+        if ka == kb:
+            continue
+        pos.setdefault(ka, a)
+        pos.setdefault(kb, b)
+        adj.setdefault(ka, set()).add(kb)
+        adj.setdefault(kb, set()).add(ka)
+    used, loops = set(), []
+    for start in adj:
+        for first in adj[start]:
+            if frozenset((start, first)) in used:
+                continue
+            used.add(frozenset((start, first)))
+            loop, cur = [start], first
+            while cur != start:
+                loop.append(cur)
+                nxt = next((k for k in adj[cur]
+                            if frozenset((cur, k)) not in used), None)
+                if nxt is None:
+                    break
+                used.add(frozenset((cur, nxt)))
+                cur = nxt
+            if cur == start and len(loop) >= 3:
+                loops.append([pos[k] for k in loop])
+    return loops
+
+
+def _cap_faces(bm, cut_edges, normal, mat_index):
+    """Close the cut: fill the outlines the plane left in ``bm`` with flat
+    faces facing ``normal`` (the side cut away), in material ``mat_index``.
+    Holes (a window in a cut wall) stay open -- the outlines are filled
+    together, even-odd. Returns how many triangles it made."""
+    import bmesh
+    from mathutils.geometry import tessellate_polygon
+    loops = _cap_loops([(e.verts[0].co.copy(), e.verts[1].co.copy())
+                        for e in cut_edges
+                        if isinstance(e, bmesh.types.BMEdge)])
+    if not loops:
+        return 0
+    pts = [v for lp in loops for v in lp]
+    try:
+        tris = tessellate_polygon(loops)
+    except Exception:                      # noqa: BLE001 -- degenerate outline
+        return 0
+    made = 0
+    verts = [bm.verts.new(v) for v in pts]
+    for i, j, k in tris:
+        a, b, c = verts[i], verts[j], verts[k]
+        if (b.co - a.co).cross(c.co - a.co).dot(normal) < 0.0:
+            b, c = c, b
+        try:
+            f = bm.faces.new((a, b, c))
+        except ValueError:                 # an exact duplicate
+            continue
+        f.material_index = mat_index
+        f.smooth = False
+        made += 1
+    return made
+
+
+def _fill_material(color):
+    """The flat Section Fill material the caps wear -- emission at the
+    strength that lands on the style's swatch colour (see FILL_STRENGTH);
+    made once, registered for the exposure steps."""
+    lin = [_srgb_to_linear(float(c)) for c in list(color)[:3]]
+    mat = bpy.data.materials.get("IngeTrazo section fill")
+    if mat is not None:
+        # The colour is the style's Section Fill, which the user can change
+        # between renders: take the one asked for now.
+        for node in mat.node_tree.nodes:
+            if node.type == "EMISSION":
+                node.inputs["Color"].default_value = (lin[0], lin[1],
+                                                      lin[2], 1.0)
+        return mat
+    mat = bpy.data.materials.new("IngeTrazo section fill")
+    if hasattr(mat, "use_nodes"):
+        mat.use_nodes = True
+    nt = mat.node_tree
+    for node in list(nt.nodes):
+        nt.nodes.remove(node)
+    out = nt.nodes.new("ShaderNodeOutputMaterial")
+    flat = nt.nodes.new("ShaderNodeEmission")
+    flat.inputs["Color"].default_value = (lin[0], lin[1], lin[2], 1.0)
+    flat.inputs["Strength"].default_value = FILL_STRENGTH
+    nt.links.new(flat.outputs["Emission"], out.inputs["Surface"])
+    _FILL["emitters"].append(flat)
+    return mat
+
+
+def _cut_clip(objs, planes, fill_color=None):
     """The viewport's cut: everything on the normal's side of the plane goes,
-    faces crossing it are trimmed exactly at it, nothing is capped.
+    faces crossing it are trimmed exactly at it -- and, with ``fill_color``
+    (the style's Section Fill), every outline the plane leaves is closed
+    with a flat cap in that colour.
+
+    Real caps, not "paint the back faces": that trick let the eye into the
+    solids, and where two of them meet face to face (a wall standing on a
+    slab, a slab resting on the wall) their coincident faces fought at the
+    cut -- streaks along every joint of the section. A cap closes each solid
+    at the plane, so what is inside is never seen.
 
     This is a clip of the geometry itself, so it needs no closed solid —
     and models are full of open geometry: a wall drawn as two sheets with
@@ -450,7 +557,7 @@ def _cut_clip(objs, planes):
     plane each vertex is on, so it cannot go wrong that way."""
     import bmesh
     bpy.context.view_layer.update()        # matrix_world of what was just imported
-    kept = gone = 0
+    kept = gone = caps = 0
     for obj in objs:
         # The bounding box settles most objects without touching their
         # mesh: wholly on the kept side of every plane → left as it is
@@ -482,18 +589,35 @@ def _cut_clip(objs, planes):
         world = obj.matrix_world
         inv = world.inverted()
         lin = world.to_3x3().transposed()  # a plane's normal moves by Mᵀ
+        mat_index = None
+        if fill_color is not None:
+            fill = _fill_material(fill_color)
+            if not len(mesh.materials):
+                # Its faces use slot 0: keep that slot theirs (empty =
+                # the default look), or they would all wear the fill.
+                mesh.materials.append(None)
+            names = [m.name if m else None for m in mesh.materials]
+            if fill.name not in names:
+                mesh.materials.append(fill)
+                names.append(fill.name)
+            mat_index = names.index(fill.name)
         bm = bmesh.new()
         bm.from_mesh(mesh)
         for p, n in crossing:
-            bmesh.ops.bisect_plane(
+            local_n = (lin @ n).normalized()
+            res = bmesh.ops.bisect_plane(
                 bm, geom=bm.verts[:] + bm.edges[:] + bm.faces[:], dist=1e-6,
-                plane_co=inv @ p, plane_no=(lin @ n).normalized(),
+                plane_co=inv @ p, plane_no=local_n,
                 use_snap_center=False, clear_outer=True, clear_inner=False)
+            if mat_index is not None:
+                cut = [e for e in res["geom_cut"] if e.is_valid]
+                caps += _cap_faces(bm, cut, local_n, mat_index)
         bm.to_mesh(mesh)
         bm.free()
         mesh.update()
     say("section", len(planes), "plane(s), clip:",
-        len(objs) - kept - gone, "cut,", kept, "untouched,", gone, "hidden")
+        len(objs) - kept - gone, "cut,", kept, "untouched,", gone, "hidden",
+        "|", caps, "cap triangles" if fill_color is not None else "no caps")
 
 
 def _cut_boolean(scene, objs, planes):
@@ -659,15 +783,16 @@ def apply_section(scene, objs, section):
     if not planes:
         return
     mode = section.get("mode", "clip")
+    color = section.get("fill_color") or (0.35, 0.37, 0.41)
     if mode == "shader":
         _cut_shader(objs, planes)
+        if section.get("fill"):
+            _add_fill(objs, planes[0], color)   # no geometry to cap here
     elif mode == "boolean":
         _cut_boolean(scene, objs, planes)     # its caps are real faces
     else:
-        _cut_clip(objs, planes)
-    if section.get("fill") and mode != "boolean":
-        _add_fill(objs, planes[0], section.get("fill_color")
-                  or (0.35, 0.37, 0.41))
+        # The clip closes every solid with a real cap (see _cut_clip).
+        _cut_clip(objs, planes, color if section.get("fill") else None)
 
 
 def main():

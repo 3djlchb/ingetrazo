@@ -480,7 +480,8 @@ def write_job(scene, camera, work: Path, *, engine: str = "eevee",
             return camera.eye() - anchor
         return camera.eye() - camera.target
 
-    save_glb(scene, glb, face_me=toward)
+    # One object per top-level group: the section caps each solid.
+    save_glb(scene, glb, face_me=toward, split_parts=True)
     job = {
         "glb": str(glb),
         "output": str(work / "render.png"),

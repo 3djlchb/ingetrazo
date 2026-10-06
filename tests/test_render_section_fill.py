@@ -141,6 +141,7 @@ def test_off_adds_no_fill_machinery(rs):
     obj, mat = _box()
     rs.apply_section(bpy.context.scene, [obj], _section(False))
     assert not rs._FILL["switches"]
+    assert not _caps(obj)
     assert mat.use_backface_culling is True            # untouched
 
 
@@ -153,38 +154,80 @@ def test_the_slice_is_the_same_with_or_without_the_fill(rs):
         assert max(v.co.x for v in obj.data.vertices) <= 2 + 1e-5
 
 
-def test_the_fill_needs_back_faces_drawn(rs):
+def _caps(obj):
+    """The cap faces a section closed ``obj`` with: those wearing the
+    Section Fill material."""
+    mesh = obj.data
+    names = [m.name if m else None for m in mesh.materials]
+    if "IngeTrazo section fill" not in names:
+        return []
+    idx = names.index("IngeTrazo section fill")
+    return [p for p in mesh.polygons if p.material_index == idx]
+
+
+def test_the_fill_closes_the_cut_with_a_real_cap(rs):
+    """The opened box is closed AT the plane by flat faces facing the side
+    cut away, in the fill material — not «paint the back faces», which let
+    the eye into the solids and made coincident faces fight at the cut."""
     obj, mat = _box()
     rs.apply_section(bpy.context.scene, [obj], _section(True))
-    assert mat.use_backface_culling is False
+    caps = _caps(obj)
+    assert caps
+    assert sum(p.area for p in caps) == pytest.approx(16.0, rel=1e-4)
+    for p in caps:
+        assert p.center.x == pytest.approx(2.0, abs=1e-5)
+        assert p.normal.x == pytest.approx(1.0, abs=1e-5)
+    assert mat.use_backface_culling is True      # the surface is untouched
 
 
-@pytest.mark.parametrize("eye,persp,expected", [
-    ((14, 2, 2), True, 1.0),       # perspective eye on the cut-away side
-    ((-8, 2, 2), True, 0.0),       # on the kept side: the plane is behind
-    ((14, 2, 2), False, 1.0),      # parallel, looking against the normal
-    ((-8, 2, 2), False, 0.0),      # parallel, looking along the normal
-])
-def test_the_fill_shows_only_from_the_cut_away_side(rs, eye, persp, expected):
+def test_an_open_sheet_gets_no_cap(rs):
+    """A lone face crossing the plane: its cut is a line, not an outline."""
+    mesh = bpy.data.meshes.new("sheet")
+    mesh.from_pydata([(0, 0, 0), (4, 0, 0), (4, 0, 4), (0, 0, 4)], [],
+                     [(0, 1, 2, 3)])
+    obj = bpy.data.objects.new("sheet", mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    rs.apply_section(bpy.context.scene, [obj], _section(True))
+    assert not _caps(obj)
+    assert max(v.co.x for v in obj.data.vertices) <= 2 + 1e-5
+
+
+def test_a_hole_in_the_cut_stays_open(rs):
+    """A box with a box-shaped void (a wall with a window, seen in plan):
+    the cap is the ring between the two outlines, not a full slab."""
+    outer = _box()[0]
+    inner = _box(1.0, 3.0)[0]
+    bm_join = [outer, inner]
+    import bmesh
+    bm = bmesh.new()
+    for o in bm_join:
+        bm.from_mesh(o.data)
+    bm.to_mesh(outer.data)
+    bm.free()
+    bpy.data.objects.remove(inner)
+    rs.apply_section(bpy.context.scene, [outer], _section(True))
+    area = sum(p.area for p in _caps(outer))
+    assert area == pytest.approx(16.0 - 4.0, rel=1e-4)
+
+
+def test_from_the_kept_side_the_box_shows_its_surface(rs):
+    """The eye on the side that stays: the model hides its own cap."""
+    got = _render_centre(rs, _section(True), _cam((-8, 2, 2)))
+    assert abs(got[2] - got[0]) < 0.05                # grey, not the blue fill
+
+
+def test_the_cap_takes_the_colour_asked_for(rs):
+    """The style's Section Fill colour is what the cap wears — change it
+    and the next render follows (the material is updated, not reused)."""
     obj, _mat = _box()
     rs.apply_section(bpy.context.scene, [obj], _section(True))
-    rs.update_fill(_cam(eye, persp))
-    assert rs._FILL["switches"]
-    for sw in rs._FILL["switches"]:
-        assert sw.inputs[1].default_value == expected
-
-
-def test_the_fill_follows_a_camera_that_crosses_the_plane(rs):
-    """A serving Blender is re-aimed at new cameras: the switch must follow."""
-    obj, _mat = _box()
-    rs.apply_section(bpy.context.scene, [obj], _section(True))
-    sw = rs._FILL["switches"][0]
-    rs.update_fill(_cam((14, 2, 2)))
-    assert sw.inputs[1].default_value == 1.0
-    rs.update_fill(_cam((-8, 2, 2)))
-    assert sw.inputs[1].default_value == 0.0
-    rs.update_fill(_cam((14, 2, 2)))
-    assert sw.inputs[1].default_value == 1.0
+    other = dict(_section(True), fill_color=[0.9, 0.1, 0.1])
+    obj2, _m2 = _box()
+    rs.apply_section(bpy.context.scene, [obj2], other)
+    mat = bpy.data.materials["IngeTrazo section fill"]
+    emit = next(n for n in mat.node_tree.nodes if n.type == "EMISSION")
+    r, g, b, _a = emit.inputs["Color"].default_value
+    assert r > 0.5 and g < 0.1 and b < 0.1
 
 
 def test_the_fill_keeps_its_colour_when_the_exposure_changes(rs):

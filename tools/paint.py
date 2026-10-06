@@ -252,29 +252,19 @@ class PaintTool(Tool):
             return
 
         # A face inside a container clicked from OUTSIDE it paints the
-        # container — the group or component instance as a whole
-        # (issue #47, @pacaeiro: «it's painting the picked face, instead of
-        # the whole group or component»). Its default faces take the paint;
-        # faces painted themselves keep their own.
+        # container — the group or component instance as a whole (issue
+        # #47). EVERY face inside takes the material, the ones that already
+        # had their own too: models arrive with every face painted (all of
+        # them, in the bundled examples), so the old rule — only default
+        # faces take the container's paint — read as «the material does not
+        # stick» from outside while it did from inside. It asks first, naming
+        # the object: a component's definition is shared by its copies.
         if group is not None:
             pick_obj = getattr(vp, "pick_group", None)
             obj = (pick_obj(ctx.screen.x(), ctx.screen.y())
                    if pick_obj is not None else None)
             if obj is not None:
-                mat = PaintTool.current_material
-                vp.history.execute(CompoundCommand([
-                    SetFaceMaterialTagCommand(
-                        [], mat.name if mat is not None else None, mat),
-                    SetGroupMaterialCommand(
-                        obj, None if PaintTool.current_is_default
-                        else self._current_as_material()),
-                ]))
-                flash = getattr(vp, "flash_status", None)
-                if callable(flash):
-                    flash(tr("{name} painted as a whole; a face that already "
-                             "had its own material keeps it",
-                             name=getattr(obj, "name", "") or tr("Group")))
-                vp.update()
+                self._paint_whole(vp, obj)
                 return
 
         # Paint the clicked face — or, if it is part of the current face
@@ -338,6 +328,107 @@ class PaintTool(Tool):
                 tag,
             ]))
         vp.update()
+
+    def _paint_whole(self, vp, obj) -> None:
+        """Paint every face of ``obj`` (a group or a component, nested
+        placements included) with the current material, after asking."""
+        from core.group import iter_placements
+        faces: list = []
+        seen: set = set()
+        for g, _m in iter_placements(obj):
+            mesh = getattr(g, "mesh", None)
+            if mesh is None or id(mesh) in seen:
+                continue
+            seen.add(id(mesh))
+            faces.extend(mesh.faces)
+        is_comp = bool(getattr(obj, "is_component", lambda: False)())
+        copies = 0
+        if is_comp:
+            copies = sum(1 for g in getattr(vp.scene, "groups", ())
+                         if g is not obj and g.mesh is obj.mesh)
+        if not self.confirm_whole(vp, obj, is_comp, len(faces), copies):
+            return
+        mat = PaintTool.current_material
+        tag = SetFaceMaterialTagCommand(
+            faces, mat.name if mat is not None else None, mat)
+        if PaintTool.current_is_default:
+            # «No material» on the whole: every face back to the default.
+            cmds = [SetFaceColorCommand(faces, None),
+                    SetFaceTextureCommand(faces, None),
+                    SetFaceOpacityCommand(faces, None), tag,
+                    SetGroupMaterialCommand(obj, None)]
+        else:
+            opacity = SetFaceOpacityCommand(faces, PaintTool.current_opacity)
+            if PaintTool.current_texture is not None:
+                # No positioned map: the faces sit in the object's own
+                # coordinates, so each projects the image on its own plane.
+                tex = dict(PaintTool.current_texture)
+                tex.pop("uvw", None)
+                cmds = [SetFaceTextureCommand(faces, tex),
+                        SetFaceColorCommand(faces, None), opacity]
+            else:
+                cmds = [SetFaceColorCommand(faces, PaintTool.current_color),
+                        SetFaceTextureCommand(faces, None), opacity]
+            # The container carries it too: a face added inside later, with
+            # no material of its own, wears the same.
+            cmds += [tag, SetGroupMaterialCommand(
+                obj, self._current_as_material())]
+        vp.history.execute(CompoundCommand(cmds))
+        flash = getattr(vp, "flash_status", None)
+        if callable(flash):
+            what = tr("Component") if is_comp else tr("Group")
+            flash(tr("{what} «{name}» painted: {n} faces",
+                     what=what, name=getattr(obj, "name", "") or what,
+                     n=len(faces)))
+        vp.update()
+
+    @staticmethod
+    def material_label() -> str:
+        """The current material as the confirmation names it."""
+        if PaintTool.current_is_default:
+            return tr("Default")
+        mat = PaintTool.current_material
+        if mat is not None and getattr(mat, "name", None):
+            return mat.name
+        tex = PaintTool.current_texture
+        if tex and tex.get("path"):
+            from pathlib import Path
+            return Path(tex["path"]).stem
+        r, g, b = (int(round(c * 255)) for c in PaintTool.current_color[:3])
+        return f"#{r:02x}{g:02x}{b:02x}"
+
+    @classmethod
+    def confirm_whole(cls, vp, obj, is_component: bool, n_faces: int,
+                      copies: int) -> bool:
+        """Ask before painting a whole group or component — the question
+        names the object, its kind, the material and what changes. Tests
+        replace this."""
+        from PySide6.QtWidgets import QMessageBox, QWidget
+        kind = tr("component") if is_component else tr("group")
+        name = getattr(obj, "name", "") or (
+            tr("Component") if is_component else tr("Group"))
+        if PaintTool.current_is_default:
+            text = tr("Remove the material from the whole {kind} «{name}»?",
+                      kind=kind, name=name)
+        else:
+            text = tr("Apply the material «{mat}» to the whole {kind} "
+                      "«{name}»?", mat=cls.material_label(), kind=kind,
+                      name=name)
+        detail = tr("Its {n} faces will be painted, also the ones that "
+                    "already have a material.", n=n_faces)
+        if copies:
+            detail += "\n" + tr("Its {n} other copies change too: they "
+                                 "share the definition.", n=copies)
+        parent = vp.window() if isinstance(vp, QWidget) else None
+        box = QMessageBox(parent)
+        box.setIcon(QMessageBox.Question)
+        box.setWindowTitle(tr("Paint component") if is_component
+                           else tr("Paint group"))
+        box.setText(text)
+        box.setInformativeText(detail)
+        box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        box.setDefaultButton(QMessageBox.Yes)
+        return box.exec() == QMessageBox.Yes
 
     @classmethod
     def _current_as_material(cls) -> dict:

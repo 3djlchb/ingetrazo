@@ -43,7 +43,7 @@ def _mime(name: str) -> str:
     return "image/png"
 
 
-def save_glb(scene, path, face_me=None) -> None:
+def save_glb(scene, path, face_me=None, split_parts: bool = False) -> None:
     """Write the scene as a binary glTF (``.glb``) to ``path``.
 
     ``face_me`` turns the face-me figures toward a camera and brings them
@@ -53,7 +53,18 @@ def save_glb(scene, path, face_me=None) -> None:
     # with its feet and heading in extras: a renderer that moves the camera
     # (Render ▸ sync with the view) turns them instead of re-exporting.
     figures: list = []
-    if face_me is not None:
+    # ``split_parts`` (Render with Blender): one mesh and node per top-level
+    # object instead of the whole model merged — see
+    # :func:`formats.meshexport.collect_geometry_parts`.
+    parts: list = []
+    if face_me is not None and split_parts:
+        from formats.meshexport import collect_geometry_parts
+        materials_in, parts, figures = collect_geometry_parts(scene, face_me)
+        prims = {}
+        for _name, own in parts:
+            for key in own:
+                prims.setdefault(key, None)
+    elif face_me is not None:
         from formats.meshexport import collect_geometry_split
         materials_in, prims, figures = collect_geometry_split(scene, face_me)
     else:
@@ -220,7 +231,15 @@ def save_glb(scene, path, face_me=None) -> None:
                                "material": mat_index[key], "mode": 4})
         return primitives
 
-    primitives = _primitives(prims)
+    part_meshes = []
+    if parts:
+        primitives = []
+        for i, (name, own) in enumerate(parts):
+            pp = _primitives(own)
+            if pp:
+                part_meshes.append((pp, name or f"IngeTrazo {i + 1}"))
+    else:
+        primitives = _primitives(prims)
     figure_meshes = []
     for fig in figures:
         fp = _primitives(fig["prims"])
@@ -242,6 +261,9 @@ def save_glb(scene, path, face_me=None) -> None:
     if primitives:
         meshes.append({"name": "IngeTrazo", "primitives": primitives})
         nodes.append({"mesh": 0, "name": "IngeTrazo"})
+    for pp, name in part_meshes:
+        meshes.append({"name": name, "primitives": pp})
+        nodes.append({"mesh": len(meshes) - 1, "name": name})
     for i, (fp, fig) in enumerate(figure_meshes, 1):
         feet = fig["feet"]
         meshes.append({"name": f"Figure {i}", "primitives": fp})
