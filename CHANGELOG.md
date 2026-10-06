@@ -6,6 +6,34 @@ follow [SemVer](https://semver.org).
 
 ## [Sin publicar]
 
+### Novedades
+- **Capa activa**: la tabla de Capas tiene una primera columna «Activa»
+  con un círculo pequeño, azul en la capa activa y vacío en las demás; un
+  clic en un círculo la cambia, y una capa nueva («+ Capa») nace activa.
+  Lo que dibujas va a esa capa: las líneas,
+  las caras que cierran, los grupos nuevos, las cotas y los textos. Lo que
+  un trazo solo parte conserva su capa (las mitades de una cara o de una
+  arista que ya existían), y una copia con Mover conserva la de su original.
+  La capa activa no se puede ocultar ni bloquear, y activar una capa oculta
+  la muestra. Se guarda con el documento.
+- **Empujar/Tirar deja el sólido entero en la capa de la cara**: las
+  paredes y sus aristas toman la capa de la cara que empujas, como ya lo
+  hacía la tapa (antes caían en «Layer 0»). Un rectángulo de «Muros»
+  levantado es un muro entero en «Muros», sea cual sea la capa activa.
+- **Escena activa**: la tabla de Escenas tiene la misma columna «Activa»;
+  la escena pasa a activa al mostrarla (doble clic o clic en su círculo), al
+  crearla con «+ Escena» o al actualizarla. El visor la nombra arriba a la
+  izquierda: «Escena:» en blanco y el nombre en azul, sobre una etiqueta
+  gris. En cuanto orbitas, desplazas o haces zoom fuera de ella, la
+  etiqueta pasa a «Sin escena» en naranja; «Actualizar» guarda la vista
+  actual en la escena activa y la etiqueta vuelve a nombrarla. Se guarda
+  con el documento.
+
+### Correcciones
+- Partir una arista que estaba en una capa (dibujando una línea que la
+  cruza) dejaba sus dos mitades en la capa por defecto; ahora conservan su
+  capa. Lo mismo al copiar con Mover una arista suelta de otra capa.
+
 ### Rendimiento
 - **Orbitar un modelo con miles de componentes es 11× más fluido**: con la
   planta industrial de la #158 (21 406 copias) cada cuadro pasaba de 1,3 s

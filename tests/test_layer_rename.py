@@ -35,13 +35,13 @@ def _close(win):
 
 def _row_of(panel, name):
     for i in range(panel.tree.topLevelItemCount()):
-        if panel.tree.topLevelItem(i).text(0) == name:
+        if panel.tree.topLevelItem(i).text(1) == name:
             return i
     raise AssertionError(name)
 
 
 def _select(panel, name):
-    panel.tree.setCurrentItem(panel.tree.topLevelItem(_row_of(panel, name)), 0)
+    panel.tree.setCurrentItem(panel.tree.topLevelItem(_row_of(panel, name)), 1)
 
 
 def _type_name(panel, text):
@@ -53,7 +53,7 @@ def _type_name(panel, text):
     _app.processEvents()
 
 
-def _click(panel, name, column=0, far_right=False):
+def _click(panel, name, column=1, far_right=False):
     """Click a cell: its left edge, or (far_right) the empty end of it —
     away from the check box, which would swallow the click."""
     from PySide6.QtCore import QPoint
@@ -91,7 +91,7 @@ def test_button_edits_the_focused_layer():
         assert "Losas" in _names(win) and "Pisos" not in _names(win)
         # The row keeps working under its new name (check boxes, delete).
         panel.tree.topLevelItem(_row_of(panel, "Losas")).setCheckState(
-            1, Qt.Unchecked)
+            2, Qt.Unchecked)
         assert win.viewport.scene.layer("Losas").visible is False
     finally:
         _close(win)
@@ -131,7 +131,7 @@ def test_a_slow_click_on_a_check_box_column_opens_no_editor():
     try:
         panel = win.tray.layers
         _select(panel, "Muros")
-        _click(panel, "Muros", column=1, far_right=True)
+        _click(panel, "Muros", column=2, far_right=True)
         QTest.qWait(_app.doubleClickInterval() + 150)
         assert panel.tree.state() != QAbstractItemView.EditingState
     finally:
@@ -155,10 +155,10 @@ def test_duplicate_or_empty_name_is_refused():
     try:
         panel = win.tray.layers
         for bad in ("Muros", "   "):
-            panel.tree.topLevelItem(_row_of(panel, "Pisos")).setText(0, bad)
+            panel.tree.topLevelItem(_row_of(panel, "Pisos")).setText(1, bad)
             assert set(_names(win)) == {"Layer 0", "Muros", "Pisos"}
             assert panel.tree.topLevelItem(
-                _row_of(panel, "Pisos")).text(0) == "Pisos"
+                _row_of(panel, "Pisos")).text(1) == "Pisos"
     finally:
         _close(win)
 

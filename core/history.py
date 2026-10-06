@@ -271,7 +271,8 @@ class AddEdgeCommand(Command):
     (never the pre-existing one it merged into)."""
 
     def __init__(self, a: QVector3D, b: QVector3D, merge: bool = True,
-                 soft: bool | None = None, curve: int | None = None) -> None:
+                 soft: bool | None = None, curve: int | None = None,
+                 layer: str | None = None) -> None:
         self.a = QVector3D(a)
         self.b = QVector3D(b)
         self.merge = merge  # kept for API parity; the mesh never duplicates
@@ -279,6 +280,10 @@ class AddEdgeCommand(Command):
         # replaces a curve/soft edge with sub-edges, so the pieces inherit.
         self.soft = soft
         self.curve = curve
+        # Layer of an edge this command CREATES: the active layer for a drawn
+        # segment, the split edge's own for its pieces. Never stamped on a
+        # pre-existing edge it merges into — that one keeps its layer.
+        self.layer = layer
         self.edge: Optional[Edge] = None
         self._owned = False
 
@@ -293,6 +298,8 @@ class AddEdgeCommand(Command):
         if self._owned and self.edge is not None:
             m.relink_edge(self.edge)  # redo of an edge this command owns
             self._stamp(self.edge)
+            if self.layer is not None:
+                self.edge.layer = self.layer
             scene.version += 1
             return
         v0 = m.vertex_at(self.a)
@@ -307,6 +314,8 @@ class AddEdgeCommand(Command):
         self.edge = m.add_edge(self.a, self.b)
         self._owned = True
         self._stamp(self.edge)
+        if self.layer is not None:
+            self.edge.layer = self.layer
         scene.version += 1
 
     def undo(self, scene) -> None:
@@ -1116,14 +1125,28 @@ class PurgeUnusedCommand(Command):
         scene.version += 1
 
 
+def _on_active_layer(annotation, scene) -> None:
+    """Put a NEW annotation (cota, leader text) on the active layer, unless
+    it already names one."""
+    if getattr(annotation, "layer", None) is None:
+        from core.layers import active_layer_tag
+        tag = active_layer_tag(scene)
+        if tag is not None:
+            annotation.layer = tag
+
+
 class AddDimensionCommand(Command):
     """Add a dimension annotation to ``scene.dimensions``, anchored to the
     vertices under its endpoints (if any) so it follows the geometry."""
 
     def __init__(self, dimension) -> None:
         self.dimension = dimension
+        self._layered = False
 
     def do(self, scene) -> None:
+        if not self._layered:          # once: a redo keeps the first layer
+            self._layered = True
+            _on_active_layer(self.dimension, scene)
         if hasattr(self.dimension, "bind"):
             self.dimension.bind(scene)
         scene.dimensions.append(self.dimension)
@@ -1162,8 +1185,12 @@ class AddTextLabelCommand(Command):
 
     def __init__(self, label) -> None:
         self.label = label
+        self._layered = False
 
     def do(self, scene) -> None:
+        if not self._layered:          # once: a redo keeps the first layer
+            self._layered = True
+            _on_active_layer(self.label, scene)
         scene.text_labels.append(self.label)
         scene.version += 1
 
@@ -2923,6 +2950,12 @@ class MakeGroupCommand(Command):
             if e is not None:
                 stamp_edge_flags(e, flags)
         self.group = Group(gmesh, name=self._name)
+        # A new group goes on the active layer (its faces keep their own).
+        # Fixed at the first run, so a redo rebuilds it on the same one.
+        if not hasattr(self, "_layer"):
+            from core.layers import active_layer_tag
+            self._layer = active_layer_tag(scene)
+        self.group.layer = self._layer
         if self._component:
             from PySide6.QtGui import QMatrix4x4
             if rot is not None:
@@ -3171,6 +3204,8 @@ class MakeNestedGroupCommand(Command):
             self.container = self._inner.group
         elif self.container is None:
             self.container = Group(Mesh(), name=self.name)
+            from core.layers import active_layer_tag
+            self.container.layer = active_layer_tag(scene)
         if self.container not in scene.groups:
             scene.groups.append(self.container)
         self._xform0 = getattr(self.container, "xform", None)

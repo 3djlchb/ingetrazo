@@ -344,9 +344,20 @@ def save_scene(scene, path: Path) -> dict:
     if layers is not None and (len(layers) > 1 or any(
             not ly.visible or ly.locked for ly in layers)):
         payload["layers"] = [ly.to_dict() for ly in layers]
+    # The active layer (by uid) and the active scene (by name — scene names
+    # are unique): absent = the default layer / no scene, so documents
+    # without them read as before and older builds just ignore the keys.
+    from core.layers import DEFAULT_LAYER_UID
+    active_uid = getattr(scene, "active_layer_uid", None)
+    if (active_uid and active_uid != DEFAULT_LAYER_UID
+            and scene.layer_by_uid(active_uid) is not None):
+        payload["active_layer"] = active_uid
     views = getattr(scene, "saved_views", None)
     if views:
         payload["saved_views"] = [v.to_dict() for v in views]
+        active_view = getattr(scene, "active_view", None)
+        if active_view is not None and active_view in views:
+            payload["active_view"] = active_view.name
     comps = getattr(scene, "compositions", None)
     if comps:
         payload["compositions"] = [c.to_dict() for c in comps]
@@ -685,6 +696,10 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
         if not any(ly.name == DEFAULT_LAYER for ly in scene.layers):
             scene.layers.insert(0, Layer(DEFAULT_LAYER))
         ensure_unique_uids(scene.layers)
+    active_uid = payload.get("active_layer")
+    scene.active_layer_uid = (active_uid if active_uid
+                              and scene.layer_by_uid(active_uid) is not None
+                              else None)
     raw_tiles = payload.get("tile_layer")
     if raw_tiles:
         from georef.tiles import TileLayer
@@ -703,6 +718,9 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
                          for r in payload.get("saved_views", [])]
     for _view in scene.saved_views:      # names-only (older) views go by uid
         _view.bind_layers(scene)
+    active_name = payload.get("active_view")
+    scene.active_view = next((v for v in scene.saved_views
+                              if active_name and v.name == active_name), None)
     from core.composition import Composicion
     scene.compositions = []
     for r in payload.get("compositions", []):

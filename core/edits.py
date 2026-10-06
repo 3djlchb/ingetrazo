@@ -46,12 +46,18 @@ from core.topology import (
 
 Segment = tuple[QVector3D, QVector3D]
 
+#: ``layer`` default of the planners: the scene's active layer. Pass a name
+#: (or ``None`` = the default layer) when the segments are a COPY that keeps
+#: its source's layer instead of new drawing.
+ACTIVE = object()
+
 
 def plan_edge_commands(
     scene,
     segments: Sequence[Segment],
     detect_faces: bool = True,
     eye=None,
+    layer=ACTIVE,
 ) -> list[Command]:
     """Build the ordered command list to add ``segments`` to ``scene``.
 
@@ -60,9 +66,14 @@ def plan_edge_commands(
     Returns a flat list (callers wrap it, possibly alongside their own
     commands such as a tool-managed face, in a single ``CompoundCommand``).
     """
+    from core.layers import active_layer_tag
     commands: list[Command] = []
     simulated: list[Edge] = list(scene.edges)
     faces_snapshot: list[Face] = list(scene.faces)
+    # The active layer: what the drawn segments (and the faces they close)
+    # are created on. The pieces of an existing edge they split keep THAT
+    # edge's layer instead — a split is not new geometry.
+    tag = active_layer_tag(scene) if layer is ACTIVE else layer
 
     for a, b in segments:
         new_segments, edge_cuts = plan_edge_split(simulated, a, b)
@@ -78,11 +89,15 @@ def plan_edge_commands(
             # circle leaves its pieces selectable as the same curve entity.
             e_soft = getattr(edge, "soft", False) or None
             e_curve = getattr(edge, "curve", None)
+            e_layer = getattr(edge, "layer", None)
             for sa, sb in ((edge.a, point), (point, edge.b)):
                 if find_duplicate_edge(simulated, sa, sb) is None:
                     commands.append(
-                        AddEdgeCommand(sa, sb, soft=e_soft, curve=e_curve))
-                    simulated.append(Edge(sa, sb))
+                        AddEdgeCommand(sa, sb, soft=e_soft, curve=e_curve,
+                                       layer=e_layer))
+                    piece = Edge(sa, sb)
+                    piece.layer = e_layer
+                    simulated.append(piece)
 
             # Carry the split into faces sharing this edge — but not the face
             # the drawn segment chord-splits, which inserts the point itself.
@@ -124,16 +139,20 @@ def plan_edge_commands(
             # Always emit the add: AddEdgeCommand welds, so a duplicate is a
             # no-op, but face detection below must still run (drawing over an
             # existing edge can still close a new face).
-            commands.append(AddEdgeCommand(sa, sb))
+            commands.append(AddEdgeCommand(sa, sb, layer=tag))
             if already is None:
-                simulated.append(Edge(sa, sb))
+                planned = Edge(sa, sb)
+                planned.layer = tag      # a later segment may split it
+                simulated.append(planned)
             if detect_faces:
-                _plan_faces(commands, faces_snapshot, simulated, sa, sb, eye)
+                _plan_faces(commands, faces_snapshot, simulated, sa, sb, eye,
+                            layer=tag)
 
     return commands
 
 
-def _plan_faces(commands, faces_snapshot, simulated, sa, sb, eye=None) -> None:
+def _plan_faces(commands, faces_snapshot, simulated, sa, sb, eye=None,
+                layer=None) -> None:
     """Emit the face commands for a freshly added edge ``sa``–``sb``.
 
     Two paths, mutually exclusive:
@@ -166,8 +185,11 @@ def _plan_faces(commands, faces_snapshot, simulated, sa, sb, eye=None) -> None:
     for cycle in find_cycles_through(simulated, sa, sb):
         if is_planar(cycle) and not face_exists(faces_snapshot, cycle):
             cycle = face_up_or_toward(cycle, eye)
-            commands.append(AddFaceCommand(cycle))
-            faces_snapshot.append(Face(list(cycle)))
+            # A face the drawing closes is new: it goes on the active layer
+            # (chord halves above keep their mother's, layer included).
+            attrs = {"layer": layer} if layer else None
+            commands.append(AddFaceCommand(cycle, attrs=attrs))
+            faces_snapshot.append(Face(list(cycle), attrs=attrs))
 
 
 def _scene_has_curves(scene) -> bool:
@@ -275,6 +297,20 @@ def _append_face_plane_rebuild(scene, commands, points) -> None:
             return
 
 
+def _on_active_layer(scene, extra) -> list:
+    """The tool-managed ``extra`` commands, with the faces they create put
+    on the active layer (the rectangle's or circle's own face) — unless the
+    tool already said which layer."""
+    from core.layers import active_layer_tag
+    extra = list(extra)
+    tag = active_layer_tag(scene)
+    if tag:
+        for c in extra:
+            if isinstance(c, AddFaceCommand) and "layer" not in (c.attrs or {}):
+                c.attrs = dict(c.attrs or {}, layer=tag)
+    return extra
+
+
 def _append_active_tag(scene, commands) -> None:
     """Tag-as-you-draw: when the BIM active class is set, append the step that
     stamps it on the plan's own drawn faces. Inserted BEFORE the plane
@@ -355,13 +391,15 @@ def build_add_edges(
     detect_faces: bool = True,
     extra: Iterable[Command] = (),
     eye=None,
+    layer=ACTIVE,
 ) -> Command:
     """Batch convenience: many drawn edges (+ optional ``extra`` commands such
     as a tool-managed face) → one atomic command. ``eye`` (the camera's
     position) decides which way a new vertical face looks."""
     commands = plan_edge_commands(scene, segments, detect_faces=detect_faces,
-                                  eye=eye)
-    commands.extend(extra)
+                                  eye=eye, layer=layer)
+    commands.extend(_on_active_layer(scene, extra) if layer is ACTIVE
+                    else extra)
     _append_active_tag(scene, commands)
     _append_flat_curve_rebuild(
         scene, commands, [p for seg in segments for p in seg])

@@ -87,6 +87,26 @@ def layer_of(entity) -> str:
     return getattr(entity, "layer", None) or DEFAULT_LAYER
 
 
+def active_layer(scene) -> str:
+    """The name of the layer new geometry is drawn on: the one
+    ``scene.active_layer_uid`` points at, or the default layer when it is
+    unset or that layer is gone (deleted, purged)."""
+    uid = getattr(scene, "active_layer_uid", None)
+    if uid:
+        find = getattr(scene, "layer_by_uid", None)
+        ly = find(uid) if find is not None else None
+        if ly is not None:
+            return ly.name
+    return DEFAULT_LAYER
+
+
+def active_layer_tag(scene):
+    """The value a new entity's layer label takes: the active layer's name,
+    or ``None`` when it is the default (unlabelled = default layer)."""
+    name = active_layer(scene)
+    return None if name == DEFAULT_LAYER else name
+
+
 def assign_layer(entity, name: str) -> None:
     """Label an entity with a layer (default name clears the label)."""
     value = None if name == DEFAULT_LAYER else name

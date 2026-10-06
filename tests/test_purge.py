@@ -193,7 +193,7 @@ def _window():
 def _row(tree, name):
     from PySide6.QtCore import Qt
     return next(tree.topLevelItem(i) for i in range(tree.topLevelItemCount())
-                if tree.topLevelItem(i).data(0, Qt.UserRole) == name)
+                if tree.topLevelItem(i).data(1, Qt.UserRole) == name)
 
 
 def test_deleting_a_layer_reassigns_faces_INSIDE_groups():

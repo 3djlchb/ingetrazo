@@ -3290,6 +3290,78 @@ class _NoEditDelegate(QStyledItemDelegate):
         return None
 
 
+#: Item role holding whether a row is the active one (its dot is filled).
+ACTIVE_ROLE = Qt.UserRole + 1
+#: The dot of the active row.
+ACTIVE_DOT_COLOR = QColor(47, 125, 225)
+
+
+class _ActiveDotDelegate(QStyledItemDelegate):
+    """The «Active» column of Layers and Scenes: a small circle, filled blue
+    on the active row and an empty ring on the others. Never edits — a click
+    on it is what activates the row (the panels listen to ``itemClicked``)."""
+
+    RADIUS = 5.0
+
+    def createEditor(self, parent, option, index):
+        return None
+
+    def paint(self, painter, option, index):
+        from PySide6.QtCore import QPointF
+        from PySide6.QtGui import QPen
+        # The row's background and selection highlight, without any text.
+        from PySide6.QtWidgets import QStyleOptionViewItem
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        opt.text = ""
+        widget = opt.widget
+        style = widget.style() if widget is not None else None
+        if style is not None:
+            from PySide6.QtWidgets import QStyle
+            style.drawControl(QStyle.CE_ItemViewItem, opt, painter, widget)
+        active = bool(index.data(ACTIVE_ROLE))
+        r = self.RADIUS
+        c = QPointF(option.rect.center())
+        painter.save()
+        painter.setRenderHint(painter.RenderHint.Antialiasing, True)
+        if active:
+            painter.setPen(QPen(ACTIVE_DOT_COLOR, 1.4))
+            painter.setBrush(ACTIVE_DOT_COLOR)
+        else:
+            ring = QColor(option.palette.text().color())
+            ring.setAlphaF(0.45)
+            painter.setPen(QPen(ring, 1.2))
+            painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(c, r, r)
+        painter.restore()
+
+    def sizeHint(self, option, index):
+        return QSize(int(self.RADIUS * 2 + 12), int(self.RADIUS * 2 + 6))
+
+
+def _mark_active(tree, is_active, on_tip: str, off_tip: str) -> None:
+    """Refill the dots of ``tree`` in place — no rebuild, so it is safe from
+    inside the click that changed the active row. ``is_active(item)``."""
+    blocked = tree.blockSignals(True)
+    try:
+        for i in range(tree.topLevelItemCount()):
+            item = tree.topLevelItem(i)
+            on = bool(is_active(item))
+            item.setData(0, ACTIVE_ROLE, on)
+            item.setToolTip(0, on_tip if on else off_tip)
+    finally:
+        tree.blockSignals(blocked)
+    tree.viewport().update()
+
+
+def _active_column(tree) -> None:
+    """Set up column 0 of ``tree`` as the «Active» dot column."""
+    tree._active_dot = _ActiveDotDelegate(tree)
+    tree.setItemDelegateForColumn(0, tree._active_dot)
+    tree.setColumnWidth(0, 52)
+    tree.headerItem().setTextAlignment(0, Qt.AlignCenter)
+
+
 class LayersPanel(QWidget):
     """Layers / tags (Fase 6): one row per layer with visibility and lock
     checkboxes; buttons to add / remove layers and to move the current
@@ -3306,11 +3378,19 @@ class LayersPanel(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 6, 8, 8)
         self.tree = QTreeWidget()
-        self.tree.setColumnCount(3)
-        self.tree.setHeaderLabels([tr("Name"), tr("Visible"), tr("Lock")])
+        self.tree.setColumnCount(4)
+        self.tree.setHeaderLabels([tr("Active"), tr("Name"), tr("Visible"),
+                                   tr("Lock")])
         self.tree.setRootIsDecorated(False)
-        self.tree.setColumnWidth(0, 120)
-        self.tree.setColumnWidth(1, 52)
+        # Column 0: the active layer's dot — click a dot to draw on that
+        # layer (nothing ever told you which layer new geometry went to).
+        _active_column(self.tree)
+        self.tree.headerItem().setToolTip(
+            0, tr("The active layer: new lines, faces, groups and "
+                  "annotations are drawn on it. Click a dot to change it."))
+        self.tree.setColumnWidth(1, 120)
+        self.tree.setColumnWidth(2, 52)
+        self.tree.itemClicked.connect(self._on_item_clicked)
         # Rename the way Windows renames a file: click a row, pause, click
         # it again (F2 and double-click work too). Typing a letter does NOT
         # start an edit, as it would by default.
@@ -3319,8 +3399,8 @@ class LayersPanel(QWidget):
                                   | QAbstractItemView.EditKeyPressed
                                   | QAbstractItemView.SelectedClicked)
         self._no_edit = _NoEditDelegate(self.tree)
-        self.tree.setItemDelegateForColumn(1, self._no_edit)
         self.tree.setItemDelegateForColumn(2, self._no_edit)
+        self.tree.setItemDelegateForColumn(3, self._no_edit)
         self.tree.itemChanged.connect(self._on_item_changed)
         lay.addWidget(self.tree)
         row = QHBoxLayout()
@@ -3355,20 +3435,25 @@ class LayersPanel(QWidget):
     # ---- Model → view --------------------------------------------------------
     def refresh(self) -> None:
         from PySide6.QtWidgets import QAbstractItemView, QTreeWidgetItem
-        from core.layers import DEFAULT_LAYER
+        from core.layers import DEFAULT_LAYER, active_layer
         if self.tree.state() == QAbstractItemView.EditingState:
             return                      # a rename in progress: leave it be
         self._updating = True
         self.tree.clear()
-        for ly in self._window.viewport.scene.layers:
-            item = QTreeWidgetItem([ly.name, "", ""])
-            item.setData(0, Qt.UserRole, ly.name)
+        scene = self._window.viewport.scene
+        active = active_layer(scene)
+        for ly in scene.layers:
+            item = QTreeWidgetItem(["", ly.name, "", ""])
+            item.setData(1, Qt.UserRole, ly.name)
+            item.setData(0, ACTIVE_ROLE, ly.name == active)
+            item.setToolTip(0, tr("Active layer") if ly.name == active
+                            else tr("Click to draw on this layer"))
             flags = item.flags() | Qt.ItemIsUserCheckable
             if ly.name != DEFAULT_LAYER:
                 flags |= Qt.ItemIsEditable
             item.setFlags(flags)
-            item.setCheckState(1, Qt.Checked if ly.visible else Qt.Unchecked)
-            item.setCheckState(2, Qt.Checked if ly.locked else Qt.Unchecked)
+            item.setCheckState(2, Qt.Checked if ly.visible else Qt.Unchecked)
+            item.setCheckState(3, Qt.Checked if ly.locked else Qt.Unchecked)
             self.tree.addTopLevelItem(item)
         fit_rows(self.tree, max_rows=12)
         self._updating = False
@@ -3381,16 +3466,16 @@ class LayersPanel(QWidget):
         if self._updating:
             return
         scene = self._scene()
-        old_name = item.data(0, Qt.UserRole)
+        old_name = item.data(1, Qt.UserRole)
         ly = scene.layer(old_name)
         if ly is None:
             return
-        if column == 0:
-            new_name = item.text(0).strip()
+        if column == 1:
+            new_name = item.text(1).strip()
             if new_name and new_name != old_name:
                 if scene.layer(new_name) is None:
                     self._rename(ly, old_name, new_name)
-                    item.setData(0, Qt.UserRole, new_name)  # the row's key
+                    item.setData(1, Qt.UserRole, new_name)  # the row's key
                 else:
                     self._window.statusBar().showMessage(
                         tr("A layer named '{name}' already exists",
@@ -3398,16 +3483,65 @@ class LayersPanel(QWidget):
             # Show the name the layer really has (an empty or repeated
             # entry goes back to what it was).
             self._updating = True
-            item.setText(0, ly.name)
+            item.setText(1, ly.name)
             self._updating = False
             self.refresh()
             self._touch()
             return
-        ly.visible = item.checkState(1) == Qt.Checked
-        ly.locked = item.checkState(2) == Qt.Checked
+        if column not in (2, 3):
+            return
+        visible = item.checkState(2) == Qt.Checked
+        locked = item.checkState(3) == Qt.Checked
+        from core.layers import active_layer
+        if ly.name == active_layer(scene) and (not visible or locked):
+            # What you draw lands on the active layer: hidden or locked, it
+            # would vanish or be unpickable the moment it is drawn.
+            self._updating = True
+            item.setCheckState(2, Qt.Checked if ly.visible else Qt.Unchecked)
+            item.setCheckState(3, Qt.Checked if ly.locked else Qt.Unchecked)
+            self._updating = False
+            self._window.statusBar().showMessage(
+                tr("The active layer cannot be hidden or locked — make "
+                   "another layer active first"), 4000)
+            return
+        ly.visible = visible
+        ly.locked = locked
         if not ly.visible or ly.locked:
             self._prune_selection(ly.name)
         self._touch()
+
+    def _on_item_clicked(self, item, column) -> None:
+        """A click on a row's dot makes that layer the active one."""
+        if column == 0:
+            self.set_active(item.data(1, Qt.UserRole), from_click=True)
+
+    def set_active(self, name: str, from_click: bool = False) -> None:
+        """Make ``name`` the active layer. A hidden or locked layer is shown
+        and unlocked first: what you draw has to stay in sight."""
+        from core.layers import DEFAULT_LAYER_UID
+        scene = self._scene()
+        ly = scene.layer(name)
+        if ly is None:
+            return
+        shown = ly.visible and not ly.locked
+        ly.visible = True
+        ly.locked = False
+        scene.active_layer_uid = (None if ly.uid == DEFAULT_LAYER_UID
+                                  else ly.uid)
+        if shown:
+            _mark_active(self.tree,
+                         lambda it: it.data(1, Qt.UserRole) == ly.name,
+                         tr("Active layer"), tr("Click to draw on this layer"))
+        elif from_click:
+            # Its check boxes changed too: rebuild — after the click that
+            # brought us here has finished with the row it was on.
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, self.refresh)
+        else:
+            self.refresh()
+        self._touch()
+        self._window.statusBar().showMessage(
+            tr("Active layer: {name}", name=ly.name), 2500)
 
     def _rename(self, ly, old_name: str, new_name: str) -> None:
         """Rename a layer and everything that carries or names it — the
@@ -3442,7 +3576,7 @@ class LayersPanel(QWidget):
                 tr("The default layer cannot be renamed"), 3000)
             return
         self.tree.setFocus()
-        self.tree.editItem(item, 0)
+        self.tree.editItem(item, 1)
 
     def _prune_selection(self, name: str) -> None:
         from core.layers import layer_of
@@ -3459,9 +3593,20 @@ class LayersPanel(QWidget):
         n = 1
         while scene.layer(f"{base} {n}") is not None:
             n += 1
-        scene.layers.append(Layer(f"{base} {n}"))
+        layer = Layer(f"{base} {n}")
+        scene.layers.append(layer)
+        # A layer is made to be drawn on: the new one becomes the active
+        # layer (and the highlighted row, so Rename / Assign act on it).
+        scene.active_layer_uid = layer.uid
         self.refresh()
+        for i in range(self.tree.topLevelItemCount()):
+            item = self.tree.topLevelItem(i)
+            if item.data(1, Qt.UserRole) == layer.name:
+                self.tree.setCurrentItem(item, 1)
+                break
         self._touch()
+        self._window.statusBar().showMessage(
+            tr("Active layer: {name}", name=layer.name), 2500)
 
     def _on_delete(self) -> None:
         from core.layers import DEFAULT_LAYER, layer_of, assign_layer
@@ -3469,7 +3614,7 @@ class LayersPanel(QWidget):
         item = self.tree.currentItem()
         if item is None:
             return
-        name = item.data(0, Qt.UserRole)
+        name = item.data(1, Qt.UserRole)
         if name == DEFAULT_LAYER:
             return                                  # the default is permanent
         ly = scene.layer(name)
@@ -3491,6 +3636,8 @@ class LayersPanel(QWidget):
             if layer_of(ent) == name:
                 assign_layer(ent, DEFAULT_LAYER)
         scene.layers.remove(ly)
+        if scene.active_layer_uid == ly.uid:
+            scene.active_layer_uid = None           # back to the default
         self.refresh()
         self._touch()
 
@@ -3533,7 +3680,7 @@ class LayersPanel(QWidget):
             self._window.statusBar().showMessage(
                 tr("Click a layer in the list first, then Assign."), 3000)
             return
-        name = item.data(0, Qt.UserRole)
+        name = item.data(1, Qt.UserRole)
         # Annotations are tagged too: a "Anotaciones" layer a
         # scene hides gives a clean plan without duplicating the model.
         targets = [ent for ent in scene.selection
@@ -3566,7 +3713,7 @@ class ScenesPanel(QWidget):
     def __init__(self, window) -> None:
         super().__init__()
         from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel,
-                                       QListWidget, QPushButton, QVBoxLayout)
+                                       QPushButton, QTreeWidget, QVBoxLayout)
         self._window = window
         self._updating = False
         lay = QVBoxLayout(self)
@@ -3574,23 +3721,31 @@ class ScenesPanel(QWidget):
         hint = QLabel(tr("Double-click a scene to show it"))
         hint.setStyleSheet("color: gray;")
         lay.addWidget(hint)
-        self.list = QListWidget()
+        # Two columns, like Layers: the active scene's dot, then the name.
+        self.tree = QTreeWidget()
+        self.tree.setColumnCount(2)
+        self.tree.setHeaderLabels([tr("Active"), tr("Name")])
+        self.tree.setRootIsDecorated(False)
+        _active_column(self.tree)
+        self.tree.headerItem().setToolTip(
+            0, tr("The scene last shown. Click a dot to show that scene."))
         # Double-click already SHOWS the scene, so it must not also open the
         # name editor (the two fought: the scene change refreshed the list
         # and killed the editor). Rename = F2, the Rename button, or — as
         # renaming a file in Windows — a click, a pause, and a second click
         # on the row already selected (a quick double-click cancels that).
-        self.list.setEditTriggers(QAbstractItemView.EditKeyPressed
+        self.tree.setEditTriggers(QAbstractItemView.EditKeyPressed
                                   | QAbstractItemView.SelectedClicked)
-        self.list.itemDoubleClicked.connect(self._on_activate)
-        self.list.itemChanged.connect(self._on_item_changed)
-        lay.addWidget(self.list)
+        self.tree.itemDoubleClicked.connect(self._on_activate)
+        self.tree.itemClicked.connect(self._on_item_clicked)
+        self.tree.itemChanged.connect(self._on_item_changed)
+        lay.addWidget(self.tree)
         row = QHBoxLayout()
         add_btn = QPushButton(tr("+ Scene"))
         add_btn.setToolTip(tr("Save the current view and layer visibility"))
         add_btn.clicked.connect(self._on_add)
         upd_btn = QPushButton(tr("Update"))
-        upd_btn.setToolTip(tr("Update the selected scene from the current view"))
+        upd_btn.setToolTip(tr("Update the active scene from the current view"))
         upd_btn.clicked.connect(self._on_update)
         ren_btn = QPushButton(tr("Rename"))
         ren_btn.setToolTip(tr("Rename the selected scene (or press F2)"))
@@ -3611,26 +3766,39 @@ class ScenesPanel(QWidget):
 
     # ---- Model → view --------------------------------------------------------
     def refresh(self) -> None:
-        from PySide6.QtWidgets import QAbstractItemView, QListWidgetItem
-        if self.list.state() == QAbstractItemView.EditingState:
+        from PySide6.QtWidgets import QAbstractItemView, QTreeWidgetItem
+        if self.tree.state() == QAbstractItemView.EditingState:
             return                      # a rename in progress: leave it be
         self._updating = True
-        self.list.clear()
-        for view in self._scene().saved_views:
-            item = QListWidgetItem(view.name)
-            item.setData(Qt.UserRole, view)
+        self.tree.clear()
+        scene = self._scene()
+        active = getattr(scene, "active_view", None)
+        for view in scene.saved_views:
+            item = QTreeWidgetItem(["", view.name])
+            item.setData(1, Qt.UserRole, view)
+            item.setData(0, ACTIVE_ROLE, view is active)
+            item.setToolTip(0, tr("Active scene") if view is active
+                            else tr("Click to show this scene"))
             item.setFlags(item.flags() | Qt.ItemIsEditable)
-            self.list.addItem(item)
-        fit_rows(self.list)
+            self.tree.addTopLevelItem(item)
+        fit_rows(self.tree)
         self._updating = False
 
     # ---- View → model --------------------------------------------------------
-    def _on_activate(self, item) -> None:
-        view = item.data(Qt.UserRole)
+    def _on_item_clicked(self, item, column) -> None:
+        """A click on a row's dot shows that scene (as a double-click)."""
+        if column == 0:
+            self._on_activate(item)
+
+    def _on_activate(self, item, _column=None) -> None:
+        view = item.data(1, Qt.UserRole)
         if view is None:
             return
         scene = self._scene()
         view.apply(scene, self._window.viewport.camera)
+        scene.active_view = view
+        _mark_active(self.tree, lambda it: it.data(1, Qt.UserRole) is view,
+                     tr("Active scene"), tr("Click to show this scene"))
         # The view may carry a style snapshot — keep the menu in step.
         sync = getattr(self._window, "_sync_style_menu", None)
         if sync is not None:
@@ -3647,14 +3815,14 @@ class ScenesPanel(QWidget):
         self._window.statusBar().showMessage(
             tr("Scene '{name}'", name=view.name), 2000)
 
-    def _on_item_changed(self, item) -> None:
-        if self._updating:
+    def _on_item_changed(self, item, column=1) -> None:
+        if self._updating or column != 1:
             return
-        view = item.data(Qt.UserRole)
+        view = item.data(1, Qt.UserRole)
         if view is None:
             return
         scene = self._scene()
-        new_name = item.text().strip()
+        new_name = item.text(1).strip()
         if new_name and new_name != view.name:
             if any(v is not view and v.name == new_name
                    for v in scene.saved_views):
@@ -3669,7 +3837,7 @@ class ScenesPanel(QWidget):
         # Show the name the scene really has (an empty or repeated entry
         # goes back to what it was).
         self._updating = True
-        item.setText(view.name)
+        item.setText(1, view.name)
         self._updating = False
 
     def _rename(self, view, new_name: str) -> None:
@@ -3685,11 +3853,11 @@ class ScenesPanel(QWidget):
     def _on_rename(self) -> None:
         """The Rename button: edit the name of the scene that has the focus
         (the highlighted row) in place."""
-        item = self.list.currentItem()
+        item = self.tree.currentItem()
         if item is None:
             return
-        self.list.setFocus()
-        self.list.editItem(item)
+        self.tree.setFocus()
+        self.tree.editItem(item, 1)
 
     def _on_add(self) -> None:
         from core.saved_views import SavedView
@@ -3699,29 +3867,44 @@ class ScenesPanel(QWidget):
         taken = {v.name for v in scene.saved_views}
         while f"{base} {n}" in taken:
             n += 1
-        scene.saved_views.append(SavedView.capture(
-            f"{base} {n}", scene, self._window.viewport.camera))
+        view = SavedView.capture(f"{base} {n}", scene,
+                                 self._window.viewport.camera)
+        scene.saved_views.append(view)
+        scene.active_view = view        # it is what you are looking at
         self.refresh()
         self._touch()
 
     def _on_update(self) -> None:
-        item = self.list.currentItem()
-        view = item.data(Qt.UserRole) if item is not None else None
+        """Write the current view into the ACTIVE scene — the one the
+        viewport's label names (or reads «No scene» for, once you have
+        moved away from it). With no scene active, the highlighted row."""
+        scene = self._scene()
+        view = getattr(scene, "active_view", None)
+        if view is None or view not in scene.saved_views:
+            item = self.tree.currentItem()
+            view = item.data(1, Qt.UserRole) if item is not None else None
         if view is None:
+            self._window.statusBar().showMessage(
+                tr("Show a scene (or pick one in the list) to update it"),
+                3000)
             return
-        view.recapture(self._scene(), self._window.viewport.camera)
+        view.recapture(scene, self._window.viewport.camera)
+        scene.active_view = view           # it now IS the current view
+        self.refresh()
         self._touch()
         self._window.statusBar().showMessage(
             tr("Scene '{name}' updated", name=view.name), 2000)
 
     def _on_delete(self) -> None:
-        item = self.list.currentItem()
-        view = item.data(Qt.UserRole) if item is not None else None
+        item = self.tree.currentItem()
+        view = item.data(1, Qt.UserRole) if item is not None else None
         if view is None:
             return
         scene = self._scene()
         if view in scene.saved_views:
             scene.saved_views.remove(view)
+        if getattr(scene, "active_view", None) is view:
+            scene.active_view = None
         self.refresh()
         self._touch()
 

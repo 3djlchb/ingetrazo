@@ -74,6 +74,14 @@ class Scene:
     # Saved views ("Scenes"): named camera + layer-visibility
     # snapshots (core.saved_views.SavedView). Presentation state, no geometry.
     saved_views: list = field(default_factory=list)
+    # The scene last shown (double-click, its dot in the Scenes panel, or
+    # «+ Scene»): one of ``saved_views`` or ``None``. Named in the viewport's
+    # top-left label and saved with the document.
+    active_view: object | None = None
+    # The ACTIVE layer, by uid (it survives a rename): what new geometry,
+    # groups and annotations are drawn on. ``None`` = the default layer.
+    # Resolve it with :func:`core.layers.active_layer`.
+    active_layer_uid: str | None = None
     # Sheet compositions (core.composition.Composicion) — the print layouts.
     compositions: list = field(default_factory=list)
     # Scales (1:N) typed by the user in the composer beyond the common
@@ -554,6 +562,8 @@ class Scene:
 
     def clear(self) -> None:
         self.end_group_edit()
+        self.active_view = None
+        self.active_layer_uid = None
         if (self.mesh.edges or self.mesh.faces or self.selection
                 or self.groups or self.dimensions or self.georef
                 or self.tile_layer or self.geo_paths or self.terrain

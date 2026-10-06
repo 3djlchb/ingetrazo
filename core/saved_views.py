@@ -140,6 +140,27 @@ class SavedView:
         fresh = SavedView.capture(self.name, scene, camera)
         self.__dict__.update(fresh.__dict__)
 
+    def matches_camera(self, camera) -> bool:
+        """True while ``camera`` still stands where this view put it: same
+        target, distance, direction, lens and projection (within float
+        noise). An orbit, pan or zoom away from the scene makes it False —
+        what the viewport's «No scene» label reports."""
+        import math
+        if (bool(camera.perspective) != self.perspective
+                or bool(getattr(camera, "two_point", False)) != self.two_point):
+            return False
+        scale = max(abs(self.distance), 1.0)
+        t = camera.target
+        if max(abs(t.x() - self.target[0]), abs(t.y() - self.target[1]),
+               abs(t.z() - self.target[2])) > 1e-4 * scale:
+            return False
+        if abs(camera.distance - self.distance) > 1e-4 * scale:
+            return False
+        dyaw = (camera.yaw - self.yaw + math.pi) % (2.0 * math.pi) - math.pi
+        if abs(dyaw) > 1e-5 or abs(camera.pitch - self.pitch) > 1e-5:
+            return False
+        return abs(camera.fov_deg - self.fov_deg) <= 1e-4
+
     def apply(self, scene, camera) -> None:
         """Recall the view: camera first, then the layer-visibility state.
         The caller bumps ``scene.version`` / repaints (tray convention)."""

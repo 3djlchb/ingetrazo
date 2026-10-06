@@ -1244,13 +1244,18 @@ class PushPullTool(Tool):
         # tagged solid). Capture before the mutation — the base is consumed.
         base_tag = None
         base_paint = None
+        # The base's layer goes to the walls and cap too: the solid a push
+        # raises from a face on «Muros» is all on «Muros», whatever layer is
+        # active (the walls used to land on the default layer).
+        base_layer = None
         if self.base_face is not None:
             t = self.base_face.attrs.get("ifc")
             if t:
                 base_tag = dict(t)
             base_paint = _paint_of(self.base_face)
-        before_verts = ({id(v) for v in mesh.vertices}
-                        if base_tag is not None or base_paint else None)
+            base_layer = self.base_face.attrs.get("layer") or None
+        inherit = base_tag is not None or bool(base_paint) or bool(base_layer)
+        before_verts = {id(v) for v in mesh.vertices} if inherit else None
         guard = (mesh.capture_state()
                  if is_closed(mesh) and not _mesh_is_flat(mesh) else None)
         fp_before = self._mesh_fingerprint(mesh) if guard is not None else None
@@ -1267,7 +1272,7 @@ class PushPullTool(Tool):
             self._refused = True
             return
         self._soften_curve_facets(mesh, before_edges)
-        if base_tag is not None or base_paint:
+        if inherit:
             # Only faces carrying at least one vertex this push created — the
             # extrusion's own walls/cap. Rebuilt neighbours (an untagged floor
             # plane re-emitted over its OLD vertices) are never touched, and a
@@ -1279,14 +1284,22 @@ class PushPullTool(Tool):
             # a face is fresh exactly when it holds one, so the pass costs the
             # push rather than the mesh.
             fresh: set = set()
+            fresh_edges: set = set()
             for v in mesh.vertices:
                 if id(v) not in before_verts:
                     fresh.update(v.faces())
+                    if base_layer:
+                        fresh_edges.update(v.edges)
             for f in fresh:
                 if base_tag is not None and not f.attrs.get("ifc"):
                     f.attrs["ifc"] = dict(base_tag)
                 if base_paint and not any(k in f.attrs for k in PAINT_KEYS):
                     f.attrs.update(base_paint)
+                if base_layer and not f.attrs.get("layer"):
+                    f.attrs["layer"] = base_layer
+            for e in fresh_edges:
+                if e.layer is None:
+                    e.layer = base_layer
 
     @staticmethod
     def _mesh_fingerprint(mesh):

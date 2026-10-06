@@ -149,7 +149,7 @@ def test_layers_panel_assign_button_speaks_and_undoes():
         assert "layer" in win.statusBar().currentMessage().lower()
         # highlight Muros, nothing selected in the model: says so too
         item = [panel.tree.topLevelItem(i) for i in range(panel.tree.topLevelItemCount())
-                if panel.tree.topLevelItem(i).text(0) == "Muros"][0]
+                if panel.tree.topLevelItem(i).text(1) == "Muros"][0]
         panel.tree.setCurrentItem(item)
         scene.clear_selection()
         panel._on_assign()

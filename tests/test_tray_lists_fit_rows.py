@@ -16,7 +16,7 @@ def test_layers_and_scenes_lists_grow_with_their_rows():
     win = MainWindow()
     try:
         tray = win.tray
-        for v in (tray.layers.tree, tray.scenes.list, tray.components._in_model):
+        for v in (tray.layers.tree, tray.scenes.tree, tray.components._in_model):
             assert v.verticalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
         h0 = tray.layers.tree.height()
         scene = win.viewport.scene
@@ -25,8 +25,8 @@ def test_layers_and_scenes_lists_grow_with_their_rows():
         tray.layers.refresh()
         assert tray.layers.tree.height() > h0
         assert tray.layers.tree.height() >= 9 * tray.layers.tree.sizeHintForRow(0)
-        h_empty = tray.scenes.list.height()
-        assert h_empty >= 3 * (tray.scenes.list.fontMetrics().height())  # min rows
+        h_empty = tray.scenes.tree.height()
+        assert h_empty >= 3 * (tray.scenes.tree.fontMetrics().height())  # min rows
     finally:
         win._saved_version = win.viewport.scene.version
         win.close()

@@ -711,20 +711,25 @@ class MoveTool(Tool):
                 for e in edges:
                     curve = getattr(e, "curve", None)
                     soft = getattr(e, "soft", False)
+                    layer = getattr(e, "layer", None)
                     if (scene is not None and curve is None and not soft
-                            and not _bounds_a_face(e)):
+                            and layer is None and not _bounds_a_face(e)):
                         plain.append((e.a + d, e.b + d))
                         continue
-                    # Soft edges and curves keep their flags on the copy.
+                    # Soft edges and curves keep their flags on the copy,
+                    # and every copy keeps its source's layer.
                     if curve is not None and curve not in id_map:
                         id_map[curve] = Mesh.next_curve_id()
                     cmds.append(AddEdgeCommand(
                         e.a + d, e.b + d,
                         soft=soft or None,
-                        curve=id_map.get(curve)))
+                        curve=id_map.get(curve), layer=layer))
             if plain:
+                # Copies of default-layer edges: they stay on the default
+                # layer, whatever layer is active (a copy is not drawing).
                 from core.edits import build_add_edges
-                cmds.append(build_add_edges(scene, plain, detect_faces=True))
+                cmds.append(build_add_edges(scene, plain, detect_faces=True,
+                                            layer=None))
             if not cmds:
                 return None
             return cmds[0] if len(cmds) == 1 else CompoundCommand(cmds)

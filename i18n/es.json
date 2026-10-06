@@ -2463,5 +2463,18 @@
  "A scene named '{name}' already exists": "Ya existe una escena llamada '{name}'",
  "Rename the selected layer (or press F2)": "Renombra la capa seleccionada (o pulsa F2)",
  "A layer named '{name}' already exists": "Ya existe una capa llamada '{name}'",
- "The default layer cannot be renamed": "La capa por defecto no se puede renombrar"
+ "The default layer cannot be renamed": "La capa por defecto no se puede renombrar",
+ "Active": "Activa",
+ "Scene:": "Escena:",
+ "Active layer": "Capa activa",
+ "Active scene": "Escena activa",
+ "Click to draw on this layer": "Clic para dibujar en esta capa",
+ "Click to show this scene": "Clic para mostrar esta escena",
+ "Active layer: {name}": "Capa activa: {name}",
+ "The active layer: new lines, faces, groups and annotations are drawn on it. Click a dot to change it.": "La capa activa: las líneas, caras, grupos y anotaciones nuevas se dibujan en ella. Haz clic en un círculo para cambiarla.",
+ "The scene last shown. Click a dot to show that scene.": "La última escena mostrada. Haz clic en un círculo para mostrar esa escena.",
+ "The active layer cannot be hidden or locked — make another layer active first": "La capa activa no se puede ocultar ni bloquear: primero activa otra capa",
+ "No scene": "Sin escena",
+ "Update the active scene from the current view": "Actualizar la escena activa con la vista actual",
+ "Show a scene (or pick one in the list) to update it": "Muestra una escena (o elige una en la lista) para actualizarla"
 }

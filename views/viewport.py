@@ -362,6 +362,15 @@ EDIT_REST_MODES = ("normal", "fade", "hide")
 #: as the subject.
 EDIT_REST_FADE = 0.75
 
+#: The top-left «Scene: <name>» label: a mid grey pill (85 %), the prefix in
+#: white and the scene's name in a light blue that reads on it.
+SCENE_LABEL_BG = QColor(75, 85, 99, 217)
+SCENE_LABEL_PREFIX = QColor(255, 255, 255)
+SCENE_LABEL_NAME = QColor(147, 197, 253)
+#: «No scene» (the view has left the active scene): orange, light enough to
+#: read on the grey pill.
+SCENE_LABEL_NONE = QColor(251, 146, 60)
+
 #: X-ray: how opaque each translucent face layer is. Layers stack, so a face
 #: seen through another reads darker and an opening (no face) stays clear.
 XRAY_FACE_OPACITY = 0.6
@@ -6201,6 +6210,10 @@ class Viewport(QOpenGLWidget):
         # Length measurement near rubber band
         self._draw_length_label(painter)
 
+        # The active scene's name, top-left; the transient labels below
+        # start under it (``_top_left_y``).
+        self._top_left_y = self._draw_active_scene_label(painter)
+
         # Labels in the top-left. Reference > explicit axis lock > soft inference.
         if self.reference_mode is not None:
             self._draw_reference_label(painter)
@@ -6220,6 +6233,67 @@ class Viewport(QOpenGLWidget):
         self._draw_zoom_box(painter)
 
         painter.end()
+
+    def active_scene_label(self):
+        """What the top-left scene label says:
+
+        - ``(«Scene:», name)`` while the camera stands where the active
+          scene put it;
+        - ``(«No scene», None)`` once it has moved away (an orbit, pan or
+          zoom), or when no scene is active — Update then writes the
+          current view into the active scene and the name comes back;
+        - ``None`` (no label) in a document without scenes."""
+        scene = self.scene
+        views = getattr(scene, "saved_views", None) or ()
+        if not views:
+            return None
+        view = getattr(scene, "active_view", None)
+        if view is not None and view in views:
+            match = getattr(view, "matches_camera", None)
+            if match is None or match(self.camera):
+                return tr("Scene:"), view.name
+        return tr("No scene"), None
+
+    def _label_top(self) -> float:
+        """Where the transient top-left labels start: under the scene label
+        when one is showing."""
+        return getattr(self, "_top_left_y", 0.0)
+
+    def _draw_active_scene_label(self, painter: QPainter) -> float:
+        """«Scene: <name>» on a grey pill at the top-left — which scene you
+        are looking at was never said anywhere. Returns the y the next
+        top-left label should start from (0 when there is no label)."""
+        label = self.active_scene_label()
+        if label is None:
+            return 0.0
+        prefix, name = label
+        font = QFont()
+        font.setPointSize(9)
+        font.setBold(True)
+        fm = QFontMetrics(font)
+        pad_x, pad_y, x, y = 10.0, 5.0, 10.0, 10.0
+        gap = fm.horizontalAdvance(" ")
+        w_prefix = fm.horizontalAdvance(prefix)
+        w = pad_x * 2 + w_prefix
+        if name is not None:
+            w += gap + fm.horizontalAdvance(name)
+        h = pad_y * 2 + fm.height()
+        painter.save()
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(SCENE_LABEL_BG)
+        painter.drawRoundedRect(QRectF(x, y, w, h), 6.0, 6.0)
+        painter.setFont(font)
+        base = y + pad_y + fm.ascent()
+        if name is None:                       # off every scene: «No scene»
+            painter.setPen(QPen(SCENE_LABEL_NONE))
+            painter.drawText(QPointF(x + pad_x, base), prefix)
+        else:
+            painter.setPen(QPen(SCENE_LABEL_PREFIX))
+            painter.drawText(QPointF(x + pad_x, base), prefix)
+            painter.setPen(QPen(SCENE_LABEL_NAME))
+            painter.drawText(QPointF(x + pad_x + w_prefix + gap, base), name)
+        painter.restore()
+        return y + h
 
     def _draw_linear_mode_label(self, painter: QPainter) -> None:
         # The mirror image of the bug above: these had the Spanish written
@@ -7403,7 +7477,7 @@ class Viewport(QOpenGLWidget):
         painter.setPen(QPen(label[1]))
         # Through tr(): this read "X axis locked" in English even with the
         # Spanish UI, because an f-string never reaches the catalogue.
-        painter.drawText(QPointF(14, 24),
+        painter.drawText(QPointF(14, 24 + self._label_top()),
                          tr("{axis} axis locked", axis=label[0]))
 
     def _draw_plane_lock_label(self, painter: QPainter) -> None:
@@ -7418,7 +7492,7 @@ class Viewport(QOpenGLWidget):
         font.setBold(True)
         painter.setFont(font)
         painter.setPen(QPen(color))
-        painter.drawText(QPointF(14, 24), tr(
+        painter.drawText(QPointF(14, 24 + self._label_top()), tr(
             "Drawing plane locked: {plane}", plane=PLANE_LOCK_NAMES[axis]))
 
     def _draw_inference_label(self, painter: QPainter) -> None:
@@ -7434,7 +7508,8 @@ class Viewport(QOpenGLWidget):
         font.setItalic(True)
         painter.setFont(font)
         painter.setPen(QPen(QColor.fromRgbF(r, g, b, 0.95)))
-        painter.drawText(QPointF(14, 44), f"On {name} Axis (hold Shift to lock)")
+        painter.drawText(QPointF(14, 44 + self._label_top()),
+                         f"On {name} Axis (hold Shift to lock)")
 
     def _draw_reference_label(self, painter: QPainter) -> None:
         if self.reference_mode is None or self.reference_edge is None:
@@ -7446,7 +7521,8 @@ class Viewport(QOpenGLWidget):
         painter.setFont(font)
         painter.setPen(QPen(QColor.fromRgbF(r, g, b, 1.0)))
         word = "Parallel" if self.reference_mode == "parallel" else "Perpendicular"
-        painter.drawText(QPointF(14, 24), f"{word} to reference edge")
+        painter.drawText(QPointF(14, 24 + self._label_top()),
+                         f"{word} to reference edge")
 
     # ---- Pixel ↔ world ------------------------------------------------------
     def _pixel_to_ray(

@@ -241,7 +241,7 @@ def test_layers_tray_assigns_and_releases_annotations():
         panel.refresh()
         tree = panel.tree
         item = next(tree.topLevelItem(i) for i in range(tree.topLevelItemCount())
-                    if tree.topLevelItem(i).data(0, Qt.UserRole) == "Anotaciones")
+                    if tree.topLevelItem(i).data(1, Qt.UserRole) == "Anotaciones")
         tree.setCurrentItem(item)
         scene.select([dim, lab])
         panel._on_assign()
