@@ -244,3 +244,81 @@ def test_a_boolean_cut_has_real_caps_so_no_fill_is_added(rs):
     obj, _mat = _box()
     rs.apply_section(bpy.context.scene, [obj], _section(True, mode="boolean"))
     assert not rs._FILL["switches"]
+
+
+def test_eevee_gives_every_light_a_sharp_shadow(rs):
+    """EEVEE's default shadow filter blurred the sun's shadow into a faint
+    smudge (the floor of a section lit where Cycles shades it, a speckled
+    glow along its edges): every light gets a narrow filter, a finer map
+    and jitter instead. Cycles is left alone."""
+    scene = bpy.context.scene
+    lights = []
+    for kind in ("SUN", "POINT", "SPOT"):
+        data = bpy.data.lights.new(kind, type=kind)
+        obj = bpy.data.objects.new(kind, data)
+        scene.collection.objects.link(obj)
+        lights.append(data)
+    rs.set_engine(scene, "eevee", 16)
+    for data in lights:
+        for attr, value in rs.EEVEE_SHADOW.items():
+            if hasattr(data, attr):
+                assert getattr(data, attr) == pytest.approx(value)
+
+
+def test_eevee_shadows_get_finer_with_the_quality(rs):
+    """Draft, normal, high: the shadow map gets finer and the shadow rays
+    more as the quality rises (EEVEE only)."""
+    scene = bpy.context.scene
+    data = bpy.data.lights.new("sun", type="SUN")
+    scene.collection.objects.link(bpy.data.objects.new("sun", data))
+    res, rays = [], []
+    for q in (0, 1, 2):
+        rs.set_engine(scene, "eevee", 16, q)
+        res.append(data.shadow_maximum_resolution)
+        rays.append(scene.eevee.shadow_ray_count)
+    assert res[0] > res[1] > res[2]
+    assert rays[0] <= rays[1] <= rays[2] and rays[2] > rays[0]
+
+
+def _ortho_cam(rs, eye, target, half_height=4.0):
+    scene = bpy.context.scene
+    rs.set_camera(scene, {"eye": list(eye), "target": list(target),
+                          "up": [0, 0, 1], "perspective": False,
+                          "fov_deg": 40.0, "half_height": half_height,
+                          "near": 0.05, "far": 10000.0,
+                          "ortho_back": 30.0}, 64, 48)
+    return scene.camera
+
+
+def test_a_parallel_cameras_far_plane_fits_what_it_shows(rs):
+    """The parallel camera reached 10 km and EEVEE spread the sun's shadow
+    over that depth — a straight roof shadow drawn as a staircase. Its far
+    plane now ends just past the model and the ground the frame shows."""
+    _box()
+    rs._GROUND["z"] = 0.0
+    try:
+        cam = _ortho_cam(rs, (14, -14, 12), (2, 2, 2))
+        assert cam.data.clip_end > 10000
+        rs.fit_ortho_clip(bpy.context.scene)
+        assert cam.data.clip_end < 200            # tens of metres, not 10 km
+        # Nothing the frame shows is cut: every corner ray meets the ground
+        # before the far plane.
+        m = cam.matrix_world
+        fwd = -(m.to_3x3() @ Vector((0, 0, 1))).normalized()
+        assert fwd.z < 0
+        # A view whose frame starts under the ground keeps its far plane.
+        cam = _ortho_cam(rs, (14, -14, 0.5), (2, 2, 0.5))
+        before = cam.data.clip_end
+        rs.fit_ortho_clip(bpy.context.scene)
+        assert cam.data.clip_end == before
+    finally:
+        rs._GROUND["z"] = None
+
+
+def test_a_perspective_camera_keeps_its_far_plane(rs):
+    _box()
+    scene = bpy.context.scene
+    rs.set_camera(scene, _cam((14, 2, 2)), 64, 48)
+    before = scene.camera.data.clip_end
+    rs.fit_ortho_clip(scene)
+    assert scene.camera.data.clip_end == before

@@ -34,6 +34,38 @@ follow [SemVer](https://semver.org).
   la esquina.
 
 ### Correcciones
+- **Render con EEVEE: sombras del sol nítidas, sin halo ni grano en los
+  bordes**: con los valores por defecto de EEVEE (filtro de sombra 1,0, sin
+  jitter, mapa de 1 mm) la sombra del sol quedaba tan difuminada que casi
+  desaparecía: el suelo de un corte salía iluminado donde Cycles lo pone en
+  sombra, y a lo largo de sus bordes aparecía un resplandor con grano, en
+  las tres calidades. Ahora cada luz (sol, luna, puntos de luz y focos) usa
+  en EEVEE un filtro estrecho, un mapa de sombras más fino y jitter, y la
+  sombra mejora con la calidad: Borrador, Normal (mapa el doble de fino, 2
+  rayos de sombra) y Alta (mapa 4 veces más fino, 4 rayos, más memoria de
+  sombras). Además, en las **vistas en proyección paralela** la sombra del
+  sol salía en escalones (el borde recto del techo dibujado como una
+  escalera en el suelo): la cámara paralela llegaba a 10 km de profundidad y
+  EEVEE repartía la sombra sobre toda esa distancia. Ahora su plano lejano
+  termina justo después del modelo y del suelo que se ve en el encuadre, y
+  la sombra sale recta y nítida como en Cycles. Cycles no cambia.
+- **Render con Blender: un color RAL ya no se renderiza como metal pulido ni
+  como agua**: el acabado se adivina por el nombre del material, y 29 nombres
+  de la paleta RAL engañaban a esa regla — «Amarillo zinc», «Azul acero»,
+  «Gris hierro», «Pardo cobre» o «Aluminio blanco» salían como metal pulido,
+  «Azul agua» y «Azul océano» como agua, y los «brillante» (luminosos) como
+  barniz. Un muro pintado RAL 1018 reflejaba el entorno como un espejo y
+  dejaba manchas oscuras en las esquinas y degradados en los cantos, en
+  EEVEE y en Cycles. Ahora el acabado automático mira primero la
+  **categoría de la biblioteca** y después el nombre: las categorías de
+  tipo de material lo fijan (Colores/RAL, Ladrillo, Concreto, Piedra,
+  Terreno, Telas, Alfombra, Papel pintado, Cielo y Techos: mate; Madera:
+  satinado; Metal, Vidrio y Agua: lo que son), y en las de uso (Pared,
+  Pisos) decide el nombre pero nunca como agua o vidrio transparente
+  («Swimming pool ceramic» es cerámica brillante, «Woven sea rush» es mate).
+  El material guarda su categoría en el documento (las versiones anteriores
+  la ignoran), y los documentos ya guardados la encuentran por su textura en
+  la biblioteca. Un acabado elegido a mano sigue mandando.
 - **Las texturas de grupos y componentes ya no desaparecen (ni la app se
   cierra) al volver de otra ventana**: cuando Windows recrea el contexto
   OpenGL del visor (al cambiar de ventana o de pantalla, minimizar o si el

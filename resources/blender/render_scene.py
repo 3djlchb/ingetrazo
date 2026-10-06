@@ -187,6 +187,64 @@ def set_camera(scene, cam_cfg, width, height):
     return cam
 
 
+#: The ground's top, once :func:`add_ground` made it (``None``: no ground) —
+#: a serving Blender fits every new parallel camera to it.
+_GROUND = {"z": None}
+
+
+def fit_ortho_clip(scene):
+    """Pull a PARALLEL camera's far plane in to what the picture shows.
+
+    The parallel view has no far plane of its own, so the camera reached
+    10 km — and EEVEE spreads a sun's shadow cascades over that whole
+    depth: every texel of the shadow tens of centimetres wide, a roof's
+    straight shadow drawn as a staircase on the floor, whatever the light's
+    resolution. Cycles never noticed. Here the far plane goes just past
+    the deepest of the model's boxes and of the points where the frame's
+    four corner rays meet the ground — in a parallel view every ray of the
+    frame meets the ground within those, so nothing visible is cut. A view
+    whose frame starts under the ground, or that does not look down, keeps
+    its far plane."""
+    cam = scene.camera
+    if cam is None or cam.data.type != "ORTHO":
+        return
+    basis = cam.matrix_world.to_3x3()
+    pos = cam.matrix_world.translation
+    fwd = -(basis @ Vector((0.0, 0.0, 1.0))).normalized()
+    right = (basis @ Vector((1.0, 0.0, 0.0))).normalized()
+    up = (basis @ Vector((0.0, 1.0, 0.0))).normalized()
+    far = 0.0
+    for obj in scene.objects:
+        if (obj.type != "MESH" or obj.hide_render
+                or obj.name.startswith("IngeTrazo ground")):
+            continue
+        for c in obj.bound_box:
+            far = max(far, (obj.matrix_world @ Vector(c) - pos).dot(fwd))
+    gz = _GROUND["z"]
+    if gz is not None:
+        if fwd.z > -1e-4:
+            return                      # level or upward: the ground runs on
+        r = scene.render
+        aspect = ((r.resolution_x * r.pixel_aspect_x)
+                  / max(r.resolution_y * r.pixel_aspect_y, 1e-9))
+        half_h = cam.data.ortho_scale / 2.0
+        half_w = half_h * aspect
+        if aspect > 1.0 and cam.data.sensor_fit == "AUTO":
+            half_w, half_h = half_h, half_h / aspect
+        # A lens shift moves the frame: widen the window by it.
+        lift = abs(cam.data.shift_y) * cam.data.ortho_scale
+        for sx in (-1.0, 1.0):
+            for sy in (-1.0, 1.0):
+                o = pos + right * (sx * half_w) + up * (sy * (half_h + lift))
+                if o.z <= gz:
+                    return              # the frame starts under the ground
+                far = max(far, (gz - o.z) / fwd.z)
+    if far <= 0.0:
+        return
+    cam.data.clip_end = min(cam.data.clip_end, far * 1.05 + 1.0)
+    say("parallel far plane", round(cam.data.clip_end, 1))
+
+
 def find_figures():
     """The face-me figures: ``(object, feet, heading, matrix as imported)``."""
     out = []
@@ -340,6 +398,7 @@ def add_ground(scene, z, size, color):
     to land on the sky below the horizon — a dark band along the bottom of
     the picture. Inside the slab they meet the ground instead: its inside
     shows the ground colour, flat."""
+    _GROUND["z"] = z
     depth = max(size * 0.25, 100.0)
     bpy.ops.mesh.primitive_cube_add(size=1.0, location=(0.0, 0.0, z - depth / 2))
     ground = bpy.context.active_object
@@ -375,7 +434,60 @@ def set_samples(scene, samples):
         scene.eevee.taa_render_samples = samples
 
 
-def set_engine(scene, engine, samples):
+#: EEVEE shadow settings for every light (Blender 4.2+ «EEVEE Next»). With
+#: the defaults — filter radius 1.0, no jitter, 1 mm texels — the sun's
+#: shadow came out blurred into a faint smudge: the floor of a section stood
+#: lit where Cycles shades it, and a speckled glow ran along its edges, in
+#: every quality. A narrow filter on a finer map keeps the shadow where
+#: Cycles puts it, and jitter (resolved over the render's samples) smooths
+#: its edge instead of leaving the map's stair steps.
+EEVEE_SHADOW = {"shadow_filter_radius": 0.25,
+                "shadow_maximum_resolution": 0.0002,
+                "use_shadow_jitter": True}
+
+#: EEVEE shadow quality per render quality (draft, normal, high): finer
+#: maps, more shadow rays and steps, a bigger shadow pool as it rises.
+#: ``light`` overrides :data:`EEVEE_SHADOW`; ``scene`` sets ``scene.eevee``.
+EEVEE_SHADOW_QUALITY = (
+    {"light": {}, "scene": {}},
+    {"light": {"shadow_maximum_resolution": 0.0001},
+     "scene": {"shadow_ray_count": 2, "shadow_step_count": 10,
+               "shadow_pool_size": "1024"}},
+    {"light": {"shadow_maximum_resolution": 0.00005},
+     "scene": {"shadow_ray_count": 4, "shadow_step_count": 16,
+               "shadow_pool_size": "2048"}},
+)
+
+
+def _try_set(obj, attr, value):
+    """Set ``obj.attr`` when this Blender has it (EEVEE settings move
+    between versions)."""
+    if hasattr(obj, attr):
+        try:
+            setattr(obj, attr, value)
+        except (TypeError, ValueError):
+            pass
+
+
+def _sharp_eevee_shadows(scene, quality=0):
+    """Apply :data:`EEVEE_SHADOW`, refined for the render ``quality``
+    (:data:`EEVEE_SHADOW_QUALITY`), to every light of the scene (the sun,
+    the moon, the document's point lights and spots)."""
+    preset = EEVEE_SHADOW_QUALITY[max(0, min(2, int(quality)))]
+    light_cfg = dict(EEVEE_SHADOW, **preset["light"])
+    for attr, value in preset["scene"].items():
+        _try_set(scene.eevee, attr, value)
+    n = 0
+    for obj in scene.objects:
+        if obj.type != "LIGHT":
+            continue
+        for attr, value in light_cfg.items():
+            _try_set(obj.data, attr, value)
+        n += 1
+    say("eevee shadows", n, "light(s), quality", quality)
+
+
+def set_engine(scene, engine, samples, quality=0):
     if engine == "cycles":
         scene.render.engine = "CYCLES"
         scene.cycles.samples = samples
@@ -412,6 +524,7 @@ def set_engine(scene, engine, samples):
                      "use_ssr", "use_ssr_refraction"):
             if hasattr(eevee, flag):
                 setattr(eevee, flag, True)
+        _sharp_eevee_shadows(scene, quality)
     say("engine", scene.render.engine)
 
 
@@ -822,7 +935,9 @@ def main():
     ground = job.get("ground")
     if ground:
         add_ground(scene, ground["z"], ground["size"], ground["color"])
-    set_engine(scene, job.get("engine", "eevee"), int(job.get("samples", 64)))
+    fit_ortho_clip(scene)
+    set_engine(scene, job.get("engine", "eevee"), int(job.get("samples", 64)),
+               int(job.get("quality", 0)))
     r = scene.render
     r.resolution_x, r.resolution_y, r.resolution_percentage = w, h, 100
     r.image_settings.file_format = "PNG"
@@ -888,6 +1003,7 @@ def serve(scene, figures):
             break
         w, h = int(req["width"]), int(req["height"])
         set_camera(scene, req["camera"], w, h)
+        fit_ortho_clip(scene)
         update_fill(req["camera"])
         face_figures(figures, req["camera"])
         set_samples(scene, int(req.get("samples", 16)))
