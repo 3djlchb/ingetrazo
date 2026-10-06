@@ -123,6 +123,56 @@ class _FaceView:
         return getattr(self._face, name)
 
 
+class _PlacedFace:
+    """A prototype face where its placement puts it, WITHOUT copying the
+    mesh: corners mapped through the matrix on the fly, the texture's world
+    map re-fitted (:func:`core.group.transformed_attrs`), the container's
+    paint applied. ``transformed_mesh`` rebuilt and re-welded a whole mesh
+    per component instance just so the export could read positions — a
+    third of a big model's export (performance phase 2). Reads like a face
+    for :func:`_add_face`: ``vertices``, ``holes``, ``normal()``,
+    ``triangulate()``, ``attrs``, ``mirrored``."""
+
+    __slots__ = ("vertices", "holes", "attrs", "mirrored")
+
+    def __init__(self, face, m, paint, mirrored):
+        from core.group import transformed_attrs
+        from core.materials import effective_attrs
+        self.vertices = [m.map(p) for p in face.vertices]
+        self.holes = [[m.map(p) for p in h] for h in face.holes]
+        attrs = transformed_attrs(face.attrs, m) if face.attrs else {}
+        self.attrs = effective_attrs(attrs, paint) if paint else attrs
+        self.mirrored = mirrored
+
+    def normal(self):
+        """Newell in double precision, as :meth:`core.mesh.Face.normal`."""
+        from PySide6.QtGui import QVector3D
+        loop = self.vertices
+        count = len(loop)
+        if count < 3:
+            return QVector3D(0.0, 0.0, 1.0)
+        nx = ny = nz = 0.0
+        for i in range(count):
+            a, b = loop[i], loop[(i + 1) % count]
+            x0, y0, z0 = a.x(), a.y(), a.z()
+            x1, y1, z1 = b.x(), b.y(), b.z()
+            nx += (y0 - y1) * (z0 + z1)
+            ny += (z0 - z1) * (x0 + x1)
+            nz += (x0 - x1) * (y0 + y1)
+        n = QVector3D(nx, ny, nz)
+        length = n.length()
+        if length < 1e-9:
+            return QVector3D(0.0, 0.0, 1.0)
+        return n / length
+
+    def triangulate(self, normal=None):
+        if len(self.vertices) < 3:
+            return []
+        from core.triangulate import triangulate
+        return triangulate(self.vertices, self.holes,
+                           normal if normal is not None else self.normal())
+
+
 def _is_mirrored(matrix) -> bool:
     return matrix is not None and matrix.determinant() < 0.0
 
@@ -158,15 +208,17 @@ def _group_faces(group):
     placements = list(iter_placements(group))
     nested_paint = any(getattr(g, "material", None)
                        for g, _m in placements if g is not group)
-    signs = {_is_mirrored(m) for _g, m in placements}
-    if not nested_paint and len(signs) == 1:
-        yield from _painted(world_mesh(group).faces,
-                            effective_material(group), signs.pop())
-        return
+    whole = effective_material(group)
     for g, m in placements:
-        mesh = g.mesh if m is None else transformed_mesh(g.mesh, m)
-        yield from _painted(mesh.faces, effective_material(g),
-                            _is_mirrored(m))
+        # The paint as before: the group's own over every placement when no
+        # nested piece has one of its own, each placement's otherwise.
+        paint = effective_material(g) if nested_paint else whole
+        if m is None:                       # classic group: already world
+            yield from _painted(g.mesh.faces, paint)
+            continue
+        mirrored = _is_mirrored(m)
+        for face in g.mesh.faces:
+            yield _PlacedFace(face, m, paint, mirrored)
 
 
 def _placements_facing(group, toward, figures: bool = True):
@@ -386,7 +438,7 @@ def _add_face(face, materials, prims) -> None:
         sh = tex.get("sh", 1.0) or 1.0
         rot = float(tex.get("rot", 0.0))
         uvw = tex.get("uvw")
-        for tri in face.triangulate():
+        for tri in face.triangulate(n):
             pts = list(tri)
             uv = affine_uv(uvw, pts) if uvw else planar_uv(n, pts, sw, sh, rot)
             prims.setdefault(key, []).append(
@@ -398,7 +450,7 @@ def _add_face(face, materials, prims) -> None:
                                    "opacity": op})
         if face.attrs.get("mat") and "mat" not in materials[key]:
             materials[key]["mat"] = face.attrs["mat"]
-        for tri in face.triangulate():
+        for tri in face.triangulate(n):
             pts = list(tri)
             prims.setdefault(key, []).append(
                 (out_n, [(pts[k], None) for k in order]))

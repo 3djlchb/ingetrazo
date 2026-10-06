@@ -68,6 +68,25 @@ follow [SemVer](https://semver.org).
   capa. Lo mismo al copiar con Mover una arista suelta de otra capa.
 
 ### Rendimiento
+- **Fase 2 — menos memoria de vídeo y la ventana viva al exportar**:
+  - Las caras opacas van a la tarjeta gráfica **indexadas** (cada esquina
+    una vez, más sus índices): entre un 27 % y un 49 % menos memoria de
+    caras en los modelos de ejemplo. Cada pasada dibuja todos sus tramos
+    visibles en **una sola llamada** (multi-draw) en vez de un bucle de
+    llamadas desde Python; un controlador sin esas funciones dibuja como
+    antes. La imagen es idéntica píxel a píxel.
+  - La geometría suelta va al final de los buffers mientras no hay un grupo
+    abierto: dibujar junto a un modelo grande ya no reenvía todo el modelo
+    a la tarjeta en cada trazo.
+  - **Render con Blender exporta en segundo plano**: la ventana sigue
+    respondiendo, y un aviso «Preparando el modelo para Blender…» aparece
+    si tarda.
+  - **Exportar glTF (y para Blender) un 36 % más rápido**, con el archivo
+    idéntico byte a byte: las copias de componentes ya no se reconstruyen
+    malla por malla para exportarlas, la normal de cada cara se calcula una
+    vez y el soldado de vértices va con NumPy.
+  - La caché de chunks en disco cambia de formato (`.chunk2`): una versión
+    anterior de IngeTrazo no la lee, así que no puede dibujarla mal.
 - **Orbitar un modelo con miles de componentes es 11× más fluido**: con la
   planta industrial de la #158 (21 406 copias) cada cuadro pasaba de 1,3 s
   a 0,12 s. Las siluetas de las copias se calculan por pieza en una sola

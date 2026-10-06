@@ -230,3 +230,65 @@ def test_a_serving_blender_renders_each_camera_and_quits(tmp_path):
     proc.stdin.write('{"quit": true}\n')
     proc.stdin.flush()
     assert proc.wait(60) == 0
+
+
+def test_the_export_runs_off_the_gui_thread(window):
+    """The model export runs on a worker: the window keeps processing
+    events (a timer keeps ticking) while it works, and the job — or the
+    error — comes back on the GUI thread."""
+    import threading
+    from PySide6.QtCore import QTimer
+    from plugins.render_blender import export_in_background
+    panel = _panels(window)[0]
+    ticks, got, threads = [], [], []
+    working = threading.Event()
+    timer = QTimer()
+    # Only the ticks that land WHILE the worker is busy count: they prove
+    # the GUI loop was not blocked by the export (how many there are
+    # depends on the machine's load, not on the code).
+    timer.timeout.connect(lambda: working.is_set() and ticks.append(1))
+    timer.start(10)
+
+    def slow_job():
+        threads.append(threading.current_thread() is threading.main_thread())
+        working.set()
+        time.sleep(0.6)
+        working.clear()
+        return "job.json"
+
+    export_in_background(panel, slow_job, got.append,
+                         lambda exc: got.append(("error", exc)))
+    assert _run(5, lambda: got)
+    timer.stop()
+    assert got == ["job.json"]
+    assert threads == [False]                      # not on the GUI thread
+    assert len(ticks) >= 2                         # the loop kept running
+
+    def broken():
+        raise ValueError("no space left")
+    got.clear()
+    export_in_background(panel, broken, got.append,
+                         lambda exc: got.append(("error", str(exc))))
+    assert _run(5, lambda: got)
+    assert got == [("error", "no space left")]
+
+
+def test_a_render_start_exports_in_the_background(window, monkeypatch):
+    """Render ▸ Render: the export goes to the worker and Blender starts
+    when it is done — a second click meanwhile does not start another."""
+    panel = _panels(window)[0]
+    if panel._found is None:
+        panel._found = rb.BlenderFound(["blender"], "blender")
+    calls, launched = [], []
+
+    def fake_write_job(scene, camera, work, **kw):
+        calls.append(kw)
+        time.sleep(0.3)
+        return work / "job.json"
+    monkeypatch.setattr(rb, "write_job", fake_write_job)
+    monkeypatch.setattr(panel, "_launch", launched.append)
+    panel._start()
+    panel._start()                                 # while exporting: ignored
+    assert _run(5, lambda: launched)
+    assert len(calls) == 1 and len(launched) == 1
+    assert launched[0].name == "job.json"

@@ -23,6 +23,8 @@ import json
 import struct
 from pathlib import Path
 
+import numpy as np
+
 from .meshexport import collect_geometry, export_names, geolocation
 
 _F32 = 5126          # accessor componentType FLOAT
@@ -184,49 +186,58 @@ def save_glb(scene, path, face_me=None, split_parts: bool = False) -> None:
                 continue
             tris = source[key]
             textured = key[0] == "tex"
-            positions: list[tuple] = []
-            normals: list[tuple] = []
-            uvs: list[tuple] = []
-            indices: list[int] = []
-            vindex: dict[tuple, int] = {}
-            for normal, verts in tris:
-                nn = _yup(normal)
-                for pos, uv in verts:
-                    p = _yup(pos)
-                    uvk = (round(uv[0], 6), round(uv[1], 6)) if textured else (0.0, 0.0)
-                    vkey = (round(p[0], 6), round(p[1], 6), round(p[2], 6),
-                            round(nn[0], 4), round(nn[1], 4), round(nn[2], 4), uvk)
-                    idx = vindex.get(vkey)
-                    if idx is None:
-                        idx = vindex[vkey] = len(positions)
-                        positions.append(p)
-                        normals.append(nn)
-                        if textured:
-                            # glTF texcoord origin is top-left; OBJ/COLLADA UVs are
-                            # bottom-left, so flip V.
-                            uvs.append((uv[0], 1.0 - uv[1]))
-                    indices.append(idx)
-            if not positions:
+            if not tris:
                 continue
+            # Vectorised (performance phase 2): the corners go into NumPy
+            # once, Y-up (x, z, -y), and the weld is one np.unique over the
+            # rounded (position, normal, uv) rows — the per-corner dict of
+            # rounded tuples and a struct.pack per vertex were most of the
+            # export of a big model. Same key, same first-occurrence order.
+            pos = np.array([(p.x(), p.z(), -p.y())
+                            for _n, verts in tris for p, _uv in verts],
+                           dtype=np.float64)
+            nrm = np.repeat(np.array([(n.x(), n.z(), -n.y())
+                                      for n, _verts in tris],
+                                     dtype=np.float64), 3, axis=0)
+            if textured:
+                uv = np.array([uv for _n, verts in tris for _p, uv in verts],
+                              dtype=np.float64)
+            else:
+                uv = np.zeros((len(pos), 2), dtype=np.float64)
+            # +0.0 folds -0.0 into 0.0: the dict this replaces took them
+            # for one key, a byte-wise compare would not.
+            key_rows = np.ascontiguousarray(np.concatenate(
+                (np.round(pos, 6), np.round(nrm, 4), np.round(uv, 6)),
+                axis=1) + 0.0)
+            row_keys = key_rows.view(np.dtype(
+                (np.void, key_rows.dtype.itemsize * key_rows.shape[1]))).ravel()
+            _u, first, inverse = np.unique(row_keys, return_index=True,
+                                           return_inverse=True)
+            order = np.argsort(first, kind="stable")
+            rank = np.empty_like(order)
+            rank[order] = np.arange(len(order))
+            sel = first[order]
+            positions = pos[sel].astype(np.float32)
+            normals = nrm[sel].astype(np.float32)
+            indices = rank[inverse.ravel()].astype(np.uint32)
 
-            pos_bytes = b"".join(struct.pack("<3f", *p) for p in positions)
-            xs = [p[0] for p in positions]
-            ys = [p[1] for p in positions]
-            zs = [p[2] for p in positions]
-            pos_acc = _accessor(pos_bytes, _F32, len(positions), "VEC3",
-                                _ARRAY_BUFFER,
-                                [min(xs), min(ys), min(zs)],
-                                [max(xs), max(ys), max(zs)])
-            nrm_bytes = b"".join(struct.pack("<3f", *n) for n in normals)
-            nrm_acc = _accessor(nrm_bytes, _F32, len(normals), "VEC3", _ARRAY_BUFFER)
+            lo = positions.min(axis=0).astype(float).tolist()
+            hi = positions.max(axis=0).astype(float).tolist()
+            pos_acc = _accessor(positions.tobytes(), _F32, len(positions),
+                                "VEC3", _ARRAY_BUFFER, lo, hi)
+            nrm_acc = _accessor(normals.tobytes(), _F32, len(normals), "VEC3",
+                                _ARRAY_BUFFER)
             attrs = {"POSITION": pos_acc, "NORMAL": nrm_acc}
-            if textured and uvs:
-                uv_bytes = b"".join(struct.pack("<2f", *t) for t in uvs)
-                attrs["TEXCOORD_0"] = _accessor(uv_bytes, _F32, len(uvs), "VEC2",
-                                                _ARRAY_BUFFER)
-            idx_bytes = struct.pack(f"<{len(indices)}I", *indices)
-            idx_acc = _accessor(idx_bytes, _U32, len(indices), "SCALAR",
-                                _ELEMENT_ARRAY_BUFFER)
+            if textured:
+                # glTF texcoord origin is top-left; OBJ/COLLADA UVs are
+                # bottom-left, so flip V.
+                uvs = uv[sel].copy()
+                uvs[:, 1] = 1.0 - uvs[:, 1]          # in double, as before
+                uvs = uvs.astype(np.float32)
+                attrs["TEXCOORD_0"] = _accessor(uvs.tobytes(), _F32, len(uvs),
+                                                "VEC2", _ARRAY_BUFFER)
+            idx_acc = _accessor(indices.tobytes(), _U32, len(indices),
+                                "SCALAR", _ELEMENT_ARRAY_BUFFER)
             primitives.append({"attributes": attrs, "indices": idx_acc,
                                "material": mat_index[key], "mode": 4})
         return primitives

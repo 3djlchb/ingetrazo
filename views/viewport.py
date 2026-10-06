@@ -333,6 +333,134 @@ _VBO_WRITE_BATCH = 8 << 20
 
 _MESH_ID_SETS = weakref.WeakKeyDictionary()
 
+GL_UNSIGNED_INT = 0x1405
+
+
+class _GLDraw:
+    """The draw entry points PySide 6 does not expose usably, taken from the
+    CURRENT context through ``getProcAddress`` and called with ctypes:
+    ``glDrawElements`` (PySide rejects a byte offset into the bound index
+    buffer), ``glMultiDrawElements`` (absent) and ``glMultiDrawArrays``
+    (with Python lists it draws only the first run). Resolved once per
+    context in ``initializeGL``; any one missing falls back to the plain
+    per-span loop, so a driver without them draws exactly as before."""
+
+    def __init__(self, ctx) -> None:
+        import ctypes
+        import sys
+        ftype = ctypes.WINFUNCTYPE if sys.platform == "win32" \
+            else ctypes.CFUNCTYPE
+
+        def get(name, *argtypes):
+            try:
+                addr = int(ctx.getProcAddress(name.encode()) or 0)
+            except Exception:  # noqa: BLE001 — a missing entry is a fallback
+                addr = 0
+            return ftype(None, *argtypes)(addr) if addr else None
+        u, i, ptr = ctypes.c_uint, ctypes.c_int, ctypes.c_void_p
+        self.multi_arrays = get("glMultiDrawArrays", u, ptr, ptr, i)
+        self.draw_elements = get("glDrawElements", u, i, u, ptr)
+        self.multi_elements = get("glMultiDrawElements", u, ptr, u, ptr, i)
+
+    @property
+    def indexed(self) -> bool:
+        return self.draw_elements is not None
+
+    def multi_draw_arrays(self, mode, spans) -> None:
+        import numpy as np
+        a = np.asarray(spans, dtype=np.int32).reshape(-1, 2)
+        first = np.ascontiguousarray(a[:, 0])
+        count = np.ascontiguousarray(a[:, 1])
+        self.multi_arrays(mode, first.ctypes.data, count.ctypes.data, len(a))
+
+    def draw_index_spans(self, mode, spans) -> None:
+        """``spans`` = ``[(first index, count)]`` into the bound uint32
+        index buffer."""
+        if len(spans) == 1 or self.multi_elements is None:
+            for first, count in spans:
+                self.draw_elements(mode, count, GL_UNSIGNED_INT, first * 4)
+            return
+        import numpy as np
+        a = np.asarray(spans, dtype=np.int64).reshape(-1, 2)
+        count = np.ascontiguousarray(a[:, 1].astype(np.int32))
+        offsets = np.ascontiguousarray((a[:, 0] * 4).astype(np.uintp))
+        self.multi_elements(mode, count.ctypes.data, GL_UNSIGNED_INT,
+                            offsets.ctypes.data, len(a))
+
+
+def _index_vcol(raw: bytes) -> tuple:
+    """Split an interleaved pos(3)+rgb(3) TRIANGLE SOUP into its unique
+    vertices and uint32 indices (first-occurrence order, so neighbours stay
+    neighbours). A face's triangles share their corners, and so do coplanar
+    faces of one colour: 27–49 % less face memory on the bundled models."""
+    import numpy as np
+    a = np.frombuffer(raw, dtype=np.float32)
+    if not len(a):
+        return b"", b""
+    rows = np.ascontiguousarray(a.reshape(-1, 6))
+    keys = rows.view(np.dtype((np.void, 24))).ravel()
+    _u, first, inverse = np.unique(keys, return_index=True,
+                                   return_inverse=True)
+    order = np.argsort(first, kind="stable")
+    rank = np.empty_like(order)
+    rank[order] = np.arange(len(order))
+    return (rows[first[order]].tobytes(),
+            rank[inverse.ravel()].astype(np.uint32).tobytes())
+
+
+def _vcol_soup(entry) -> bytes:
+    """A chunk's opaque faces as the triangle soup (pos+rgb per corner) —
+    for the passes that draw arrays (instanced prototypes, previews,
+    ghosts). Memoised on the entry against the vertex bytes it came from,
+    so a shifted chunk recomputes it."""
+    ix = entry.get("vcol_ix")
+    raw = entry["vcol"]
+    if ix is None:
+        return raw                      # an entry still in soup form
+    memo = entry.get("_soup")
+    if memo is not None and memo[0] is raw and memo[1] is ix:
+        return memo[2]
+    import numpy as np
+    rows = np.frombuffer(raw, dtype=np.float32).reshape(-1, 6)
+    soup = rows[np.frombuffer(ix, dtype=np.uint32)].tobytes() if ix else b""
+    entry["_soup"] = (raw, ix, soup)
+    return soup
+
+
+def _rebased_ix(entry, base: int) -> bytes:
+    """The chunk's indices offset to where its vertices sit in the
+    consolidated buffer — memoised per base, so a chunk that did not move
+    hands back the SAME bytes object and the upload's prefix test is an
+    identity hit."""
+    import numpy as np
+    ix = entry.get("vcol_ix")
+    memo = entry.get("_ix_abs")
+    if memo is not None and memo[0] == base and memo[1] is ix:
+        return memo[2]
+    if ix is None:
+        n = len(entry["vcol"]) // 24
+        out = np.arange(base, base + n, dtype=np.uint32).tobytes()
+    else:
+        out = (np.frombuffer(ix, dtype=np.uint32) + np.uint32(base)).tobytes()
+    entry["_ix_abs"] = (base, ix, out)
+    return out
+
+
+def _mirror_ix(ix, mirrored: bool):
+    """A chunk's indices for a mirrored placement: two corners of every
+    triangle swapped, so the front stays the front (see ``tp32``)."""
+    if ix is None or not mirrored or not ix:
+        return ix
+    import numpy as np
+    a = np.frombuffer(ix, dtype=np.uint32).reshape(-1, 3)
+    return np.ascontiguousarray(a[:, [0, 2, 1]]).tobytes()
+
+
+def _ix_count(entry) -> int:
+    """How many indices (= soup corners) a chunk's opaque faces draw."""
+    ix = entry.get("vcol_ix")
+    return len(ix) // 4 if ix is not None else len(entry["vcol"]) // 24
+
 
 def _mesh_id_sets(mesh):
     """``(edge ids, face ids)`` of ``mesh`` as sets, rebuilt only when the
@@ -1019,6 +1147,13 @@ class Viewport(QOpenGLWidget):
         self._faces_vao = None
         self._faces_vbo = None
         self._faces_count = 0
+        # Opaque faces: ``_faces_count`` counts INDICES (soup corners) — the
+        # unit their draw spans use; ``_faces_vcount`` the vertices in the
+        # VBO (where the translucent / back runs start).
+        self._faces_vcount = 0
+        self._faces_indexed = False
+        self._glx = None
+        self._faces_ibo = None
         # Solid-colour faces share ONE interleaved pos+rgb VBO drawn in a
         # single call (the shaded material colour rides per vertex).
         # Textured faces (pos+uv VBO) grouped by image path: [(path, start, count)].
@@ -1263,6 +1398,19 @@ class Viewport(QOpenGLWidget):
         self._selected_vao, self._selected_vbo = self._create_dynamic()
         self._sel_faces_vao, self._sel_faces_vbo = self._create_dynamic()
         self._faces_vao, self._faces_vbo = self._create_dynamic_vcol()
+        # Indexed opaque faces + multi-draw (phase 2): the entry points come
+        # from this context; the index buffer lives in the faces VAO.
+        self._glx = _GLDraw(self.context())
+        self._faces_ibo = None
+        if self._glx.indexed:
+            self._faces_vao.bind()
+            ibo = QOpenGLBuffer(QOpenGLBuffer.IndexBuffer)
+            ibo.setUsagePattern(QOpenGLBuffer.DynamicDraw)
+            ibo.create()
+            ibo.bind()
+            ibo.allocate(12)
+            self._faces_vao.release()     # the VAO keeps the index binding
+            self._faces_ibo = ibo
         self._tex_faces_vao, self._tex_faces_vbo = self._create_dynamic_uv()
         self._billboard_vao, self._billboard_vbo = self._create_dynamic_uv()
         self._bb_sel_vao, self._bb_sel_vbo = self._create_dynamic()
@@ -1622,8 +1770,7 @@ class Viewport(QOpenGLWidget):
                 self._gl.glDepthMask(GL_FALSE)
             self._faces_vao.bind()
             if split_f is None:
-                for _vs, _vc in face_spans:
-                    self._gl.glDrawArrays(GL_TRIANGLES, _vs, _vc)
+                self._draw_face_spans(face_spans)
             else:
                 # Context first, washed toward the background but fully
                 # opaque and still writing depth (the faded rest of
@@ -1631,13 +1778,9 @@ class Viewport(QOpenGLWidget):
                 # at full strength.
                 self._program.setUniformValue1f(self._loc_fade,
                                                 EDIT_REST_FADE)
-                for _vs, _vc in face_spans:
-                    if _vs < split_f:
-                        self._gl.glDrawArrays(GL_TRIANGLES, _vs, _vc)
+                self._draw_face_spans(face_spans, hi=split_f)
                 self._program.setUniformValue1f(self._loc_fade, 0.0)
-                for _vs, _vc in face_spans:
-                    if _vs >= split_f:
-                        self._gl.glDrawArrays(GL_TRIANGLES, _vs, _vc)
+                self._draw_face_spans(face_spans, lo=split_f)
             fstart, fcount = self._fvcol_run
             if fcount:
                 # opaque front copies of glass-backed faces: visible only
@@ -1688,8 +1831,7 @@ class Viewport(QOpenGLWidget):
                     if not spans:
                         continue
                     self._program.setUniformValue1f(self._loc_fade, fade)
-                    for _vs, _vc in spans:
-                        self._gl.glDrawArrays(GL_TRIANGLES, _vs, _vc)
+                    self._draw_spans(GL_TRIANGLES, spans)
             self._program.setUniformValue1f(self._loc_fade, 0.0)
             self._tex_faces_vao.release()
             self._program.setUniformValue1f(self._loc_shade, 1.0)
@@ -1725,8 +1867,7 @@ class Viewport(QOpenGLWidget):
                     if not spans:
                         continue
                     self._program.setUniformValue1f(self._loc_fade, fade)
-                    for _vs, _vc in spans:
-                        self._gl.glDrawArrays(GL_TRIANGLES, _vs, _vc)
+                    self._draw_spans(GL_TRIANGLES, spans)
                 tex.release(0)
             self._program.setUniformValue1f(self._loc_fade, 0.0)
             self._program.setUniformValue(self._loc_hard_cutout, 0)
@@ -1765,18 +1906,13 @@ class Viewport(QOpenGLWidget):
             self._set_back_face_color()
             self._dback_vao.bind()
             if split_db is None:
-                for _vs, _vc in db_draw:
-                    self._gl.glDrawArrays(GL_TRIANGLES, _vs, _vc)
+                self._draw_spans(GL_TRIANGLES, db_draw)
             else:
                 self._program.setUniformValue1f(self._loc_fade,
                                                 EDIT_REST_FADE)
-                for _vs, _vc in db_draw:
-                    if _vs < split_db:
-                        self._gl.glDrawArrays(GL_TRIANGLES, _vs, _vc)
+                self._draw_spans(GL_TRIANGLES, db_draw, hi=split_db)
                 self._program.setUniformValue1f(self._loc_fade, 0.0)
-                for _vs, _vc in db_draw:
-                    if _vs >= split_db:
-                        self._gl.glDrawArrays(GL_TRIANGLES, _vs, _vc)
+                self._draw_spans(GL_TRIANGLES, db_draw, lo=split_db)
             self._dback_vao.release()
             self._gl.glDisable(GL_CULL_FACE)
             self._gl.glDisable(GL_POLYGON_OFFSET_FILL)
@@ -2074,21 +2210,16 @@ class Viewport(QOpenGLWidget):
                 _espans = getattr(self, "_frame_edge_spans",
                                   ((0, self._edges_count),))
                 if split_e is None:
-                    for _vs, _vc in _espans:
-                        self._gl.glDrawArrays(GL_LINES, _vs, _vc)
+                    self._draw_spans(GL_LINES, _espans)
                 else:
                     # Same two-tier draw as the faces: washed-out
                     # surroundings, then the edited group's own edges at
                     # full strength.
                     self._program.setUniformValue1f(self._loc_fade,
                                                     EDIT_REST_FADE)
-                    for _vs, _vc in _espans:
-                        if _vs < split_e:
-                            self._gl.glDrawArrays(GL_LINES, _vs, _vc)
+                    self._draw_spans(GL_LINES, _espans, hi=split_e)
                     self._program.setUniformValue1f(self._loc_fade, 0.0)
-                    for _vs, _vc in _espans:
-                        if _vs >= split_e:
-                            self._gl.glDrawArrays(GL_LINES, _vs, _vc)
+                    self._draw_spans(GL_LINES, _espans, lo=split_e)
                 self._edges_vao.release()
             if show_edges:
                 self._set_color(*_ecol, 1.0)
@@ -2763,7 +2894,7 @@ class Viewport(QOpenGLWidget):
 
         self._program.bind()
         # vcol: pos(3)+rgb(3)
-        vcol_raw = base["vcol"]
+        vcol_raw = _vcol_soup(base)          # instanced: drawn as arrays
         vcol_vbo = static_vbo(vcol_raw)
         vcol_vao = QOpenGLVertexArrayObject(self)
         vcol_vao.create()
@@ -3039,9 +3170,8 @@ class Viewport(QOpenGLWidget):
         self._set_color(*color, 1.0)
         if self._edges_count > 0:
             self._edges_vao.bind()
-            for _vs, _vc in getattr(self, "_frame_edge_spans",
-                                    ((0, self._edges_count),)):
-                self._gl.glDrawArrays(GL_LINES, _vs, _vc)
+            self._draw_spans(GL_LINES, getattr(
+                self, "_frame_edge_spans", ((0, self._edges_count),)))
             self._edges_vao.release()
         self._draw_instanced_edges()
         self._gl.glDepthFunc(GL_LEQUAL)
@@ -3057,7 +3187,7 @@ class Viewport(QOpenGLWidget):
         self._gl.glPolygonOffset(1.0, 1.0)
         if self._faces_count > 0:
             self._faces_vao.bind()
-            self._gl.glDrawArrays(GL_TRIANGLES, 0, self._faces_count)
+            self._draw_face_spans([(0, self._faces_count)])
             self._faces_vao.release()
         if self._tex_faces_count > 0:
             self._tex_faces_vao.bind()
@@ -4164,7 +4294,7 @@ class Viewport(QOpenGLWidget):
         if self._faces_count > 0 or self._tcol_runs:
             self._faces_vao.bind()
             if self._faces_count > 0:
-                self._gl.glDrawArrays(GL_TRIANGLES, 0, self._faces_count)
+                self._draw_face_spans([(0, self._faces_count)])
             # The .skp translucency rule: under 70 % opacity a material
             # casts NO shadow (glass lets the sun through); at or above it,
             # it casts like a solid.
@@ -4408,7 +4538,7 @@ class Viewport(QOpenGLWidget):
                 if ch["edges"]:
                     edge_parts.append(ch["edges"])
                 if ch["vcol"]:
-                    vcol_parts.append(ch["vcol"])
+                    vcol_parts.append(_vcol_soup(ch))
                 for path, raw in ch["by_texture"].items():
                     tex_parts.setdefault(path, []).append(raw)
             raw = b"".join(edge_parts)
@@ -4558,7 +4688,7 @@ class Viewport(QOpenGLWidget):
                 if ch["edges"]:
                     edge_parts.append(ch["edges"])
                 if ch["vcol"]:
-                    vcol_parts.append(ch["vcol"])
+                    vcol_parts.append(_vcol_soup(ch))
                 for path, raw in ch["by_texture"].items():
                     tex_parts.setdefault(path, []).append(raw)
         if geometry:
@@ -4702,7 +4832,8 @@ class Viewport(QOpenGLWidget):
         return (n.normalized() if n.length() > 1e-9
                 else QVector3D(0.0, 0.0, 1.0))
 
-    def _upload_vbo(self, vbo, slot: str, parts, empty: int = 24) -> int:
+    def _upload_vbo(self, vbo, slot: str, parts, empty: int = 24,
+                    vao=None) -> int:
         """Put ``b"".join(parts)`` in ``vbo``, re-sending only the tail that
         actually changed. Returns the total byte length.
 
@@ -4721,6 +4852,10 @@ class Viewport(QOpenGLWidget):
         discard the prefix along with everything else)."""
         parts = list(parts)
         total = sum(map(len, parts))
+        if vao is not None:
+            # An INDEX buffer: its binding is VAO state — bind it inside its
+            # VAO and never release it there (that would unhook it).
+            vao.bind()
         prev = self._vbo_parts.get(slot)
         keep = 0
         first = 0                  # index of the first part to (re)send
@@ -4758,9 +4893,40 @@ class Viewport(QOpenGLWidget):
         if batch_len:
             raw = batch[0] if len(batch) == 1 else b"".join(batch)
             vbo.write(offset, raw, batch_len)
-        vbo.release()
+        if vao is not None:
+            vao.release()
+        else:
+            vbo.release()
         self._vbo_parts[slot] = (parts, cap)
         return total
+
+    def _draw_spans(self, mode, spans, lo=None, hi=None) -> None:
+        """Draw array ``spans`` (``[(first, count)]``) of the bound VAO —
+        those starting in ``[lo, hi)`` when given — in ONE
+        ``glMultiDrawArrays`` call instead of a Python loop of draws."""
+        sel = [(f, c) for f, c in spans
+               if c and (lo is None or f >= lo) and (hi is None or f < hi)]
+        if not sel:
+            return
+        glx = getattr(self, "_glx", None)
+        if len(sel) > 1 and glx is not None and glx.multi_arrays is not None:
+            glx.multi_draw_arrays(mode, sel)
+            return
+        for f, c in sel:
+            self._gl.glDrawArrays(mode, f, c)
+
+    def _draw_face_spans(self, spans, lo=None, hi=None) -> None:
+        """The opaque faces' spans (index units) from the bound faces VAO:
+        indexed through its index buffer, or — on a driver without the
+        entry points — the soup the sync uploaded instead, drawn as arrays
+        (index units ARE soup corners, so the spans mean the same)."""
+        if not getattr(self, "_faces_indexed", False):
+            self._draw_spans(GL_TRIANGLES, spans, lo, hi)
+            return
+        sel = [(f, c) for f, c in spans
+               if c and (lo is None or f >= lo) and (hi is None or f < hi)]
+        if sel:
+            self._glx.draw_index_spans(GL_TRIANGLES, sel)
 
     def _sync_edges(self) -> None:
         if _cache_ver(self) == self._edges_version:
@@ -4913,10 +5079,20 @@ class Viewport(QOpenGLWidget):
         subj_parts, subj_spans, _n = _collect(subject, head_n)
         group_parts = head_parts + subj_parts
         group_spans = head_spans + subj_spans
-        edge_parts += group_parts
-        edge_spans += [(bb, loose_n + start, n) for bb, start, n in group_spans]
-        if self._edit_split_e is None and split_rel is not None:
-            self._edit_split_e = loose_n + split_rel
+        if editing:
+            edge_parts += group_parts
+            edge_spans += [(bb, loose_n + start, n)
+                           for bb, start, n in group_spans]
+            if self._edit_split_e is None and split_rel is not None:
+                self._edit_split_e = loose_n + split_rel
+        else:
+            # Nothing open: the loose block goes LAST. It is the part that
+            # changes while you draw, and in front it shifted every group
+            # behind it — the whole model re-sent to the GPU each frame of
+            # a stroke beside a big import.
+            edge_parts = group_parts + edge_parts
+            edge_spans = ([(bb, start, n) for bb, start, n in group_spans]
+                          + [(None, _n, loose_n)])
         self._edge_spans = edge_spans
         self._edges_count = self._upload_vbo(
             self._edges_vbo, "edges", edge_parts) // 12
@@ -5136,10 +5312,10 @@ class Viewport(QOpenGLWidget):
                 dback_spans.append((chunk.get("bbox"), dback_start,
                                     len(chunk["dback"]) // 12))
                 dback_start += len(chunk["dback"]) // 12
-            face_parts.append(chunk["vcol"])
-            group_face_spans.append((chunk.get("bbox"), gface_start,
-                                     len(chunk["vcol"]) // 24))
-            gface_start += len(chunk["vcol"]) // 24
+            face_parts.append(chunk)          # indexed below
+            n_ix = _ix_count(chunk)
+            group_face_spans.append((chunk.get("bbox"), gface_start, n_ix))
+            gface_start += n_ix
             # The SUBJECT of the edit, for the textured pass — which draws
             # in its own runs and decides the fade with this flag, not with
             # the positional split. Comparing by identity against
@@ -5169,27 +5345,63 @@ class Viewport(QOpenGLWidget):
         # Kept as a part LIST (not one concatenated blob) so the upload can
         # tell which pieces changed; the trailing runs below append to it.
         subj_raw = subj_vcol.tobytes()
-        all_face_parts = [vcol.tobytes()] + face_parts + [subj_raw]
-        self._faces_count = sum(len(p) for p in all_face_parts) // 24
-        # Loose faces sit at the front of the VBO and always draw; group spans
-        # follow them, and a bucketed subject block closes the buffer.
-        loose_n = len(vcol) // 6
-        self._face_spans = ([(None, 0, loose_n)]
-                            + [(bb, loose_n + s, n)
-                               for bb, s, n in group_face_spans])
+        loose_raw = vcol.tobytes()
+        loose_n = len(loose_raw) // 24
+        # Layout (index units = soup corners): with a group open, the loose
+        # block is context and leads (the fade split needs the context in
+        # one piece); otherwise it goes LAST, where its changes while you
+        # draw no longer shift — and re-send — every group behind it.
+        loose_first = self.scene.edit_group is not None
+        g0 = loose_n if loose_first else 0
+        self._face_spans = [(bb, g0 + st, n) for bb, st, n in group_face_spans]
+        if loose_first:
+            self._face_spans.insert(0, (None, 0, loose_n))
         if self._edit_split_f is not None:
-            self._edit_split_f += loose_n   # was relative to the group block
+            self._edit_split_f += g0        # was relative to the group block
+        pos = g0 + gface_start
         if subj_raw:
-            subj_start = loose_n + gface_start
-            self._face_spans.append((None, subj_start, len(subj_raw) // 24))
+            self._face_spans.append((None, pos, len(subj_raw) // 24))
             if subject_bucketed and self.scene.edit_group is not None:
-                # The bucketed block IS the subject, and it is last: the fade
-                # split moves to its start so the context still fades.
-                self._edit_split_f = subj_start
+                self._edit_split_f = pos
+            pos += len(subj_raw) // 24
+        if not loose_first:
+            self._face_spans.append((None, pos, loose_n))
+            pos += loose_n
+        self._faces_count = pos
+        # Vertices and indices, block by block in that same order. Chunks
+        # carry their faces indexed (unique corners + uint32 indices); the
+        # freshly built loose/subject blocks are soups, indexed 1:1.
+        import numpy as _np
+        glx = getattr(self, "_glx", None)
+        indexed = (glx is not None and glx.indexed
+                   and getattr(self, "_faces_ibo", None) is not None)
+        blocks = (([loose_raw] if loose_first else []) + face_parts
+                  + [subj_raw] + ([] if loose_first else [loose_raw]))
+        all_face_parts: list = []
+        ix_parts: list = []
+        base = 0
+        for blk in blocks:
+            if isinstance(blk, dict):
+                raw = blk["vcol"] if indexed else _vcol_soup(blk)
+                if indexed:
+                    ix_parts.append(_rebased_ix(blk, base))
+            else:
+                raw = blk
+                if indexed and raw:
+                    nv = len(raw) // 24
+                    ix_parts.append(_np.arange(base, base + nv,
+                                               dtype=_np.uint32).tobytes())
+            all_face_parts.append(raw)
+            base += len(raw) // 24
+        self._faces_vcount = base
+        self._faces_indexed = indexed
+        if indexed:
+            self._upload_vbo(self._faces_ibo, "faces_ix", ix_parts, empty=12,
+                             vao=self._faces_vao)
         # Translucent colour runs live in the SAME VBO, after the opaque
         # batch; drawn in their own blended pass (depth-write off).
         self._tcol_runs = []
-        start = self._faces_count
+        start = self._faces_vcount
         for key in sorted(tcol_runs):
             a, fc = key
             raw = b"".join(tcol_runs[key])
@@ -6826,7 +7038,7 @@ class Viewport(QOpenGLWidget):
         self._gl.glCullFace(GL_FRONT)          # rasterize BACK faces only
         if self._faces_count > 0:
             self._faces_vao.bind()
-            self._gl.glDrawArrays(GL_TRIANGLES, 0, self._faces_count)
+            self._draw_face_spans([(0, self._faces_count)])
             self._faces_vao.release()
         if self._tex_faces_count > 0:
             self._tex_faces_vao.bind()
@@ -8323,7 +8535,12 @@ class Viewport(QOpenGLWidget):
             "nv": base["nv"], "ne": base["ne"], "nf": base["nf"],
             "edges": tp32(base["edges"], 3, tris=False),
             "dback": tp32(base.get("dback", b""), 3),
-            "vcol": tp32(base["vcol"], 6),
+            # Indexed faces: the corners move, and a mirror's winding fix
+            # swaps two INDICES of each triangle (the corners are shared).
+            "vcol": (tp32(base["vcol"], 6, tris=False)
+                     if base.get("vcol_ix") is not None
+                     else tp32(base["vcol"], 6)),
+            "vcol_ix": _mirror_ix(base.get("vcol_ix"), mirrored),
             "by_texture": {p: tp32(raw, 5)
                            for p, raw in base["by_texture"].items()},
             "tcol": {a: tp32(raw, 6)
@@ -8721,6 +8938,8 @@ class Viewport(QOpenGLWidget):
         idxs = sorted({k * max(nv - 1, 0) // 31 for k in range(32)}) if nv else []
         samples = [(i, (verts[i].position.x(), verts[i].position.y(),
                         verts[i].position.z())) for i in idxs]
+        # Opaque faces indexed: unique pos+rgb corners and uint32 indices.
+        vcol_u, vcol_ix = _index_vcol(vcol.tobytes())
         entry = {"fp": fp, "vkey": vkey, "rev": 0, "uid": next(_chunk_uid),
                  "msig": msig,
                  "serial": getattr(mesh, "_mut_serial", None),
@@ -8730,7 +8949,7 @@ class Viewport(QOpenGLWidget):
                  # axes, which is the one the selection cue draws.
                  "obb": None,
                  "edges": edges_data.tobytes(),
-                 "vcol": vcol.tobytes(),
+                 "vcol": vcol_u, "vcol_ix": vcol_ix,
                  "by_texture": {k: v.tobytes() for k, v in by_texture.items()},
                  "tcol": {a: v.tobytes() for a, v in tcol.items()},
                  "ttex": {(pth, a, fc): v.tobytes()
@@ -8813,8 +9032,14 @@ class Viewport(QOpenGLWidget):
                 h.update(repr(("fhidden", i)).encode())
         return h.hexdigest()
 
+    #: The file extension of the on-disk chunks, bumped with their FORMAT:
+    #: ".chunk2" holds the opaque faces indexed (``vcol`` = unique corners +
+    #: ``vcol_ix``). A build from before reads only ".chunk" and must never
+    #: meet these — it would draw the unique corners as a triangle soup.
+    _CHUNK_CACHE_EXT = ".chunk2"
+
     _CHUNK_CACHE_FIELDS = (
-        "edges", "vcol", "by_texture", "tcol", "ttex", "back_vcol",
+        "edges", "vcol", "vcol_ix", "by_texture", "tcol", "ttex", "back_vcol",
         "back_tex", "back_tcol", "back_ttex", "fvcol", "dback", "areas",
         "v0", "e1", "e2", "tri_ent", "soft_pts", "soft_n0", "soft_c0",
         "soft_n1", "soft_c1", "soft_single", "bbox", "coordsum",
@@ -8827,13 +9052,14 @@ class Viewport(QOpenGLWidget):
         import pickle
         try:
             path = self._chunk_cache_dir() / \
-                (self._chunk_cache_key(mesh, fp) + ".chunk")
+                (self._chunk_cache_key(mesh, fp) + self._CHUNK_CACHE_EXT)
             if not path.is_file():
                 return None
             with open(path, "rb") as fh:
                 stored = pickle.load(fh)     # our own cache dir only
-            if stored.get("nf") != len(mesh.faces) or "dback" not in stored:
-                return None          # a cache predating the back-side tint
+            if (stored.get("nf") != len(mesh.faces) or "dback" not in stored
+                    or "vcol_ix" not in stored):
+                return None          # a cache predating the back tint / index
             entry = dict(stored)
             entry.update(fp=fp, vkey=vkey, rev=0, uid=next(_chunk_uid),
                          faces=list(mesh.faces))
@@ -8856,12 +9082,12 @@ class Viewport(QOpenGLWidget):
 
         def write():
             try:
-                path = cdir / (key + ".chunk")
+                path = cdir / (key + self._CHUNK_CACHE_EXT)
                 tmp = path.with_suffix(".part")
                 with open(tmp, "wb") as fh:
                     pickle.dump(payload, fh, protocol=5)
                 tmp.replace(path)
-                files = sorted(cdir.glob("*.chunk"),
+                files = sorted(cdir.glob("*" + self._CHUNK_CACHE_EXT),
                                key=lambda p: p.stat().st_mtime)
                 for old in files[:-self._CHUNK_CACHE_KEEP]:
                     old.unlink(missing_ok=True)

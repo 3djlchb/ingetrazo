@@ -2485,5 +2485,6 @@
  "Remove the material from the whole {kind} «{name}»?": "¿Quitar el material de todo el {kind} «{name}»?",
  "Its {n} faces will be painted, also the ones that already have a material.": "Se pintarán sus {n} caras, también las que ya tienen un material.",
  "Its {n} other copies change too: they share the definition.": "También cambian sus otras {n} copias: comparten la definición.",
- "{what} «{name}» painted: {n} faces": "{what} «{name}» pintado: {n} caras"
+ "{what} «{name}» painted: {n} faces": "{what} «{name}» pintado: {n} caras",
+ "Preparing the model for Blender…": "Preparando el modelo para Blender…"
 }

@@ -374,7 +374,8 @@ def test_una_instancia_espejada_conserva_el_frente_de_sus_caras():
         setattr(vp, name, getattr(Viewport, name).__get__(vp))
     assert vp._instanced_eligible(inst) is True
     ch = vp._group_chunk(inst)
-    tris = np.frombuffer(ch["vcol"], np.float32).reshape(-1, 3, 6)[:, :, :3]
+    from views.viewport import _vcol_soup          # the chunk keeps it indexed
+    tris = np.frombuffer(_vcol_soup(ch), np.float32).reshape(-1, 3, 6)[:, :, :3]
     for t in tris:
         n = np.cross(t[1] - t[0], t[2] - t[0])
         assert n[2] > 0, "el giro sigue antihorario visto desde +Z: el frente es el frente"

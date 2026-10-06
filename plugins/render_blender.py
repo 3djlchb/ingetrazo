@@ -263,6 +263,56 @@ def _make_pick_tool(prompt: str, done, cancelled):
 
 # ---- The panel ---------------------------------------------------------------------
 
+def export_in_background(parent, job_fn, done, failed) -> None:
+    """Run ``job_fn`` — the model export, ``rb.write_job`` — on a worker
+    thread, then call ``done(job)`` or ``failed(exc)`` back on the GUI
+    thread (performance phase 2). The export of a big model froze the
+    whole window for seconds; now the window keeps painting, and a modal
+    «Preparing the model…» shows once it takes longer than a blink — it
+    also keeps anyone from editing the model while the worker reads it."""
+    import threading
+    from PySide6.QtWidgets import QProgressDialog
+    owner = parent.window() if hasattr(parent, "window") else None
+    dlg = QProgressDialog(tr("Preparing the model for Blender…"), None, 0, 0,
+                          owner)
+    dlg.setWindowTitle(tr("Render with Blender"))
+    dlg.setWindowModality(Qt.WindowModal)
+    dlg.setCancelButton(None)
+    dlg.setAutoClose(False)
+    dlg.setAutoReset(False)
+    dlg.setMinimumDuration(10_000_000)        # shown by hand, below
+    result: dict = {}
+
+    def run():
+        try:
+            result["job"] = job_fn()
+        except Exception as exc:  # noqa: BLE001 — reported on the GUI thread
+            result["error"] = exc
+
+    worker = threading.Thread(target=run, name="render-export", daemon=True)
+    started = time.monotonic()
+    timer = QTimer(parent)
+    timer.setInterval(25)
+
+    def poll():
+        if worker.is_alive():
+            if not dlg.isVisible() and time.monotonic() - started > 0.4:
+                dlg.show()
+            return
+        timer.stop()
+        timer.deleteLater()
+        dlg.close()
+        dlg.deleteLater()
+        if "error" in result:
+            failed(result["error"])
+        else:
+            done(result["job"])
+
+    timer.timeout.connect(poll)
+    worker.start()
+    timer.start()
+
+
 class SyncSession(QObject):
     """«Sync with the view»: one Blender kept open with the scene loaded;
     whenever the camera comes to rest somewhere new, it renders a quick
@@ -334,6 +384,8 @@ class SyncSession(QObject):
 
     # ---- The Blender that waits ------------------------------------------
     def _load(self, scene_key) -> None:
+        if getattr(self, "_exporting", False):
+            return       # the next poll after the export compares again
         self._shutdown()
         self._scene_key = scene_key
         self._done_key = None
@@ -342,17 +394,32 @@ class SyncSession(QObject):
         base = _work_dir()
         self._work = base.with_name(base.name + "-sync")
         self.state.emit(tr("Loading the scene into Blender…"))
-        try:
-            job = rb.write_job(
-                panel.app.scene, panel.app.viewport.camera, self._work,
-                engine=panel._engine.currentData(), quality=0,
-                width=rb.SYNC_WIDTH, height=self._height(),
-                ground=panel._ground.isChecked(), ambience=st["ambience"],
-                lights=st["lights"], sun_scale=st["sun_scale"], serve=True)
-        except Exception as exc:  # noqa: BLE001 - say it, do not crash
+        import copy
+        scene, camera = panel.app.scene, copy.copy(panel.app.viewport.camera)
+        work = self._work
+        kwargs = dict(engine=panel._engine.currentData(), quality=0,
+                      width=rb.SYNC_WIDTH, height=self._height(),
+                      ground=panel._ground.isChecked(),
+                      ambience=st["ambience"], lights=st["lights"],
+                      sun_scale=st["sun_scale"], serve=True)
+        self._exporting = True
+
+        def failed(exc):
+            self._exporting = False
             self.state.emit(str(exc))
             self._timer.stop()
-            return
+
+        def done(job):
+            self._exporting = False
+            if self.active:                # not stopped meanwhile
+                self._spawn(job)
+        export_in_background(
+            panel, lambda: rb.write_job(scene, camera, work, **kwargs),
+            done, failed)
+
+    def _spawn(self, job) -> None:
+        """Start the Blender that loads the exported scene and waits."""
+        panel = self.panel
         argv = rb.command(panel._found, job)
         proc = QProcess(self)
         env = QProcessEnvironment()
@@ -1048,25 +1115,41 @@ class RenderPanel(QWidget):
 
     # ---- Rendering -----------------------------------------------------------
     def _start(self) -> None:
-        if self._found is None or self._proc is not None:
+        if (self._found is None or self._proc is not None
+                or getattr(self, "_exporting", False)):
             return
         self._remember_settings()
         st = _state(self.app)
         self._work = _work_dir()
-        try:
-            job = rb.write_job(
-                self.app.scene, self.app.viewport.camera, self._work,
-                engine=self._engine.currentData(),
-                quality=self._quality.currentIndex(),
-                width=self._width.value(),
-                height=max(2, round(self._width.value() / self._aspect())),
-                ground=self._ground.isChecked(),
-                keep_blend=self._blend.isChecked(),
-                ambience=st["ambience"], lights=st["lights"],
-                sun_scale=st["sun_scale"])
-        except Exception as exc:  # noqa: BLE001 - say it, do not crash
+        import copy
+        scene, camera = self.app.scene, copy.copy(self.app.viewport.camera)
+        work = self._work
+        kwargs = dict(engine=self._engine.currentData(),
+                      quality=self._quality.currentIndex(),
+                      width=self._width.value(),
+                      height=max(2, round(self._width.value()
+                                          / self._aspect())),
+                      ground=self._ground.isChecked(),
+                      keep_blend=self._blend.isChecked(),
+                      ambience=st["ambience"], lights=st["lights"],
+                      sun_scale=st["sun_scale"])
+        self._exporting = True
+        self._status.setText(tr("Preparing the model for Blender…"))
+
+        def failed(exc):
+            self._exporting = False
+            self._status.setText("")
             QMessageBox.critical(self, tr("Render with Blender"), str(exc))
-            return
+
+        def done(job):
+            self._exporting = False
+            self._launch(job)
+        export_in_background(
+            self, lambda: rb.write_job(scene, camera, work, **kwargs),
+            done, failed)
+
+    def _launch(self, job) -> None:
+        """Start Blender on the exported job (the second half of _start)."""
         argv = rb.command(self._found, job)
         proc = QProcess(self)
         env = QProcessEnvironment()
