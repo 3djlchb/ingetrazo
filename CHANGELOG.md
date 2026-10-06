@@ -6,6 +6,14 @@ follow [SemVer](https://semver.org).
 
 ## [Sin publicar]
 
+## [0.5.8] — 2026-10-06
+
+**Capa activa y escena activa a la vista, Empujar/Tirar que respeta la capa
+de la cara, pintar un grupo o componente entero, renders de Blender más
+limpios (sombras de EEVEE nítidas según la calidad, cortes de sección sin
+vetas, colores RAL como pintura) y modelos de millones de polígonos con
+mucha menos memoria de vídeo y una órbita más fluida.**
+
 ### Novedades
 - **Capa activa**: la tabla de Capas tiene una primera columna «Activa»
   con un círculo pequeño, azul en la capa activa y vacío en las demás; un

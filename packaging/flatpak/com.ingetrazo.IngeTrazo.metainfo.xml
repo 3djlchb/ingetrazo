@@ -75,6 +75,22 @@
   <url type="vcs-browser">https://github.com/ingelibre/ingetrazo</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.5.8" date="2026-10-06">
+      <description>
+        <p>An active layer and an active scene marked in their tables and
+        named in the viewport, Push/Pull that keeps the whole solid on the
+        face's layer, painting a whole group or component, sharper EEVEE
+        shadows that improve with the render quality, clean section cuts and
+        RAL colours rendered as paint in Blender, and much less video memory
+        and smoother orbiting with very large models.</p>
+        <p xml:lang="es">Capa activa y escena activa marcadas en sus tablas y
+        nombradas en el visor, Empujar/Tirar que deja el sólido entero en la
+        capa de la cara, pintar un grupo o componente entero, sombras de EEVEE
+        más nítidas que mejoran con la calidad, cortes de sección limpios y
+        colores RAL renderizados como pintura en Blender, y mucha menos
+        memoria de vídeo y una órbita más fluida con modelos muy grandes.</p>
+      </description>
+    </release>
     <release version="0.5.7" date="2026-09-30">
       <description>
         <p>Parametric windows with the Windowizer example extension, the
