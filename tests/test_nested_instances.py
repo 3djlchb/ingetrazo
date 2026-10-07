@@ -176,7 +176,7 @@ def test_editing_into_a_nested_group_keeps_the_tree():
     assert len(top.children) == 1, "el árbol se horneó al entrar"
     assert top.children[0].name == "mid"
     assert top.children[0].children[0].mesh is proto, "y sigue compartiendo malla"
-    assert top.xform == QMatrix4x4()
+    assert top.xform in (None, QMatrix4x4()), "inside, the world's frame"
     despues = [p.toTuple() for g, m in iter_placements(top)
                for v in g.mesh.vertices
                for p in [m.map(v.position) if m is not None else v.position]]

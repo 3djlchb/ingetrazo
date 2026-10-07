@@ -7,6 +7,19 @@ follow [SemVer](https://semver.org).
 ## [Sin publicar]
 
 ### Novedades
+- **Grupos y componentes anidados creados desde dentro**: abre un grupo o
+  componente (doble clic), dibuja, selecciona y Crear grupo / Crear
+  componente: el nuevo queda **dentro** del abierto. Repite dentro de ese y
+  sigue bajando, sin límite de niveles; Esc sube de uno en uno. Antes se
+  rechazaba («Sal del grupo primero») y solo se podía anidar de dentro hacia
+  fuera, en la raíz (sigue funcionando). Lo que se crea dentro de un
+  **componente** forma parte de su definición: aparece en todas sus copias,
+  compartiendo la geometría, y deshacer la edición lo quita de todas.
+  Descomponer un grupo dentro de otro deja sus piezas en ese nivel.
+- **Un componente con grupos dentro sigue siendo un componente al abrirlo**:
+  se horneaba (su geometría salía de la definición y su matriz se perdía),
+  así que la siguiente edición ya no llegaba a las copias. Ahora se abre
+  como cualquier componente y lo editado en él llega a todas.
 - **Clic derecho ▸ Capa ▸ Capa nueva… deja activa la capa nueva**, como
   «+ Capa» en el panel de Capas: además de mover la selección a ella, pasa
   a ser la capa donde se dibuja, con su fila resaltada en el panel. Si el

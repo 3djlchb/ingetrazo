@@ -96,8 +96,10 @@ def test_entrar_a_otro_grupo_cierra_lo_abierto():
 
 
 def test_un_contenedor_movido_entra_sin_moverse():
-    """Mover un contenedor compone en su matriz. Al entrar, esa matriz baja a
-    los hijos: dentro se dibuja en coordenadas del mundo y nada se mueve."""
+    """Mover un contenedor compone en su matriz. Al entrar, dentro se dibuja
+    en coordenadas del mundo y nada se mueve: un grupo de grupos baja su
+    matriz a los hijos; un componente (el contenedor de esta prueba, con su
+    ``component`` por defecto) la aparca y la devuelve al salir."""
     scene, padre, h1, h2 = _plaza()
     t = QMatrix4x4()
     t.translate(10.0, 5.0, 0.0)
@@ -107,13 +109,21 @@ def test_un_contenedor_movido_entra_sin_moverse():
                    for v in g.mesh.vertices
                    for c in (t.map(v.position)).toTuple())
     scene.begin_group_edit(padre)
-    assert padre.xform == QMatrix4x4(), "el contenedor debe quedar en identidad"
+    assert padre.xform in (None, QMatrix4x4()), "dentro se trabaja en el mundo"
     despues = sorted(round(c, 6)
                      for g in (h1, h2)
                      for v in g.mesh.vertices
                      for c in ((g.xform.map(v.position) if g.xform is not None
                                 else v.position)).toTuple())
     assert antes == despues, "la geometría se movió al entrar"
+    scene.end_group_edit()
+    fuera = sorted(round(c, 6)
+                   for g in (h1, h2)
+                   for v in g.mesh.vertices
+                   for c in ((padre.xform * g.xform).map(v.position)
+                             if g.xform is not None
+                             else padre.xform.map(v.position)).toTuple())
+    assert antes == fuera, "la geometría se movió al salir"
 
 
 def test_un_grupo_normal_sigue_funcionando_igual():

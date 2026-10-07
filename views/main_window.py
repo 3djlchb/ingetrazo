@@ -2410,13 +2410,9 @@ class MainWindow(QMainWindow):
         five seconds, or an empty selection that returns in silence, reads to
         the user as "I pressed Create group and it does not create" — which
         is exactly how this was reported."""
-        if self.viewport.scene.edit_group is not None:
-            # Grouping INSIDE a group would have to land in that group's
-            # children, not at the root where MakeGroupCommand puts it.
-            self.viewport.flash_status(tr(
-                "Leave the group first (Esc) — grouping inside a group is "
-                "not wired up yet"), 4000)
-            return
+        # Inside an open group or component it makes a group INSIDE it — a
+        # nested level, as deep as you go (2026-10-08); the commands put it
+        # in the open context's children.
         sel = self.viewport.scene.selection
         faces = [f for f in sel if isinstance(f, Face)]
         edges = [e for e in sel if isinstance(e, Edge)]
@@ -2457,11 +2453,7 @@ class MainWindow(QMainWindow):
     def _on_make_component(self) -> None:
         """Make Component (G): the selection becomes a shared
         DEFINITION placed as an instance — every copy shares it."""
-        if self.viewport.scene.edit_group is not None:
-            self.viewport.flash_status(tr(
-                "Leave the group first (Esc) — nested groups aren't "
-                "supported yet"))
-            return
+        # Inside an open group or component: a component INSIDE it.
         sel = self.viewport.scene.selection
         faces = [f for f in sel if isinstance(f, Face)]
         edges = [e for e in sel if isinstance(e, Edge)]

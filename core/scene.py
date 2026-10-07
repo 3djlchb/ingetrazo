@@ -297,7 +297,11 @@ class Scene:
         # group's axes, level by level.
         from core.group import group_frame
         frame = group_frame(group)
-        if getattr(group, "children", None):
+        kids0 = None
+        comp_container = (getattr(group, "children", None)
+                          and getattr(group, "xform", None) is not None
+                          and bool(getattr(group, "component", True)))
+        if getattr(group, "children", None) and not comp_container:
             # A container: its children stay children. What CANNOT stay is a
             # transform on it, because the tools work in world coordinates —
             # so the matrix is pushed down into the children and into its own
@@ -317,13 +321,26 @@ class Scene:
             proto, xform = group.mesh, group.xform
             group.mesh = transformed_mesh(proto, xform)
             group.xform = None
+            # The groups and components inside a COMPONENT are part of its
+            # definition: they go into world coordinates with it (their
+            # matrices take the instance's on the left) and come back on
+            # leaving, reaching every copy (see :meth:`share_back`). It used
+            # to bake the container instead -- its own geometry copied out of
+            # the definition, its matrix gone for good -- so a component that
+            # held groups stopped being one the first time it was opened.
+            from PySide6.QtGui import QMatrix4x4
+            kids0 = [(c, QMatrix4x4(c.xform) if c.xform is not None
+                      else None) for c in (group.children or ())]
+            for c in group.children or ():
+                c.xform = xform * (c.xform if c.xform is not None
+                                   else QMatrix4x4())
             self._edit_share = (group, proto, xform,
                                 group.mesh.capture_state())
         if not self._edit_stack:
             self._loose_mesh = anterior
         self._edit_stack.append(
             {"group": group, "mesh": anterior, "share": self._edit_share,
-             "frame": frame})
+             "frame": frame, "kids0": kids0})
         self.mesh = group.mesh
         self.edit_group = group
         self.selection.clear()
@@ -383,10 +400,14 @@ class Scene:
             # Headless callers (tests, the AI bridge): share back directly.
             # The viewport takes the share first and wraps it in a command.
             group, proto, xform, state0 = share
-            if group.mesh.capture_state() == state0:
-                self.restore_sharing(group, proto, xform)
+            kids0 = nivel.get("kids0")
+            kids_out = self.edit_kids_out(group)
+            if (group.mesh.capture_state() == state0
+                    and not self.kids_changed(kids0, kids_out, xform)):
+                self.restore_sharing(group, proto, xform, kids0)
             else:
-                self.share_back(group, proto, xform, group.mesh)
+                self.share_back(group, proto, xform, group.mesh,
+                                kids0=kids0, kids_out=kids_out)
         self.mesh = nivel["mesh"]
         self.edit_group = (self._edit_stack[-1]["group"] if self._edit_stack
                            else None)
@@ -412,17 +433,73 @@ class Scene:
         self._edit_share = None
         return share
 
-    @staticmethod
-    def restore_sharing(group, proto, xform) -> None:
-        """The instance left untouched: back on the shared definition."""
-        group.mesh = proto
-        group.xform = xform
+    def take_edit_kids(self):
+        """The groups inside the INNERMOST open component as they were when
+        it was opened -- ``[(child, local matrix or None)]`` -- or ``None``
+        for a context that is not a shared component. Handed over once,
+        with :meth:`take_edit_share`."""
+        if self._edit_stack:
+            kids = self._edit_stack[-1].get("kids0")
+            self._edit_stack[-1]["kids0"] = None
+            return kids
+        return None
 
     @staticmethod
-    def share_back(group, proto, xform, edited) -> None:
+    def edit_kids_out(group) -> list:
+        """``[(child, world matrix)]`` of a component being left: where each
+        of the groups inside it stands now."""
+        from PySide6.QtGui import QMatrix4x4
+        return [(c, QMatrix4x4(c.xform) if c.xform is not None
+                 else QMatrix4x4())
+                for c in (getattr(group, "children", None) or ())]
+
+    @staticmethod
+    def kids_changed(kids0, kids_out, xform) -> bool:
+        """Whether the groups inside a component changed during its edit:
+        one made or removed, or one moved."""
+        if kids0 is None:
+            return False
+        if [c for c, _m in kids0] != [c for c, _m in kids_out]:
+            return True
+        from PySide6.QtGui import QMatrix4x4
+        for (_c, m0), (_c2, wm) in zip(kids0, kids_out):
+            was = xform * (m0 if m0 is not None else QMatrix4x4())
+            if any(abs(a - b) > 1e-6 for a, b in zip(was.data(), wm.data())):
+                return True
+        return False
+
+    @staticmethod
+    def restore_sharing(group, proto, xform, kids0=None) -> None:
+        """The instance left untouched: back on the shared definition, and
+        the groups inside it back on their own matrices."""
+        group.mesh = proto
+        group.xform = xform
+        if kids0:
+            group.children = [c for c, _m in kids0]
+            for c, m in kids0:
+                c.xform = m
+
+    def definition_siblings(self, group, proto) -> list:
+        """Every other placement -- top level or nested at any depth -- that
+        draws the definition ``proto``: the other copies of a component."""
+        from core.group import iter_placements
+        out = []
+        for top in self.groups:
+            for g, _m in iter_placements(top):
+                if g is not group and g.mesh is proto:
+                    out.append(g)
+        return out
+
+    def share_back(self, group, proto, xform, edited,
+                   kids0=None, kids_out=None) -> None:
         """Write the edited world-space mesh into the shared prototype (local
         coordinates) and put the instance back on it: every sibling shows
-        the edit."""
+        the edit.
+
+        With ``kids_out`` the groups inside the component go back to its own
+        frame, and when they changed -- one made, deleted or moved inside --
+        every copy of the component gets the same set, sharing their
+        geometry: what a component holds is part of its definition."""
         from core.group import transformed_mesh
         inverse, ok = xform.inverted()
         local = transformed_mesh(edited, inverse if ok else xform)
@@ -431,6 +508,28 @@ class Scene:
         proto.restore_state(local.capture_state())
         group.mesh = proto
         group.xform = xform
+        if kids_out is None:
+            return
+        changed = self.kids_changed(kids0, kids_out, xform)
+        group.children = [c for c, _m in kids_out]
+        for c, wm in kids_out:
+            c.xform = (inverse * wm) if ok else wm
+        if changed:
+            from core.group import copy_group
+            for sib in self.definition_siblings(group, proto):
+                sib.children = [copy_group(c, _in_definition=True)
+                                for c in group.children]
+
+    def context_groups(self) -> list:
+        """The list the groups of the open context live in: the children of
+        the group being edited, or the model's top level. Where Make Group
+        and Make Component put what they make."""
+        eg = self.edit_group
+        if eg is None:
+            return self.groups
+        if getattr(eg, "children", None) is None:
+            eg.children = []
+        return eg.children
 
     @staticmethod
     def _keep_untouched_local(local, proto, xform) -> None:

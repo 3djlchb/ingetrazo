@@ -2843,6 +2843,31 @@ class MeshSnapshotCommand(Command):
             scene.version += 1
 
 
+def _parent_list(scene, parent):
+    """Where a group made in the context ``parent`` lives: its children, or
+    the model's top level when ``parent`` is ``None``. A parent that gains
+    its first child gets a matrix (``Group.adopt``'s invariant: a group that
+    owns placements is always an instance)."""
+    if parent is None:
+        return scene.groups
+    if getattr(parent, "children", None) is None:
+        parent.children = []
+    if parent.xform is None and not _in_shared_edit(scene, parent):
+        from PySide6.QtGui import QMatrix4x4
+        parent.xform = QMatrix4x4()
+    return parent.children
+
+
+def _in_shared_edit(scene, group) -> bool:
+    """Whether ``group`` is a component open on its world copy: its matrix
+    is parked (None) until it is left, and must stay so."""
+    for level in getattr(scene, "_edit_stack", None) or ():
+        if isinstance(level, dict) and level.get("group") is group:
+            return level.get("share") is not None or \
+                level.get("kids0") is not None
+    return False
+
+
 class MakeGroupCommand(Command):
     """Encapsulate the selected faces and edges into a new Group with its own
     mesh, removing them from the loose mesh so they no longer weld to the rest.
@@ -2895,6 +2920,11 @@ class MakeGroupCommand(Command):
     def do(self, scene) -> None:
         m = scene.mesh
         self.snapshot = m.capture_state()
+        # Made inside a group, it is a group INSIDE that group (nested):
+        # the context is fixed at the first run, so a redo after leaving the
+        # group still puts it back where it was made.
+        if not hasattr(self, "_parent"):
+            self._parent = getattr(scene, "edit_group", None)
         # The group is a fresh copy built from the captured positions. A
         # COMPONENT shifts them into local coordinates around the origin.
         origin = QVector3D(0.0, 0.0, 0.0)
@@ -2984,14 +3014,15 @@ class MakeGroupCommand(Command):
                                 (_key(e.a) in grouped and _key(e.b) in grouped)):
                 m.remove_edge(e)
                 scene.selection.discard(e)
-        scene.groups.append(self.group)
+        _parent_list(scene, self._parent).append(self.group)
         scene.selection.clear()
         scene.selection.add(self.group)
         scene.version += 1
 
     def undo(self, scene) -> None:
-        if self.group in scene.groups:
-            scene.groups.remove(self.group)
+        owner = _parent_list(scene, getattr(self, "_parent", None))
+        if self.group in owner:
+            owner.remove(self.group)
         scene.selection.discard(self.group)
         scene.mesh.restore_state(self.snapshot)
         scene.version += 1
@@ -3005,24 +3036,45 @@ class ReshareInstanceCommand(Command):
     whole edit undoes as one step, back to the definition as it was, with
     the instance shared again. Redo replays it from the edited copy."""
 
-    def __init__(self, group, proto, xform, edited, inner=()) -> None:
+    def __init__(self, group, proto, xform, edited, inner=(),
+                 kids0=None, kids_out=None) -> None:
         self.group = group
         self.proto = proto
         self.xform = xform
         self.edited = edited
         self.inner = list(inner)
         self._before = None
+        #: The groups inside the component when it was opened (local
+        #: matrices) and when it was left (world matrices): the edit can
+        #: have made, deleted or moved some (nested groups, 2026-10-08).
+        self.kids0 = kids0
+        self.kids_out = kids_out
+        self._sibs_before = None
 
     def do(self, scene) -> None:
         if self._before is None:
             self._before = self.proto.capture_state()
-        scene.share_back(self.group, self.proto, self.xform, self.edited)
+        if self.kids_out is not None and self._sibs_before is None:
+            # Every copy's own groups, to put back on undo: a change inside
+            # reaches them as fresh copies sharing the geometry.
+            self._sibs_before = [
+                (s, list(getattr(s, "children", None) or ()))
+                for s in scene.definition_siblings(self.group, self.proto)]
+        scene.share_back(self.group, self.proto, self.xform, self.edited,
+                         kids0=self.kids0, kids_out=self.kids_out)
         scene.version += 1
 
     def undo(self, scene) -> None:
         self.proto.restore_state(self._before)
         self.group.mesh = self.proto
         self.group.xform = self.xform
+        if self.kids0 is not None:
+            self.group.children = [c for c, _m in self.kids0]
+            for c, m in self.kids0:
+                c.xform = m
+        for s, kids in self._sibs_before or ():
+            s.children = kids
+        _dirty_group_chunks(scene)
         scene.version += 1
 
 
@@ -3199,6 +3251,11 @@ class MakeNestedGroupCommand(Command):
         self._xform0 = None
 
     def do(self, scene) -> None:
+        # Inside a group the groups being grouped are ITS children, and the
+        # container goes there too (fixed at the first run, for the redo).
+        if not hasattr(self, "_parent"):
+            self._parent = getattr(scene, "edit_group", None)
+        owner = _parent_list(scene, self._parent)
         if self._inner is not None:
             self._inner.do(scene)
             self.container = self._inner.group
@@ -3206,14 +3263,14 @@ class MakeNestedGroupCommand(Command):
             self.container = Group(Mesh(), name=self.name)
             from core.layers import active_layer_tag
             self.container.layer = active_layer_tag(scene)
-        if self.container not in scene.groups:
-            scene.groups.append(self.container)
+        if self.container not in owner:
+            owner.append(self.container)
         self._xform0 = getattr(self.container, "xform", None)
         self._indices = sorted(
-            ((scene.groups.index(g), g) for g in self.groups),
+            ((owner.index(g), g) for g in self.groups),
             key=lambda pair: pair[0])
         for _i, g in self._indices:
-            scene.groups.remove(g)
+            owner.remove(g)
             scene.selection.discard(g)
         # In document order, not selection order: a selection is a set, and
         # the children of a group are a list somebody will read.
@@ -3226,14 +3283,15 @@ class MakeNestedGroupCommand(Command):
         scene.version += 1
 
     def undo(self, scene) -> None:
+        owner = _parent_list(scene, getattr(self, "_parent", None))
         self.container.children = []
         self.container.xform = self._xform0
         for idx, g in self._indices:
-            scene.groups.insert(min(idx, len(scene.groups)), g)
+            owner.insert(min(idx, len(owner)), g)
         if self._inner is not None:
             self._inner.undo(scene)        # loose geometry back, group gone
-        elif self.container in scene.groups:
-            scene.groups.remove(self.container)
+        elif self.container in owner:
+            owner.remove(self.container)
         scene.selection.clear()
         scene.version += 1
 
@@ -3381,7 +3439,13 @@ class ExplodeGroupCommand(Command):
         m = scene.mesh
         g = self.group
         self.snapshot = m.capture_state()
-        self.index = scene.groups.index(g)
+        # A group exploded inside an open group is one of ITS children, and
+        # what comes out stays at that level.
+        if not hasattr(self, "_parent"):
+            self._parent = (getattr(scene, "edit_group", None)
+                            if g not in scene.groups else None)
+        owner = _parent_list(scene, self._parent)
+        self.index = owner.index(g)
         self._selection = set(scene.selection)
         P = getattr(g, "xform", None)
         paint = getattr(g, "material", None)
@@ -3437,21 +3501,22 @@ class ExplodeGroupCommand(Command):
             if c.material is None and paint:
                 c.material = {k: (dict(v) if isinstance(v, dict) else v)
                               for k, v in paint.items()}
-        scene.groups.remove(g)
-        scene.groups[self.index:self.index] = kids
+        owner.remove(g)
+        owner[self.index:self.index] = kids
         scene.selection.discard(g)
         if kids:
             scene.selection = set(kids)   # select what came out
         scene.version += 1
 
     def undo(self, scene) -> None:
+        owner = _parent_list(scene, getattr(self, "_parent", None))
         for c, xform, mesh, material, axes, offset in self._lifted:
-            if c in scene.groups:
-                scene.groups.remove(c)
+            if c in owner:
+                owner.remove(c)
             c.xform, c.mesh, c.material, c.axes = xform, mesh, material, axes
             c.explode_offset = offset
         scene.mesh.restore_state(self.snapshot)
-        scene.groups.insert(self.index, self.group)
+        owner.insert(self.index, self.group)
         if self._selection is not None:
             scene.selection = set(self._selection)
         scene.version += 1

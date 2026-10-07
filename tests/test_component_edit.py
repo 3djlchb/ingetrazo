@@ -90,18 +90,22 @@ def test_a_group_with_nested_placements_keeps_them():
     with his plaza on 2026-09-11 — nine groups became a single 17 577-face
     mesh, structure and per-group chunks gone. Now it enters as it is.
 
-    The instance share-back does NOT arm for a container: there is no shared
-    definition to write back to, and its matrix comes down into the children
-    on the way in (see tests/test_nested_group_edit.py)."""
+    A COMPONENT that holds groups opens like any component since
+    2026-10-08: on a world copy of its definition, its groups placed in the
+    world with it, all of it shared back on leaving — what it holds is part
+    of the definition (nested groups made inside a component)."""
     scene, proto, a, b = _two_instances()
     child = Group(Mesh(), name="child")
     _square(child.mesh, z=5.0)
     child.xform = QMatrix4x4()
     b.adopt([child])
+    xb = QMatrix4x4(b.xform)
     scene.begin_group_edit(b)
-    assert scene._edit_share is None
+    assert scene._edit_share is not None
     assert b.children == [child], "los hijos se hornearon al entrar"
+    assert child.xform == xb, "the group inside stands in the world"
     assert len(child.mesh.faces) == 1
     scene.end_group_edit()
     assert b.children == [child]
+    assert b.xform == xb and child.xform == QMatrix4x4(), "back as it was"
     assert a.mesh is proto and len(proto.faces) == 1    # la hermana, intacta

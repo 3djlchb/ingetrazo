@@ -11981,9 +11981,18 @@ class Viewport(QOpenGLWidget):
             from core.history import MakeUniqueCommand
             self.history.execute(MakeUniqueCommand(group))
         was_instance = (getattr(group, "xform", None) is not None
-                        and not getattr(group, "children", None))
+                        and (not getattr(group, "children", None)
+                             or bool(getattr(group, "component", True))))
         self.scene.begin_group_edit(group)
-        self._edit_undo_mark = len(self.history.undo_stack)
+        # One mark per open level: a component opened inside another must
+        # not overwrite the outer one's, or leaving the outer folded only
+        # the commands made after the inner was opened.
+        marks = getattr(self, "_edit_undo_marks", None)
+        if marks is None:
+            marks = self._edit_undo_marks = []
+        del marks[len(getattr(self.scene, "_edit_stack", ()) or ()) - 1:]
+        marks.append(len(self.history.undo_stack))
+        self._edit_undo_mark = marks[-1]
         self._hover_entity = None
         self._edges_version = -1     # the rest may fade out or leave the VBOs
         share = getattr(self.scene, "_edit_share", None)
@@ -12068,27 +12077,38 @@ class Viewport(QOpenGLWidget):
     def _leave_group_edit(self, todos: bool) -> None:
         if self.scene.edit_group is None:
             return
-        share = self.scene.take_edit_share()
         if todos:
-            self.scene.end_group_edit()
-        else:
-            self.scene.end_one_group_edit()
+            # Every level, innermost first: each component shares back its
+            # own edit (a nested one into the definition it lives in).
+            while self.scene.edit_group is not None:
+                self._leave_group_edit(todos=False)
+            return
+        share = self.scene.take_edit_share()
+        kids0 = self.scene.take_edit_kids() if share is not None else None
+        self.scene.end_one_group_edit()
+        marks = getattr(self, "_edit_undo_marks", None) or []
+        mark = marks.pop() if marks else getattr(
+            self, "_edit_undo_mark", len(self.history.undo_stack))
         self._hover_entity = None
         self._edges_version = -1     # the rest comes back
         if share is not None:
             group, proto, xform, state0 = share
             edited = group.mesh
-            if edited.capture_state() == state0:
-                self.scene.restore_sharing(group, proto, xform)
+            kids_out = (self.scene.edit_kids_out(group)
+                        if kids0 is not None else None)
+            if (edited.capture_state() == state0
+                    and not self.scene.kids_changed(kids0, kids_out or [],
+                                                    xform)):
+                self.scene.restore_sharing(group, proto, xform, kids0)
                 self.flash_status(tr("Left the group"), 2000)
             else:
                 from core.history import ReshareInstanceCommand
-                mark = getattr(self, "_edit_undo_mark",
-                               len(self.history.undo_stack))
+                mark = min(mark, len(self.history.undo_stack))
                 inner = self.history.undo_stack[mark:]
                 del self.history.undo_stack[mark:]
                 self.history.execute(ReshareInstanceCommand(
-                    group, proto, xform, edited, inner))
+                    group, proto, xform, edited, inner,
+                    kids0=kids0, kids_out=kids_out))
                 copies = sum(1 for g in self.scene.groups if g.mesh is proto)
                 self.flash_status(tr(
                     "Component '{name}' updated on its {n} copies",
