@@ -3337,6 +3337,10 @@ class MainWindow(QMainWindow):
         name = (name or "").strip()
         if ok and name:
             self._assign_layer(name)
+            # …and, like «+ Layer», the new layer becomes the active one.
+            layers = getattr(getattr(self, "tray", None), "layers", None)
+            if layers is not None:
+                layers.activate_new(name)
 
     def _hideable(self, entities) -> list:
         """The objects, faces and edges in ``entities`` that Hide acts on

@@ -3605,18 +3605,29 @@ class LayersPanel(QWidget):
             n += 1
         layer = Layer(f"{base} {n}")
         scene.layers.append(layer)
-        # A layer is made to be drawn on: the new one becomes the active
-        # layer (and the highlighted row, so Rename / Assign act on it).
-        scene.active_layer_uid = layer.uid
+        self.activate_new(layer.name)
+
+    def activate_new(self, name: str) -> None:
+        """A layer just made is made to be drawn on: it becomes the active
+        layer and the highlighted row (so Rename / Assign act on it) — what
+        «+ Layer» does, and right-click ▸ Layer ▸ New layer… too (Marco,
+        2026-10-07: it made the layer and left the old one active)."""
+        scene = self._scene()
+        ly = scene.layer(name)
+        if ly is None:
+            return
+        ly.visible = True            # what you draw has to stay in sight
+        ly.locked = False
+        scene.active_layer_uid = ly.uid
         self.refresh()
         for i in range(self.tree.topLevelItemCount()):
             item = self.tree.topLevelItem(i)
-            if item.data(1, Qt.UserRole) == layer.name:
+            if item.data(1, Qt.UserRole) == ly.name:
                 self.tree.setCurrentItem(item, 1)
                 break
         self._touch()
         self._window.statusBar().showMessage(
-            tr("Active layer: {name}", name=layer.name), 2500)
+            tr("Active layer: {name}", name=ly.name), 2500)
 
     def _on_delete(self) -> None:
         from core.layers import DEFAULT_LAYER, layer_of, assign_layer

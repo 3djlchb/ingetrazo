@@ -7,6 +7,12 @@ follow [SemVer](https://semver.org).
 ## [Sin publicar]
 
 ### Novedades
+- **Clic derecho ▸ Capa ▸ Capa nueva… deja activa la capa nueva**, como
+  «+ Capa» en el panel de Capas: además de mover la selección a ella, pasa
+  a ser la capa donde se dibuja, con su fila resaltada en el panel. Si el
+  nombre escrito es el de una capa oculta o bloqueada, se muestra y se
+  desbloquea. Al deshacer, la capa desaparece y la activa vuelve a la
+  predeterminada; al rehacer vuelve la misma capa, activa.
 - **Overlay ▸ Orientación de cara**: un botón «Overlay» arriba a la
   derecha del visor abre un menú con la casilla «Orientación de cara».
   Activada, cada cara se tiñe de **azul** por su frente y de **rojo** por su
