@@ -58,6 +58,10 @@ datas = [
     ('i18n/*.json',                'i18n'),
     # Bundled plugins (Extensions menu) — discovered by file path at runtime.
     ('plugins/*.py',               'plugins'),
+    # A bundled plugin can be a PACKAGE too (Animation): the whole folder,
+    # its assets included - ``plugins/*.py`` alone left it out of every
+    # PyInstaller build.
+    ('plugins/igz_animacion',      'plugins/igz_animacion'),
     # Example extensions: shipped but NOT loaded — Extensions ▸ Example
     # extensions copies one into the user's plugins folder on request.
     # Whole folder: an example extension can be a package (CAM, PR #132).
@@ -154,6 +158,10 @@ hiddenimports += [
     'openskp.edit',
     'openskp.errors',
     'openskp.scene',
+    # The standard library the Animation plugin reaches only at run time
+    # (FFmpeg's download and unpacking (tar.xz needs lzma), the Blender
+    # download page, scene ids).
+    'tarfile', 'lzma', 'zipfile', 'urllib.request', 'webbrowser', 'uuid',
 ]
 
 # ...and every other app module a by-path file imports, found by reading
@@ -184,7 +192,7 @@ def _app_imports(paths):
 
 
 hiddenimports += _app_imports(
-    [*Path('plugins').glob('*.py'),
+    [*Path('plugins').rglob('*.py'),
      *Path('examples/extensions').rglob('*.py'),
      Path('scripts/ingetrazo_mcp.py')])
 # The rest of openskp (export/*, _face_groups, instanced_scene, codegen…)

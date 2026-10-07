@@ -434,6 +434,25 @@ def set_samples(scene, samples):
         scene.eevee.taa_render_samples = samples
 
 
+def set_cycles_sampling(scene, req):
+    """The finer Cycles controls a serve request MAY carry (Animation's
+    render settings): ``noise_threshold`` (``None`` = adaptive sampling
+    off), ``min_samples`` and ``time_limit`` in seconds (0 = none). Absent
+    keys leave the scene as it is, so the viewport's Sync is unchanged."""
+    if scene.render.engine != "CYCLES":
+        return
+    c = scene.cycles
+    if "noise_threshold" in req:
+        thr = req["noise_threshold"]
+        _try_set(c, "use_adaptive_sampling", thr is not None)
+        if thr is not None:
+            _try_set(c, "adaptive_threshold", float(thr))
+    if "min_samples" in req:
+        _try_set(c, "adaptive_min_samples", max(0, int(req["min_samples"])))
+    if "time_limit" in req:
+        _try_set(c, "time_limit", max(0.0, float(req["time_limit"])))
+
+
 #: EEVEE shadow settings for every light (Blender 4.2+ «EEVEE Next»). With
 #: the defaults — filter radius 1.0, no jitter, 1 mm texels — the sun's
 #: shadow came out blurred into a faint smudge: the floor of a section stood
@@ -1007,6 +1026,7 @@ def serve(scene, figures):
         update_fill(req["camera"])
         face_figures(figures, req["camera"])
         set_samples(scene, int(req.get("samples", 16)))
+        set_cycles_sampling(scene, req)
         r.resolution_x, r.resolution_y = w, h
         r.filepath = req["output"]
         say("rendering", w, "x", h)

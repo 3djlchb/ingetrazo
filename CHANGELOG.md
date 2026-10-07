@@ -7,6 +7,48 @@ follow [SemVer](https://semver.org).
 ## [Sin publicar]
 
 ### Novedades
+- **Pestaña Animación** en el panel derecho (la extensión igz_animacion
+  incorporada al programa): las **escenas son los fotogramas clave** —
+  marca las que entran, en su orden — y la cámara viaja entre ellas; un
+  **plano de sección** capturado en dos escenas seguidas se mueve de una
+  posición a la otra. **Línea de tiempo** bajo el visor (reproducir,
+  pausar, fotograma a fotograma, saltar de escena en escena, repetir; la
+  rueda acerca la regla). Se renderiza con el **visor** (captura nativa en
+  alta resolución) o con **Blender** (Cycles o EEVEE, con umbral de ruido,
+  muestras y tiempo límite, y las luces y el ambiente de la pestaña Render),
+  a **secuencia de imágenes**, **video MP4** (FFmpeg, H.264 o H.265,
+  calidad CRF) o ambos; resolución y FPS (6 a 240 o personalizado). Crear,
+  borrar y capturar escenas desde la pestaña, sincronizada con Propiedades
+  ▸ Escenas. Todo se guarda en el .igz, y los documentos hechos con el
+  plugin igz_animacion abren su animación tal cual. FFmpeg se busca en el
+  sistema, se puede elegir uno propio, o se descarga (preguntando) a la
+  carpeta del usuario.
+  Corregido respecto al plugin: la secuencia de imágenes con el visor no se
+  guardaba; Blender ignoraba las luces de Render y renderizaba con las
+  muestras de la vista previa; el muestreo no hacía nada; FFmpeg se
+  intentaba escribir en la carpeta del programa (de solo lectura una vez
+  instalado); el aviso «Blender no encontrado» saltaba solo; cada edición
+  del modelo recargaba la pestaña entera; borrar una escena en Propiedades
+  dejaba los estados en escenas equivocadas; cada clic en un ajuste era un
+  paso de deshacer; y la extensión no entraba en las versiones empaquetadas.
+  Al día con igz_animacion v0.22.66 (la línea de tiempo sigue en el visor):
+  **Procesamiento Nativo / Personalizado** para Blender — Nativo usa la
+  calidad de Renderizar ▸ Calidad y muestra sus samples; Personalizado
+  muestra solo lo que tiene cada motor (EEVEE: samples; Cycles: umbral de
+  ruido, samples máx./mín. o fijos, tiempo límite). **Frame buffer propio**
+  de la animación, hecho a partir de la ventana de Render pero con sus
+  zonas separadas para que nada se monte: fotograma n / total y tramo de
+  escenas arriba, la imagen (zoom con la rueda, arrastrar, Ajustar, 100 %)
+  con un panel de información al lado (renderizador, muestreo, resolución,
+  tiempo transcurrido, por fotograma y restante), una barra para volver a
+  ver fotogramas ya hechos, y abajo progreso, Guardar fotograma, Abrir
+  carpeta, **Pausar / Continuar** y **Cancelar** (Cancelar detiene Blender
+  aunque esté a mitad de un fotograma). Sirve para los dos renderizadores.
+  Sección **Consola** con lo que hace el render y la salida de Blender
+  (las líneas de estadísticas, a ~10 por segundo). Cada escena se aplica
+  una vez por tramo y no en cada fotograma. Los datos se guardan
+  directamente en el espacio de la extensión, como v0.22.66; los .igz con
+  el formato anterior se siguen abriendo y se reescriben al primer cambio.
 - **«No existe escena» en rojo en un archivo sin escenas**: la etiqueta de
   arriba a la izquierda del visor no aparecía hasta crear la primera
   escena; ahora un archivo nuevo dice «No existe escena» en rojo. Con
