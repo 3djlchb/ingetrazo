@@ -290,9 +290,11 @@ def test_the_scenes_panel_marks_the_active_scene_and_the_viewport_names_it():
         panel._on_delete()
         assert scene.active_view is None
         assert vp.active_scene_label()[1] is None       # «No scene»
-        # No scenes left at all: no label.
+        # No scenes left at all: «No scene exists» (in red).
         scene.saved_views.clear()
-        assert vp.active_scene_label() is None
+        prefix, name = vp.active_scene_label()
+        assert name is None
+        assert prefix in ("No scene exists", "No existe escena")
     finally:
         _close(win)
 
@@ -551,8 +553,9 @@ def test_the_active_layer_label_sits_right_of_the_scene_label():
                     start = None
             return spans
 
-        assert len(pills()) == 1                      # no scenes: layer only
-        assert pills()[0][0] < 16
+        # No scenes: «No scene exists» at the corner, the layer to its right.
+        assert len(pills()) == 2
+        assert pills()[0][0] < 16 < pills()[1][0]
         scene.saved_views.append(SavedView.capture("Planta", scene, vp.camera))
         scene.active_view = scene.saved_views[0]
         spans = pills()

@@ -2490,5 +2490,6 @@
  "Overlays": "Overlay",
  "What the viewport shows over the model": "Lo que el visor muestra sobre el modelo",
  "Face Orientation": "Orientación de cara",
- "Blue: the front of a face. Red: its back, an inverted face or the inside of a solid.": "Azul: el frente de una cara. Rojo: su reverso, una cara invertida o el interior de un sólido."
+ "Blue: the front of a face. Red: its back, an inverted face or the inside of a solid.": "Azul: el frente de una cara. Rojo: su reverso, una cara invertida o el interior de un sólido.",
+ "No scene exists": "No existe escena"
 }

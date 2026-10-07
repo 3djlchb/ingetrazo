@@ -7,6 +7,11 @@ follow [SemVer](https://semver.org).
 ## [Sin publicar]
 
 ### Novedades
+- **«No existe escena» en rojo en un archivo sin escenas**: la etiqueta de
+  arriba a la izquierda del visor no aparecía hasta crear la primera
+  escena; ahora un archivo nuevo dice «No existe escena» en rojo. Con
+  escenas todo sigue igual: «Escena: nombre», y «Sin escena» en naranja
+  cuando la vista se aleja de la escena activa.
 - **Grupos y componentes anidados creados desde dentro**: abre un grupo o
   componente (doble clic), dibuja, selecciona y Crear grupo / Crear
   componente: el nuevo queda **dentro** del abierto. Repite dentro de ese y

@@ -521,6 +521,9 @@ SCENE_LABEL_NAME = QColor(147, 197, 253)
 #: «No scene» (the view has left the active scene): orange, light enough to
 #: read on the grey pill.
 SCENE_LABEL_NONE = QColor(251, 146, 60)
+#: «No scene exists» (a document with no scenes at all): red, light enough
+#: to read on the grey pill — there is nothing to go back to yet.
+SCENE_LABEL_MISSING = QColor(252, 99, 99)
 
 #: X-ray: how opaque each translucent face layer is. Layers stack, so a face
 #: seen through another reads darker and an opening (no face) stays clear.
@@ -6649,11 +6652,13 @@ class Viewport(QOpenGLWidget):
         - ``(«No scene», None)`` once it has moved away (an orbit, pan or
           zoom), or when no scene is active — Update then writes the
           current view into the active scene and the name comes back;
-        - ``None`` (no label) in a document without scenes."""
+        - ``(«No scene exists», None)`` in a document without scenes, drawn
+          in red: a new file says so from the start (2026-10-08) instead of
+          showing no label at all."""
         scene = self.scene
         views = getattr(scene, "saved_views", None) or ()
         if not views:
-            return None
+            return tr("No scene exists"), None
         view = getattr(scene, "active_view", None)
         if view is not None and view in views:
             match = getattr(view, "matches_camera", None)
@@ -6673,11 +6678,11 @@ class Viewport(QOpenGLWidget):
         return tr("Active layer:"), active_layer(self.scene)
 
     def _draw_label_pill(self, painter: QPainter, x: float, y: float,
-                         prefix: str, name) -> tuple:
+                         prefix: str, name, color=None) -> tuple:
         """One top-left label: a grey pill with ``prefix`` in white and
         ``name`` in light blue — or, when ``name`` is ``None``, ``prefix``
-        alone in orange (the «No scene» state). Returns ``(right, bottom)``
-        of the pill."""
+        alone in orange (the «No scene» state) or in ``color``. Returns
+        ``(right, bottom)`` of the pill."""
         font = QFont()
         font.setPointSize(9)
         font.setBold(True)
@@ -6696,7 +6701,8 @@ class Viewport(QOpenGLWidget):
         painter.setFont(font)
         base = y + pad_y + fm.ascent()
         if name is None:
-            painter.setPen(QPen(SCENE_LABEL_NONE))
+            painter.setPen(QPen(color if color is not None
+                                else SCENE_LABEL_NONE))
             painter.drawText(QPointF(x + pad_x, base), prefix)
         else:
             painter.setPen(QPen(SCENE_LABEL_PREFIX))
@@ -6708,7 +6714,7 @@ class Viewport(QOpenGLWidget):
 
     def _draw_active_scene_label(self, painter: QPainter) -> float:
         """The top-left labels, side by side: «Scene: <name>» (or «No
-        scene»; absent in a document without scenes) and, to its right,
+        scene»; «No scene exists» in red without scenes) and, to its right,
         «Active layer: <name>» — which scene you are looking at and which
         layer you are drawing on were never said anywhere. Returns the y
         the transient top-left labels should start from."""
@@ -6716,7 +6722,10 @@ class Viewport(QOpenGLWidget):
         bottom = 0.0
         scene_label = self.active_scene_label()
         if scene_label is not None:
-            right, bottom = self._draw_label_pill(painter, x, y, *scene_label)
+            no_scenes = not (getattr(self.scene, "saved_views", None) or ())
+            right, bottom = self._draw_label_pill(
+                painter, x, y, *scene_label,
+                color=SCENE_LABEL_MISSING if no_scenes else None)
             x = right + spacing
         _right, b = self._draw_label_pill(painter, x, y,
                                           *self.active_layer_label())
