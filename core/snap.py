@@ -335,9 +335,24 @@ def _on_edge_point(edge, t: float,
     if project_onto_line is not None and ab.length() > 1e-9:
         proj = project_onto_line(edge.a, ab)
         if proj is not None:
-            tt = QVector3D.dotProduct(proj - edge.a, ab) / QVector3D.dotProduct(ab, ab)
-            return edge.a + ab * max(0.0, min(1.0, tt))
+            return _lerp_on_segment(edge.a, edge.b, proj)
     return edge.a + ab * t
+
+
+def _lerp_on_segment(a: QVector3D, b: QVector3D, p: QVector3D) -> QVector3D:
+    """The point of segment ``a``–``b`` nearest ``p``, worked in double
+    precision and rounded to a QVector3D once. Through QVector3D every
+    product rounds to single precision, and on a long segment (a guide's
+    visible span, hundreds of metres in a low view) that left the point a
+    fifth of a millimetre off its own line."""
+    ax, ay, az = a.x(), a.y(), a.z()
+    dx, dy, dz = b.x() - ax, b.y() - ay, b.z() - az
+    l2 = dx * dx + dy * dy + dz * dz
+    if l2 < 1e-18:
+        return QVector3D(a)
+    t = ((p.x() - ax) * dx + (p.y() - ay) * dy + (p.z() - az) * dz) / l2
+    t = max(0.0, min(1.0, t))
+    return QVector3D(ax + dx * t, ay + dy * t, az + dz * t)
 
 
 def _line_segment_intersection(
@@ -714,6 +729,12 @@ def _in_plane_with_point_snap(
         # to reach the plane through ``ref``.
         m = QVector3D.crossProduct(n, d)
         ma = QVector3D.dotProduct(m, a)                       # = |a × n|, > 0
+        if abs(ma) < 1e-4:
+            # In theory |a × n|, but a face all but parallel to the axis
+            # plane rounds it to nothing in single precision — a division
+            # by zero on a mouse move (2026-10-07) — and the line it would
+            # give runs off past the horizon anyway.
+            continue
         s = QVector3D.dotProduct(candidate - ref, a)
         foot = candidate - m * (s / ma)
         fp = world_to_pixel(foot)
@@ -1198,6 +1219,7 @@ def compute_snap(
     linear_mode: str = "all",
     work_plane_normal: Optional[QVector3D] = None,
     radial_arm: bool = False,
+    depth_of: Optional[Callable[[QVector3D], float]] = None,
 ) -> SnapResult:
     # Linear-inference toggle (Alt): "all" = every inference, "off" =
     # point snaps only, "parallel_perp" = keep only parallel/perpendicular. The
@@ -1364,8 +1386,13 @@ def compute_snap(
         bucket the order stays as appended (named points before endpoints).
         """
         nonlocal best
+        # …and then to the point nearer the camera: in a parallel view the
+        # front edge and the one straight behind it fall on the SAME pixels
+        # (an elevation, a side view), and the far one won as often as not.
         pending.sort(key=lambda c: (math.floor(c[0] / _TIE_PX),
-                                    0 if c[4] is None else 1))
+                                    0 if c[4] is None else 1,
+                                    depth_of(c[1]) if depth_of is not None
+                                    else 0.0))
         chosen = None
         for d, world, kind, color, context, occludable in pending:
             # Only snap to geometry the user can actually see — a vertex
@@ -1423,8 +1450,11 @@ def compute_snap(
             # the geometry is inside a group or component; Marco found the
             # magenta everywhere on a model made of components tiring —
             # 2026-09-14 — so the colours stay, the tip says "in component".)
-            _consider(edge.a, "endpoint", COLOR_ENDPOINT, context=getattr(edge, "context", None))
-            _consider(edge.b, "endpoint", COLOR_ENDPOINT, context=getattr(edge, "context", None))
+            # An end cut where the edge runs behind the eye is no endpoint.
+            if not getattr(edge, "clip_a", False):
+                _consider(edge.a, "endpoint", COLOR_ENDPOINT, context=getattr(edge, "context", None))
+            if not getattr(edge, "clip_b", False):
+                _consider(edge.b, "endpoint", COLOR_ENDPOINT, context=getattr(edge, "context", None))
         # A "close" already chosen stands; otherwise the nearest visible of
         # the named points and endpoints (named ones first on a tie — they
         # were appended first and the sort is stable).
@@ -1566,7 +1596,9 @@ def compute_snap(
     for edge in scene.edges:
         if getattr(edge, "guide", False) or (edge.a - edge.b).length() < 1e-9:
             continue
-        _consider((edge.a + edge.b) * 0.5, "midpoint", COLOR_MIDPOINT,
+        # The WHOLE edge's midpoint, also for one cut at the eye.
+        ea, eb = getattr(edge, "full", None) or (edge.a, edge.b)
+        _consider((ea + eb) * 0.5, "midpoint", COLOR_MIDPOINT,
                   context=getattr(edge, "context", None))
     _consider(QVector3D(0.0, 0.0, 0.0), "origin", COLOR_ORIGIN)
     _resolve()
@@ -1592,8 +1624,7 @@ def compute_snap(
         ab = edge.b - edge.a
         if project_onto_line is not None and ab.length() > 1e-9:
             proj = project_onto_line(edge.a, ab)
-            tt = QVector3D.dotProduct(proj - edge.a, ab) / QVector3D.dotProduct(ab, ab)
-            on_pt = edge.a + ab * max(0.0, min(1.0, tt))
+            on_pt = _lerp_on_segment(edge.a, edge.b, proj)
         else:
             on_pt = edge.a + ab * t
         if is_occluded is not None and is_occluded(on_pt):

@@ -155,14 +155,22 @@ class _SnapEdge:
     marks the degenerate one that carries a circle's centre."""
 
     __slots__ = ("a", "b", "center", "component_origin", "arc_midpoint",
-                 "guide", "in_group", "context", "group", "figure")
+                 "guide", "in_group", "context", "group", "figure",
+                 "clip_a", "clip_b", "full")
 
     def __init__(self, a, b, center: bool = False, component_origin: bool = False,
                  arc_midpoint: bool = False, guide: bool = False,
                  in_group: bool = False, context=None, group=None,
-                 figure: bool = False) -> None:
+                 figure: bool = False, clip_a: bool = False,
+                 clip_b: bool = False, full=None) -> None:
         self.a = a
         self.b = b
+        # An edge running behind the eye reaches the snap as its part in
+        # front (see ``Viewport._front_snap_edge``): a clipped end is no
+        # endpoint, and the midpoint is the WHOLE edge's (``full``).
+        self.clip_a = clip_a
+        self.clip_b = clip_b
+        self.full = full
         self.figure = figure                       # a face-me figure's feet
         self.center = center
         self.component_origin = component_origin   # a group's insertion point
@@ -171,6 +179,17 @@ class _SnapEdge:
         self.in_group = in_group                   # magenta point inferences
         self.context = context                     # "group" / "component" for the tip
         self.group = group                         # the top-level owner, when known
+
+
+def _segments_px(vp, A, B):
+    """``vp._project_segments_px`` — or, on the bare stand-ins of the
+    tests, the two ends projected as before."""
+    fn = getattr(vp, "_project_segments_px", None)
+    if fn is not None:
+        return fn(A, B)
+    ax, ay, oka = vp._project_px(A)
+    bx, by, okb = vp._project_px(B)
+    return ax, ay, bx, by, oka & okb
 
 
 def _group_pseudo_edge(idx, i: int) -> _SnapEdge:
@@ -242,6 +261,10 @@ SHADER_DIR = app_root() / "resources" / "shaders"
 #: ~a dozen times per hover, and an exploded medium import (9k faces =
 #: ~20k edges) froze every mouse move (user report, piscina.igz).
 _LOOSE_SNAP_CAP = 3000
+
+#: INGETRAZO_SNAP_DEBUG=1 logs every snap that lands on a face with an edge
+#: near the cursor (see ``Viewport._snap_debug``).
+_SNAP_DEBUG = bool(os.environ.get("INGETRAZO_SNAP_DEBUG"))
 
 
 def _ray_aabb_span(o, d, lo, hi):
@@ -1296,6 +1319,13 @@ class Viewport(QOpenGLWidget):
         self._photo_textures = []
         self._photo_ranges = []
 
+        # Overlays (top right): what the viewport lays over the model to
+        # inspect it — for now Face Orientation, which shows which side of
+        # every face the camera sees.
+        self.show_face_orientation = False
+        self._overlay_button = None
+        self._build_overlay_button()
+
     # ---- GL lifecycle -------------------------------------------------------
     def initializeGL(self) -> None:
         if getattr(self, "_gl", None) is not None:
@@ -1369,6 +1399,7 @@ class Viewport(QOpenGLWidget):
         self._loc_shadow_overlay = self._program.uniformLocation(
             "u_shadow_overlay")
         self._loc_stipple = self._program.uniformLocation("u_stipple")
+        self._loc_face_orient = self._program.uniformLocation("u_face_orient")
         self._loc_viewport_px = self._program.uniformLocation("u_viewport_px")
         self._loc_dash_px = self._program.uniformLocation("u_dash_px")
         self._depth_program = self._compile_depth_program()
@@ -1424,6 +1455,75 @@ class Viewport(QOpenGLWidget):
         self._tile_quad_vao, self._tile_quad_vbo = self._create_dynamic_uv()
         self._terrain_vao, self._terrain_vbo = self._create_dynamic_uv()
         self._photo_vao, self._photo_vbo = self._create_dynamic_uv()
+
+    def resizeEvent(self, ev) -> None:
+        super().resizeEvent(ev)
+        self._place_overlay_button()
+
+    # ---- Overlays (top-right button) -----------------------------------------
+    def _build_overlay_button(self) -> None:
+        """The «Overlays» button in the top-right corner and its drop-down:
+        a checkbox per overlay. The menu stays open while the boxes are
+        ticked (one look at the model, several switches), as the classic
+        overlay popover does."""
+        from PySide6.QtWidgets import (QCheckBox, QMenu, QToolButton,
+                                       QWidgetAction)
+        btn = QToolButton(self)
+        btn.setObjectName("viewportOverlayButton")
+        btn.setText(tr("Overlays"))
+        btn.setToolTip(tr("What the viewport shows over the model"))
+        btn.setPopupMode(QToolButton.InstantPopup)
+        btn.setCursor(Qt.ArrowCursor)
+        btn.setStyleSheet(
+            "QToolButton#viewportOverlayButton {"
+            " background: rgba(40, 42, 46, 200); color: #e8e8e8;"
+            " border: 1px solid rgba(255, 255, 255, 40); border-radius: 4px;"
+            " padding: 3px 18px 3px 8px; }"
+            "QToolButton#viewportOverlayButton:hover {"
+            " background: rgba(60, 63, 68, 220); }"
+            "QToolButton#viewportOverlayButton::menu-indicator {"
+            " subcontrol-origin: padding; subcontrol-position: right center;"
+            " right: 5px; }")
+        menu = QMenu(btn)
+        box = QCheckBox(tr("Face Orientation"), menu)
+        box.setToolTip(tr("Blue: the front of a face. Red: its back, an "
+                          "inverted face or the inside of a solid."))
+        box.setStyleSheet("QCheckBox { padding: 4px 10px; }")
+        box.setChecked(self.show_face_orientation)
+        box.toggled.connect(self.set_face_orientation)
+        act = QWidgetAction(menu)
+        act.setDefaultWidget(box)
+        menu.addAction(act)
+        btn.setMenu(menu)
+        self._overlay_button = btn
+        self._face_orient_box = box
+        self._place_overlay_button()
+        btn.show()
+
+    def _place_overlay_button(self) -> None:
+        btn = getattr(self, "_overlay_button", None)
+        if btn is None:
+            return
+        btn.adjustSize()
+        btn.move(max(self.width() - btn.width() - 8, 0), 8)
+        btn.raise_()
+
+    def set_face_orientation(self, on: bool) -> None:
+        """Overlays ▸ Face Orientation on or off."""
+        on = bool(on)
+        if on == self.show_face_orientation:
+            return
+        self.show_face_orientation = on
+        box = getattr(self, "_face_orient_box", None)
+        if box is not None and box.isChecked() != on:
+            box.setChecked(on)
+        self.update()
+
+    def _face_orientation_on(self) -> bool:
+        # An overlay is for looking at the model, never part of a picture
+        # of it: exports and printed sheets render without it.
+        return (bool(getattr(self, "show_face_orientation", False))
+                and getattr(self, "_export_size", None) is None)
 
     def resizeGL(self, w: int, h: int) -> None:
         # Qt passes framebuffer-pixel sizes here (already scaled by DPR), so
@@ -1619,6 +1719,7 @@ class Viewport(QOpenGLWidget):
         # Solid-colour by default; the textured-face pass flips this on.
         self._program.setUniformValue(self._loc_use_tex, 0)
         self._program.setUniformValue(self._loc_stipple, 0)
+        self._program.setUniformValue(self._loc_face_orient, 0)
         self._program.setUniformValue(self._loc_tex, 0)  # sampler → unit 0
         self._program.setUniformValue(self._loc_use_vcolor, 0)
         self._program.setUniformValue1f(self._loc_opacity, 1.0)
@@ -1737,6 +1838,11 @@ class Viewport(QOpenGLWidget):
         if getattr(self, "_frame_shadow", None) is not None:
             self._draw_shadow_ground(style)
             self._program.setUniformValue(self._loc_shadow_enable, 1)
+        # Overlays ▸ Face Orientation: blue fronts, red backs, over every
+        # face pass from here to the translucent runs (not the section
+        # fill, not the edges, never in an exported image).
+        orient = int(self._face_orientation_on())
+        self._program.setUniformValue(self._loc_face_orient, orient)
         if self._faces_count > 0 and mode != "wireframe":
             self._gl.glEnable(GL_POLYGON_OFFSET_FILL)
             self._gl.glPolygonOffset(1.0, 1.0)
@@ -1961,7 +2067,9 @@ class Viewport(QOpenGLWidget):
                 self._program.setUniformValue(self._loc_use_tex, 0)
             self._gl.glDisable(GL_CULL_FACE)
 
+        self._program.setUniformValue(self._loc_face_orient, 0)
         self._draw_section_fill(mode, style)
+        self._program.setUniformValue(self._loc_face_orient, orient)
 
         # Translucent material runs (.skp trans with useTrans): drawn
         # after everything opaque, blended, depth-tested but not depth-
@@ -2030,6 +2138,8 @@ class Viewport(QOpenGLWidget):
             self._program.setUniformValue1f(self._loc_opacity, 1.0)
             self._gl.glDisable(GL_POLYGON_OFFSET_FILL)
             self._gl.glDepthMask(GL_TRUE)
+
+        self._program.setUniformValue(self._loc_face_orient, 0)
 
         # Face-me billboards (2D people): per-frame textured cutout
         # — skipped on plan sheets and line styles: a coloured cutout person
@@ -7846,6 +7956,11 @@ class Viewport(QOpenGLWidget):
         self, x: float, y: float
     ) -> tuple[Optional[QVector3D], Optional[QVector3D]]:
         """Camera ray (origin, unit direction) through the given pixel."""
+        cam = self.camera
+        if not getattr(cam, "perspective", True) and hasattr(cam, "up_vector"):
+            ray = self._parallel_ray(x, y)
+            if ray is not None:
+                return ray
         w = max(self.width(), 1)
         h = max(self.height(), 1)
         ndc_x = 2.0 * x / w - 1.0
@@ -7860,6 +7975,74 @@ class Viewport(QOpenGLWidget):
         if direction.length() < 1e-9:
             return None, None
         return p_near, direction.normalized()
+
+    def _snap_depth(self, p: QVector3D) -> float:
+        """How far ``p`` lies from the camera along what it sees — the snap
+        engine's tie-break between points that share a pixel."""
+        cam = self.camera
+        if cam.perspective:
+            return (p - cam.eye()).length()
+        return QVector3D.dotProduct(p - cam.eye(), cam.forward())
+
+    def _parallel_ray(self, x: float, y: float):
+        """The parallel view's ray through a pixel, worked in double
+        precision from the camera itself and starting just behind the model.
+
+        Unprojected through the matrices, the ray started on the near plane
+        of the parallel projection — 10 km behind the eye, where single
+        precision only tells millimetres apart — so every point the cursor
+        put on a face, an edge's plane or a guide came back up to 1.6 mm off
+        it in a parallel view and exact in perspective (measured 2026-10-07).
+        The direction is the sight line; the origin sits on the eye's plane
+        moved back past everything the view can show."""
+        cam = self.camera
+        w = max(self.width(), 1)
+        h = max(self.height(), 1)
+        ndc_x = 2.0 * x / w - 1.0
+        ndc_y = 1.0 - 2.0 * y / h
+        cp, sp = math.cos(cam.pitch), math.sin(cam.pitch)
+        cy, sy = math.cos(cam.yaw), math.sin(cam.yaw)
+        d = cam.distance
+        t = cam.target
+        ex, ey, ez = t.x() + d * cp * cy, t.y() + d * cp * sy, t.z() + d * sp
+        fx, fy, fz = -cp * cy, -cp * sy, -sp
+        up = cam.up_vector()
+        ux, uy, uz = up.x(), up.y(), up.z()
+        rx, ry, rz = fy * uz - fz * uy, fz * ux - fx * uz, fx * uy - fy * ux
+        rl = math.sqrt(rx * rx + ry * ry + rz * rz)
+        if rl < 1e-12:
+            return None
+        rx, ry, rz = rx / rl, ry / rl, rz / rl
+        vx, vy, vz = ry * fz - rz * fy, rz * fx - rx * fz, rx * fy - ry * fx
+        half_h = d * math.tan(math.radians(cam.fov_deg) / 2.0)
+        half_w = half_h * cam.aspect
+        px = ex + rx * ndc_x * half_w + vx * ndc_y * half_h
+        py = ey + ry * ndc_x * half_w + vy * ndc_y * half_h
+        pz = ez + rz * ndc_x * half_w + vz * ndc_y * half_h
+        back = self._parallel_back(px, py, pz)
+        return (QVector3D(px - fx * back, py - fy * back, pz - fz * back),
+                QVector3D(fx, fy, fz))
+
+    def _parallel_back(self, px: float, py: float, pz: float) -> float:
+        """How far behind a point of the eye's plane a parallel ray must
+        start to have the whole model in front of it: past the model's
+        bounding sphere, seen from that point, plus the camera distance."""
+        key = _cache_ver(self)
+        cached = getattr(self, "_parallel_bounds", None)
+        if cached is None or cached[0] != key:
+            try:
+                lo, hi = self.scene.bounds()
+            except Exception:  # noqa: BLE001 — stub scenes in tests
+                lo = hi = None
+            if lo is None or hi is None:
+                sphere = (0.0, 0.0, 0.0, 0.0)
+            else:
+                c = (lo + hi) * 0.5
+                sphere = (c.x(), c.y(), c.z(), (hi - lo).length() * 0.5)
+            cached = self._parallel_bounds = (key, sphere)
+        cx, cy, cz, rad = cached[1]
+        gap = math.sqrt((px - cx) ** 2 + (py - cy) ** 2 + (pz - cz) ** 2)
+        return gap + rad + self.camera.distance + 1.0
 
     def _coplanar_eps(self, origin: QVector3D, direction: QVector3D,
                       best_t: float) -> float:
@@ -7912,12 +8095,26 @@ class Viewport(QOpenGLWidget):
         # status bar said "On face"). If a real face IS under the cursor,
         # believe the face — that is what the cursor is pointing at, and what
         # the inference is already promising.
-        face, group = self.pick_face_any(x, y)
+        #
+        # Without the grazing test: the point is bounded by the face the ray
+        # actually meets, so a steep angle cannot run it to the horizon. With
+        # it, a face seen under 6 deg gave no point at all, and no point meant
+        # no snap either, not even the corner beside the cursor. A rotated
+        # group or component turns its sides edge-on far more often than an
+        # axis-aligned box: «en unas caras coge y en otras no». And the
+        # PLACEMENT's matrix, not the owner's: a nested component's owner
+        # carries the container's matrix and put the plane elsewhere.
+        face, group = self.pick_face_placement(x, y)
         if face is not None:
             from core.snap import face_plane_world
             fpoint, fnormal = face_plane_world(face, getattr(group, "xform", None))
-            if fnormal is not None:
-                return self._ray_plane(origin, direction, fpoint, fnormal)
+            if fnormal is not None and fnormal.length() > 1e-9:
+                n = fnormal.normalized()
+                denom = QVector3D.dotProduct(n, direction)
+                if abs(denom) > 1e-9:
+                    t = QVector3D.dotProduct(n, fpoint - origin) / denom
+                    if t >= 0:
+                        return origin + direction * t
         return None
 
     #: A ray meeting the work plane below this angle gives a point nobody
@@ -8132,12 +8329,24 @@ class Viewport(QOpenGLWidget):
         ray_origin, ray_dir = self._pixel_to_ray(pixel_x, pixel_y)
         if ray_origin is None or ray_dir is None:
             return start
-        d1 = lock_dir.normalized()
-        d2 = ray_dir
-        r = start - ray_origin
-        b = QVector3D.dotProduct(d1, d2)
-        d = QVector3D.dotProduct(d1, r)
-        e = QVector3D.dotProduct(d2, r)
+        # In double precision, rounded to a QVector3D once at the end:
+        # QVector3D arithmetic is single precision at every step, and a
+        # guide's visible span runs hundreds of metres in a low view — the
+        # point on it came back a fifth of a millimetre off the line
+        # (measured 2026-10-07).
+        sx, sy, sz = start.x(), start.y(), start.z()
+        lx, ly, lz = lock_dir.x(), lock_dir.y(), lock_dir.z()
+        ln = math.sqrt(lx * lx + ly * ly + lz * lz)
+        if ln < 1e-12:
+            return start
+        lx, ly, lz = lx / ln, ly / ln, lz / ln
+        qx, qy, qz = ray_dir.x(), ray_dir.y(), ray_dir.z()
+        rx = sx - ray_origin.x()
+        ry = sy - ray_origin.y()
+        rz = sz - ray_origin.z()
+        b = lx * qx + ly * qy + lz * qz
+        d = lx * rx + ly * ry + lz * rz
+        e = qx * rx + qy * ry + qz * rz
         denom = 1.0 - b * b
         if abs(denom) < 1e-6:
             # Lock line is parallel to the camera ray — project the ray
@@ -8145,7 +8354,7 @@ class Viewport(QOpenGLWidget):
             t = -d
         else:
             t = (b * e - d) / denom
-        return start + d1 * t
+        return QVector3D(sx + lx * t, sy + ly * t, sz + lz * t)
 
     #: Eye depth (m) a segment is cut at when it runs behind the camera.
     _CLIP_W = 1e-3
@@ -9103,6 +9312,86 @@ class Viewport(QOpenGLWidget):
         m = self.camera.projection_matrix() * self.camera.view_matrix()
         return np.array(m.data(), dtype=np.float64).reshape(4, 4, order="F")
 
+    #: Eye depth (clip w) where a segment running behind the camera is cut
+    #: for picking and snapping — the same as the guides' and the preview's.
+    _SEG_CLIP_W = 1e-3
+
+    def _project_segments_px(self, A, B):
+        """Batch world segments (N, 3) × 2 → ``(ax, ay, bx, by, ok)``, each
+        cut where it passes behind the eye instead of dropped whole.
+
+        Projecting the two ends alone threw away every edge with one end
+        behind the camera — with the camera close to a long wall, the very
+        edges under the cursor: its top and its foot ran past the eye, read
+        «En cara» and could not be snapped or clicked, while the short
+        upright at the corner could (Marco's video, 2026-10-07). Clip
+        coordinates are linear along a segment, so the cut is exact; ``ok``
+        is False only when the whole segment is behind."""
+        import numpy as np
+        M = self._np_mvp()
+        ca = A @ M[:, :3].T + M[:, 3]
+        cb = B @ M[:, :3].T + M[:, 3]
+        wa, wb = ca[:, 3], cb[:, 3]
+        eps = self._SEG_CLIP_W
+        ok = (wa > eps) | (wb > eps)
+        cut_a = ok & (wa <= eps)
+        cut_b = ok & (wb <= eps)
+        if cut_a.any() or cut_b.any():
+            with np.errstate(divide="ignore", invalid="ignore"):
+                ta = np.where(cut_a, (eps - wa) / (wb - wa), 0.0)
+                tb = np.where(cut_b, (eps - wb) / (wa - wb), 0.0)
+            ca, cb = ca + (cb - ca) * ta[:, None], cb + (ca - cb) * tb[:, None]
+            wa, wb = ca[:, 3], cb[:, 3]
+        sa = np.where(ok, wa, 1.0)
+        sb = np.where(ok, wb, 1.0)
+        w, h = self.width(), self.height()
+        ax = (ca[:, 0] / sa * 0.5 + 0.5) * w
+        ay = (1.0 - (ca[:, 1] / sa * 0.5 + 0.5)) * h
+        bx = (cb[:, 0] / sb * 0.5 + 0.5) * w
+        by = (1.0 - (cb[:, 1] / sb * 0.5 + 0.5)) * h
+        return ax, ay, bx, by, ok
+
+    def _front_part(self, a: QVector3D, b: QVector3D):
+        """``(a', b', cut_a, cut_b)``: the part of world segment ``a``–``b``
+        in front of the eye, worked in double precision, or ``None`` when
+        all of it is behind."""
+        M = self._np_mvp()
+        wa = (M[3, 0] * a.x() + M[3, 1] * a.y() + M[3, 2] * a.z() + M[3, 3])
+        wb = (M[3, 0] * b.x() + M[3, 1] * b.y() + M[3, 2] * b.z() + M[3, 3])
+        eps = self._SEG_CLIP_W
+        if wa <= eps and wb <= eps:
+            return None
+        if wa > eps and wb > eps:
+            return a, b, False, False
+        if wa <= eps:
+            t = (eps - wa) / (wb - wa)
+            return (QVector3D(a.x() + (b.x() - a.x()) * t,
+                              a.y() + (b.y() - a.y()) * t,
+                              a.z() + (b.z() - a.z()) * t), b, True, False)
+        t = (eps - wb) / (wa - wb)
+        return (a, QVector3D(b.x() + (a.x() - b.x()) * t,
+                             b.y() + (a.y() - b.y()) * t,
+                             b.z() + (a.z() - b.z()) * t), False, True)
+
+    def _front_snap_edge(self, e):
+        """``e`` as the snap engine should see it: itself when all of it is
+        in front of the eye, ``None`` when all of it is behind, else a
+        pseudo-edge on its front part that keeps its context and knows its
+        cut end is not an endpoint (the snap read the two ends and dropped
+        the edge when one did not project)."""
+        part = self._front_part(e.a, e.b)
+        if part is None:
+            return None
+        a, b, cut_a, cut_b = part
+        if not (cut_a or cut_b):
+            return e
+        return _SnapEdge(a, b, in_group=bool(getattr(e, "in_group", False)),
+                         context=getattr(e, "context", None),
+                         group=getattr(e, "group", None),
+                         clip_a=cut_a or bool(getattr(e, "clip_a", False)),
+                         clip_b=cut_b or bool(getattr(e, "clip_b", False)),
+                         full=getattr(e, "full", None) or (e.a, e.b))
+
     def _project_px(self, pts):
         """Batch world points (N, 3) → ``(px, py, in_front)`` arrays — the
         exact math of :meth:`_world_to_pixel`, vectorised."""
@@ -9935,17 +10224,21 @@ class Viewport(QOpenGLWidget):
         """The world point of ``edge`` nearest the cursor (closest point of
         its screen-space segment, mapped back along the edge), or None when
         the edge does not project."""
-        pa = self._world_to_pixel(edge.a)
-        pb = self._world_to_pixel(edge.b)
+        part = self._front_part(edge.a, edge.b)   # its part before the eye
+        if part is None:
+            return None
+        a, b = part[0], part[1]
+        pa = self._world_to_pixel(a)
+        pb = self._world_to_pixel(b)
         if pa is None or pb is None:
             return None
         dx, dy = pb[0] - pa[0], pb[1] - pa[1]
         l2 = dx * dx + dy * dy
         if l2 < 1e-12:
-            return QVector3D(edge.a)
+            return QVector3D(a)
         t = ((screen_x - pa[0]) * dx + (screen_y - pa[1]) * dy) / l2
         t = max(0.0, min(1.0, t))
-        return edge.a + (edge.b - edge.a) * t
+        return a + (b - a) * t
 
     def pick_edge(self, screen_x: float, screen_y: float):
         """Return the edge closest to ``(screen_x, screen_y)`` within threshold."""
@@ -9967,9 +10260,8 @@ class Viewport(QOpenGLWidget):
         idx = self._pick_index(near="skip")
         if idx.edge_a is None:
             return None
-        ax, ay, oka = self._project_px(idx.edge_a)
-        bx, by, okb = self._project_px(idx.edge_b)
-        ok = oka & okb & idx.edge_sel
+        ax, ay, bx, by, ok = _segments_px(self, idx.edge_a, idx.edge_b)
+        ok = ok & idx.edge_sel
         soft = getattr(idx, "edge_soft", None)
         if (visible_only and soft is not None
                 and not getattr(self.scene, "show_hidden_geometry", False)):
@@ -10153,9 +10445,7 @@ class Viewport(QOpenGLWidget):
         cached = getattr(self, "_gedge_px_cache", None)
         if cached is not None and cached[0] == key:
             return cached[1]
-        ax, ay, oka = self._project_px(idx.gedge_a)
-        bx, by, okb = self._project_px(idx.gedge_b)
-        data = (ax, ay, bx, by, oka & okb)
+        data = _segments_px(self, idx.gedge_a, idx.gedge_b)
         self._gedge_px_cache = (key, data)
         return data
 
@@ -10194,9 +10484,7 @@ class Viewport(QOpenGLWidget):
         cached = getattr(self, "_ledge_px_cache", None)
         if cached is not None and cached[0] == key:
             return cached[1]
-        ax, ay, oka = self._project_px(idx.edge_a)
-        bx, by, okb = self._project_px(idx.edge_b)
-        data = (ax, ay, bx, by, oka & okb)
+        data = _segments_px(self, idx.edge_a, idx.edge_b)
         self._ledge_px_cache = (key, data)
         return data
 
@@ -10297,6 +10585,12 @@ class Viewport(QOpenGLWidget):
                 xf = getattr(g, "xform", None)
                 if xf is None or getattr(g, "billboard", False):
                     continue
+                # What is not drawn offers no point: the hidden plan blocks
+                # of an imported drawing put their origins along the foot of
+                # the walls built over them, and stole the snap from the
+                # edge with a point nobody could see (2026-10-07).
+                if not self.scene.entity_visible(g):
+                    continue
                 o = xf.map(QVector3D(0.0, 0.0, 0.0))
                 groups.append(g)
                 pts.append((o.x(), o.y(), o.z()))
@@ -10332,19 +10626,30 @@ class Viewport(QOpenGLWidget):
             if by_mesh is None:
                 by_mesh = self._arc_mid_by_mesh = {}
 
-            def local_mids(mesh):
+            def local_mids(mesh, keep=None):
                 serial = getattr(mesh, "_mut_serial", None)
+                if keep is not None:
+                    serial = (serial, keep[0])
                 hit = by_mesh.get(id(mesh))
                 if hit is None or hit[0] != serial:
-                    hit = by_mesh[id(mesh)] = (serial, self._mesh_arc_midpoints(mesh))
+                    hit = by_mesh[id(mesh)] = (
+                        serial, self._mesh_arc_midpoints(
+                            mesh, keep[1] if keep is not None else None))
                 return hit[1]
-            mids = list(local_mids(self.scene.mesh))
+            # The loose arcs on a hidden layer are not there to snap to.
+            scene = self.scene
+            hidden_sig = tuple(sorted(ly.name for ly in getattr(scene, "layers", ())
+                                      if not getattr(ly, "visible", True)))
+            mids = list(local_mids(scene.mesh,
+                                   (hidden_sig, scene.entity_visible)))
             # …and the arcs inside every placed group / component, through
             # each placement's matrix.
             for g in self._placements():
                 mesh = getattr(g, "mesh", None)
                 if mesh is None or getattr(g, "billboard", False):
                     continue
+                if not scene.entity_visible(g):
+                    continue                 # a hidden block's door swings
                 lm = local_mids(mesh)
                 if not lm:
                     continue
@@ -10363,14 +10668,14 @@ class Viewport(QOpenGLWidget):
         return out
 
     @staticmethod
-    def _mesh_arc_midpoints(mesh) -> list:
+    def _mesh_arc_midpoints(mesh, visible=None) -> list:
         """The sweep midpoint of every open curve chain of ``mesh`` (in the
-        mesh's own space)."""
+        mesh's own space); with ``visible``, only of the edges it accepts."""
         from core.snap import fit_circle
         by_curve: dict = {}
         for e in mesh.edges:
             cid = getattr(e, "curve", None)
-            if cid is not None:
+            if cid is not None and (visible is None or visible(e)):
                 by_curve.setdefault(cid, []).append(e)
         mids = []
         for edges in by_curve.values():
@@ -10495,19 +10800,67 @@ class Viewport(QOpenGLWidget):
                                   QVector3D(gp.position)))
         big = (px is not None
                and len(self.scene.edges) > _LOOSE_SNAP_CAP)
-        if not lines and not near and sp is None and not big and excl is None:
+        # Edges running behind the eye go in as their part in front: with
+        # the camera close to a long wall its top and foot have an end
+        # behind the camera, and the snap — which reads both ends — dropped
+        # them («No detecta las líneas», Marco, 2026-10-07).
+        behind_of = getattr(self, "_loose_edges_behind_eye", None)  # stub VPs
+        behind = behind_of() if behind_of is not None else frozenset()
+        front = getattr(self, "_front_snap_edge", None)
+        if front is not None:
+            near = [f for f in (front(e) for e in near) if f is not None]
+        hidden_of = getattr(self, "_hidden_layers_hold_edges", None)
+        hidden_layers = hidden_of is not None and hidden_of()
+        if (not lines and not near and sp is None and not big
+                and excl is None and not behind and not hidden_layers):
             return self.scene
         if big:
             loose = self._nearby_loose_edges(px, py)
         else:
             loose = list(self.scene.edges)
         loose = [e for e in loose if not getattr(e, "hidden", False)]
+        if hidden_layers:
+            vis = self.scene.entity_visible
+            loose = [e for e in loose if vis(e)]   # an invisible line
         if excl is not None and excl[0]:
             loose = [e for e in loose if id(e) not in excl[0]]
         if sp is not None:
             loose = [e for e in loose if _kept(e)]
+        if behind and front is not None:
+            loose = [f for f in (front(e) if id(e) in behind
+                                 else e for e in loose) if f is not None]
         from types import SimpleNamespace
         return SimpleNamespace(edges=loose + lines + near)
+
+    def _hidden_layers_hold_edges(self) -> bool:
+        """Whether some layer is switched off — then the snap scene leaves
+        out the loose edges on it (a line on a hidden layer attracted the
+        cursor, invisibly). A walk over the few layers, never the edges:
+        the filter itself runs on the bounded list near the cursor."""
+        return any(not getattr(ly, "visible", True)
+                   for ly in getattr(self.scene, "layers", ()) or ())
+
+    def _loose_edges_behind_eye(self) -> frozenset:
+        """ids of the loose edges with an end behind the camera — the few
+        :meth:`_snap_scene` must clip — in one vectorised pass, cached
+        while the scene and the camera stand still."""
+        idx = self._pick_index(near="skip")
+        if getattr(idx, "edge_a", None) is None or not len(idx.edge_a):
+            return frozenset()
+        M = self._np_mvp()
+        key = (self.scene.version, id(self.scene.mesh), M.tobytes())
+        cached = getattr(self, "_behind_eye_cache", None)
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        import numpy as np
+        eps = self._SEG_CLIP_W
+        wa = idx.edge_a @ M[3, :3] + M[3, 3]
+        wb = idx.edge_b @ M[3, :3] + M[3, 3]
+        edges = idx.edges
+        ids = frozenset(id(edges[int(i)])
+                        for i in np.flatnonzero((wa <= eps) | (wb <= eps)))
+        self._behind_eye_cache = (key, ids)
+        return ids
 
     def _group_obb(self, group):
         """``(frame, lo, hi)`` of the group in its OWN axes, cached on its
@@ -11134,12 +11487,30 @@ class Viewport(QOpenGLWidget):
         if getattr(idx, "tri_v0", None) is None \
                 and not getattr(idx, "own_spans", None):
             return False
-        origin = self.camera.eye()
-        delta = world - origin
-        dist = delta.length()
-        if dist < 1e-9:
-            return False
-        d = delta / dist
+        cam = self.camera
+        if getattr(cam, "perspective", True) or not hasattr(cam, "forward"):
+            origin = cam.eye()
+            delta = world - origin
+            dist = delta.length()
+            if dist < 1e-9:
+                return False
+            d = delta / dist
+            depth = dist
+        else:
+            # A parallel view looks along ONE direction: what hides a point
+            # lies on the sight line through it, not on a line to the eye —
+            # and a parallel view also shows what is behind the eye.
+            d = cam.forward()
+            dist = self._parallel_back(world.x(), world.y(), world.z())
+            origin = world - d * dist
+            depth = abs(QVector3D.dotProduct(world - cam.eye(), d))                 + cam.distance
+        # A point ON a face must not be hidden by that face. A fixed 1 mm
+        # was the margin, and single-precision coordinates seen from afar
+        # or along a face nearly edge-on round by more than that: corners
+        # and points on faces went dark at random on a large site. A
+        # hundred-thousandth of the distance (1 cm at 1 km, sub-pixel)
+        # and never less than the old millimetre.
+        eps = max(1e-3, depth * 1e-5)
         sp = _active_cut(self.scene)
         if sp is None:
             # Nothing to sort out per face: the single nearest hit decides,
@@ -11147,12 +11518,12 @@ class Viewport(QOpenGLWidget):
             # query (this fires dozens of times a frame).
             nearest = self._ray_hits(idx, origin, d, idx.ent_vis,
                                      reduce_global=True)
-            return nearest is not None and nearest < dist - 1e-3
+            return nearest is not None and nearest < dist - eps
         face_t = self._ray_hits(idx, origin, d, idx.ent_vis)
         if face_t is None:
             return False
         import numpy as np
-        hit = np.isfinite(face_t) & (face_t < dist - 1e-3)
+        hit = np.isfinite(face_t) & (face_t < dist - eps)
         if not hit.any():
             return False
         # An active cut removes what it hides, so a hit on the clipped-away
@@ -12916,7 +13287,7 @@ class Viewport(QOpenGLWidget):
 
         p = self._last_mouse_pos.toPoint()
         px_x, px_y = p.x(), p.y()
-        world_raw = self._world_from_pixel(px_x, px_y)
+        world_raw, points_only = self._snap_candidate(px_x, px_y)
         if world_raw is None:
             return
         modifiers = QGuiApplication.keyboardModifiers()
@@ -12950,9 +13321,12 @@ class Viewport(QOpenGLWidget):
             linear_mode=self.linear_inference_mode,
             work_plane_normal=self._work_plane_normal(),
             radial_arm=bool(getattr(self.active_tool, "radial_arm", False)),
+            depth_of=self._snap_depth,
         )
         snap = self._axis_source_cue(snap, px_x, px_y)
         snap = self._extension_snap(snap, px_x, px_y)
+        if points_only and snap.kind not in self._POINT_SNAPS:
+            return
         self.last_snap = snap
         ctx = ToolContext(
             viewport=self,
@@ -13353,11 +13727,14 @@ class Viewport(QOpenGLWidget):
         self._sync_axes()
         p = ev.position().toPoint()
         px_x, px_y = p.x(), p.y()
-        world_raw = self._world_from_pixel(px_x, px_y)
+        world_raw, points_only = self._snap_candidate(px_x, px_y)
         if world_raw is None:
             return None
         # Tools that don't snap (Select, Push/Pull) skip the snap engine and its
         # occlusion raycasts entirely, and show no snap marker.
+        if points_only and (self.active_tool is None
+                            or not self.active_tool.uses_snap):
+            return None
         if self.active_tool is not None and not self.active_tool.uses_snap:
             snap = SnapResult(world_raw, "none")
             return ToolContext(
@@ -13401,9 +13778,14 @@ class Viewport(QOpenGLWidget):
             linear_mode=self.linear_inference_mode,
             work_plane_normal=self._work_plane_normal(),
             radial_arm=bool(getattr(self.active_tool, "radial_arm", False)),
+            depth_of=self._snap_depth,
         )
         snap = self._axis_source_cue(snap, px_x, px_y)
         snap = self._extension_snap(snap, px_x, px_y)
+        if points_only and snap.kind not in self._POINT_SNAPS:
+            return None
+        if _SNAP_DEBUG:
+            self._snap_debug(px_x, px_y, snap)
         return ToolContext(
             viewport=self,
             world=snap.point,
@@ -13411,3 +13793,132 @@ class Viewport(QOpenGLWidget):
             modifiers=ev.modifiers(),
             snap=snap,
         )
+
+    def _snap_debug(self, px: float, py: float, snap) -> None:
+        """INGETRAZO_SNAP_DEBUG=1: when the snap lands on a face (or on
+        nothing) with an edge close to the cursor, write WHY to
+        ``ingetrazo-snap-debug.jsonl`` in the log folder — every edge near
+        the cursor, how far it projects, whether it was taken as hidden and
+        by how much, plus the camera, the style and the open context. A
+        snap that misses on one machine and not on another is answered by
+        the numbers of the machine where it misses."""
+        if snap.kind not in ("on_face", "none", "axis_inference"):
+            return
+        import json
+        import time
+        now = time.monotonic()
+        if now - getattr(self, "_snap_debug_t", 0.0) < 0.25:
+            return
+        from core.snap import _closest_on_segment_2d, _lerp_on_segment
+        try:
+            scene_edges = self._snap_scene(px, py).edges
+        except Exception as exc:  # noqa: BLE001 — a probe must not break input
+            scene_edges, err = [], repr(exc)
+        else:
+            err = None
+        near = []
+        eye = self.camera.eye()
+        for e in scene_edges:
+            pa, pb = self._world_to_pixel(e.a), self._world_to_pixel(e.b)
+            if pa is None or pb is None:
+                near.append({"a": e.a.toTuple(), "b": e.b.toTuple(),
+                             "unprojectable": True})
+                continue
+            d, _t = _closest_on_segment_2d((px, py), pa, pb)
+            if d > 25.0:
+                continue
+            on = _lerp_on_segment(e.a, e.b,
+                                  self._project_to_lock_line(e.a, e.b - e.a,
+                                                             px, py))
+            dist = (on - eye).length()
+            hit = None
+            idx = self._pick_index()
+            if getattr(idx, "tri_v0", None) is not None or getattr(idx, "own_spans", None):
+                dv = (on - eye) / max(dist, 1e-12)
+                hit = self._ray_hits(idx, eye, dv, idx.ent_vis,
+                                     reduce_global=True)
+            near.append({
+                "a": [round(v, 5) for v in e.a.toTuple()],
+                "b": [round(v, 5) for v in e.b.toTuple()],
+                "px_dist": round(d, 2),
+                "context": getattr(e, "context", None),
+                "in_group": bool(getattr(e, "in_group", False)),
+                "clip": [bool(getattr(e, "clip_a", False)),
+                         bool(getattr(e, "clip_b", False))],
+                "layer": getattr(e, "layer", None),
+                "hidden": bool(getattr(e, "hidden", False)),
+                "visible": (self.scene.entity_visible(e)
+                            if hasattr(e, "faces") else None),
+                "occluded": bool(self._is_occluded(on)),
+                "eye_dist": round(dist, 5),
+                "nearest_hit": (None if hit is None or hit == float("inf")
+                                else round(float(hit), 5)),
+            })
+        if not near and err is None:
+            return
+        self._snap_debug_t = now
+        cam = self.camera
+        eg = self.scene.edit_group
+        rec = {
+            "t": time.strftime("%H:%M:%S"),
+            "kind": snap.kind,
+            "cursor": [px, py],
+            "size": [self.width(), self.height()],
+            "dpr": self.devicePixelRatioF(),
+            "camera": {"persp": cam.perspective, "yaw": round(cam.yaw, 4),
+                       "pitch": round(cam.pitch, 4),
+                       "dist": round(cam.distance, 4),
+                       "target": [round(v, 4) for v in cam.target.toTuple()]},
+            "style": getattr(self._effective_style(), "face_mode", None),
+            "tool": type(self.active_tool).__name__,
+            "edit_group": (None if eg is None else
+                           [getattr(eg, "name", None),
+                            bool(getattr(eg, "is_instance", lambda: False)())]),
+            "thresholds": [self.snap_threshold_px, self.edge_snap_threshold_px],
+            "loose_edges": len(self.scene.edges),
+            "snap_scene_edges": len(scene_edges),
+            "error": err,
+            "near": near,
+        }
+        try:
+            from core.paths import user_log_dir
+            path = user_log_dir() / "ingetrazo-snap-debug.jsonl"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        except OSError:
+            pass
+
+    #: Snaps that land on a definite point of the model, whatever the
+    #: candidate the cursor gave: the only ones worth keeping when the
+    #: candidate itself was a stand-in (see :meth:`_snap_candidate`).
+    _POINT_SNAPS = _NAMED_SNAPS | {"on_line"}
+
+    def _snap_candidate(self, px: float, py: float):
+        """``(world, points_only)``: the cursor's point on the work plane,
+        or — when the ray only grazes that plane and no face is under the
+        cursor — a stand-in on the plane facing the camera through its
+        target, with ``points_only`` set: the snap may still land on a
+        corner, a midpoint or an edge there, but nothing that would keep
+        the stand-in itself. With the camera low over the ground, a corner
+        with nothing behind it gave no point and so no snap at all, though
+        the cursor sat right on it (measured 2026-10-06: 14 of 304 corners
+        of a plain box at 12 deg of pitch)."""
+        world = self._world_from_pixel(px, py)
+        if world is not None:
+            return world, False
+        origin, direction = self._pixel_to_ray(px, py)
+        if origin is None or direction is None:
+            return None, False
+        cam = self.camera
+        fwd = cam.target - cam.eye()
+        if fwd.length() < 1e-9:
+            return None, False
+        fwd = fwd.normalized()
+        denom = QVector3D.dotProduct(direction, fwd)
+        if denom < 1e-6:
+            return None, False
+        t = QVector3D.dotProduct(cam.target - origin, fwd) / denom
+        if t < 0:
+            return None, False
+        return origin + direction * t, True

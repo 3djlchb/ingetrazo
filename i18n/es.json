@@ -2486,5 +2486,9 @@
  "Its {n} faces will be painted, also the ones that already have a material.": "Se pintarán sus {n} caras, también las que ya tienen un material.",
  "Its {n} other copies change too: they share the definition.": "También cambian sus otras {n} copias: comparten la definición.",
  "{what} «{name}» painted: {n} faces": "{what} «{name}» pintado: {n} caras",
- "Preparing the model for Blender…": "Preparando el modelo para Blender…"
+ "Preparing the model for Blender…": "Preparando el modelo para Blender…",
+ "Overlays": "Overlay",
+ "What the viewport shows over the model": "Lo que el visor muestra sobre el modelo",
+ "Face Orientation": "Orientación de cara",
+ "Blue: the front of a face. Red: its back, an inverted face or the inside of a solid.": "Azul: el frente de una cara. Rojo: su reverso, una cara invertida o el interior de un sólido."
 }

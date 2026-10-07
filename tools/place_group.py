@@ -160,12 +160,22 @@ class PlaceGroupTool(Tool):
     def _update_alignment(self, ctx: ToolContext) -> None:
         if not self._align:
             return
+        vp = ctx.viewport
+        pick = (getattr(vp, "pick_face_placement", None)
+                or getattr(vp, "pick_face_any", None))
         try:
-            hit = ctx.viewport.pick_face_any(ctx.screen.x(), ctx.screen.y())
+            hit = pick(ctx.screen.x(), ctx.screen.y()) if pick else None
         except Exception:
             hit = None
         face = hit[0] if isinstance(hit, tuple) else hit
-        self._face_normal = face.normal() if face is not None else None
+        grp = hit[1] if isinstance(hit, tuple) else None
+        if face is None:
+            self._face_normal = None
+            return
+        # World normal: on a turned group's face the local one tilted the
+        # component being placed.
+        from core.snap import face_plane_world
+        self._face_normal = face_plane_world(face, getattr(grp, "xform", None))[1]
 
     # ---- Spatial input ------------------------------------------------------
     def on_hover(self, ctx: ToolContext) -> None:

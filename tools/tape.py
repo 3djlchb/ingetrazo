@@ -27,6 +27,8 @@ locks onto, erasable with the Eraser or Edit ▸ Delete Guides. Esc cancels.
 """
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QVector3D
 
@@ -117,6 +119,7 @@ class TapeMeasureTool(Tool):
         # after one measure-only reading the guides looked broken (Marco,
         # 2026-09-17: «solo funciona con ctrl»).
         self._mode = "line"
+        self._viewport = viewport
         self._reset()
 
     def on_deactivate(self, viewport) -> None:
@@ -158,6 +161,7 @@ class TapeMeasureTool(Tool):
     # ---- Spatial input ------------------------------------------------------
     def on_click(self, ctx: ToolContext) -> None:
         viewport = ctx.viewport
+        self._viewport = viewport
         if self.start_point is None:
             self.start_point = ctx.world
             # Clicking an edge's BODY starts guide mode; an endpoint measures.
@@ -230,6 +234,7 @@ class TapeMeasureTool(Tool):
         viewport.update()
 
     def on_hover(self, ctx: ToolContext) -> None:
+        self._viewport = ctx.viewport
         self.hover_point = ctx.world
         ctx.viewport.update()
 
@@ -307,13 +312,56 @@ class TapeMeasureTool(Tool):
     def _edge_dir(self) -> QVector3D:
         return (self._edge.b - self._edge.a).normalized()
 
+    #: How close (degrees) the pull must come to a clean direction square to
+    #: the source — level across it, or straight up — to be held to it.
+    OFFSET_MAGNET_DEG = 10.0
+
     def _guide_offset(self, world: QVector3D) -> QVector3D | None:
-        """Cursor offset perpendicular to the source edge (the guide's pull)."""
+        """Cursor offset perpendicular to the source edge (the guide's pull).
+
+        Held to the clean direction square to the source — level across it,
+        or plumb — when it runs within :data:`OFFSET_MAGNET_DEG` of one. The
+        pull was the bare 3-D perpendicular, so a guide on the floor dragged
+        to the foot of a wall standing on a 15 cm slab leaned up by those
+        15 cm: the distance it showed mixed plan and height, a typed 1.20
+        laid the guide 1.19 m out and above the floor, and every guide after
+        it carried the error (Marco, 2026-10-07: «a veces pierde la
+        precisión al generar guías»). Alt (inferences off) leaves it free."""
         if self._edge is None or self.start_point is None:
             return None
         d = self._edge_dir()
         delta = world - self.start_point
-        return delta - d * QVector3D.dotProduct(delta, d)
+        off = delta - d * QVector3D.dotProduct(delta, d)
+        if self._magnet_off or off.length() < 1e-9:
+            return off
+        up = QVector3D(0.0, 0.0, 1.0)
+        dirs = []
+        across = QVector3D.crossProduct(d, up)
+        if across.length() > 1e-6:
+            dirs.append(across.normalized())                 # level, across
+            plumb = up - d * QVector3D.dotProduct(up, d)
+            if plumb.length() > 1e-6:
+                dirs.append(plumb.normalized())              # straight up
+        else:
+            # A plumb source: every level direction is square to it; the
+            # two axes are the clean ones.
+            dirs += [QVector3D(1.0, 0.0, 0.0), QVector3D(0.0, 1.0, 0.0)]
+        n = off.normalized()
+        cos_tol = math.cos(math.radians(self.OFFSET_MAGNET_DEG))
+        best = None
+        for u in dirs:
+            c = QVector3D.dotProduct(n, u)
+            if abs(c) >= cos_tol and (best is None or abs(c) > best[0]):
+                best = (abs(c), u)
+        if best is None:
+            return off
+        u = best[1]
+        return u * QVector3D.dotProduct(off, u)
+
+    @property
+    def _magnet_off(self) -> bool:
+        vp = getattr(self, "_viewport", None)
+        return getattr(vp, "linear_inference_mode", "all") == "off"
 
     def _place_guide_point(self, viewport, where: QVector3D,
                            origin: QVector3D | None = None) -> None:

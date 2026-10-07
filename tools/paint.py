@@ -134,6 +134,13 @@ def clicked_back_side(viewport, face, group, x: float, y: float) -> bool:
     if origin is None or direction is None:
         return False
     from core.snap import face_plane_world
+    # The PLACEMENT's matrix places the normal; the owner ``group`` is the
+    # container's for a nested component, which turned the normal wrong.
+    placed = getattr(viewport, "pick_face_placement", None)
+    if placed is not None:
+        pface, pgroup = placed(x, y)
+        if pface is face:
+            group = pgroup
     _p, normal = face_plane_world(face, getattr(group, "xform", None))
     return QVector3D.dotProduct(normal, direction) > 0.0
 

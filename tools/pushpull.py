@@ -879,19 +879,39 @@ class PushPullTool(Tool):
         cache = getattr(self, "_infer_cache", None)
         if cache is None:
             cache = []
-            meshes = ([vp.scene.mesh]
-                      + [g.mesh for g in getattr(vp.scene, "groups", [])])
+            # Every corner WHERE IT IS: a component's mesh is its prototype,
+            # in local coordinates, so reading ``g.mesh`` raw offered the
+            # corners of a copy sitting at the origin — pushing a face level
+            # with a placed component's top took the wrong height or none.
+            # Each placement (nested ones too) through its world matrix, and
+            # the model outside an open group as well.
+            scene = vp.scene
+            meshes = [(scene.mesh, None)]
+            loose = getattr(scene, "loose_mesh", None)
+            if loose is not None and loose is not scene.mesh:
+                meshes.append((loose, None))
+            placements = getattr(scene, "placements", None)
+            if callable(placements):
+                meshes += [(g.mesh, m) for g, m in placements()
+                           if getattr(g, "mesh", None) is not None]
+            else:                         # stub scenes in tests
+                meshes += [(g.mesh, getattr(g, "xform", None))
+                           for g in getattr(scene, "groups", [])]
             seen = set()
-            for mesh in meshes:
-                if id(mesh) in seen:      # shared prototypes: project once
+            for mesh, m in meshes:
+                key = (id(mesh), None if m is None else tuple(m.data()))
+                if key in seen:           # one mesh, one place: project once
                     continue
-                seen.add(id(mesh))
+                seen.add(key)
                 verts = mesh.vertices
                 if not verts:
                     continue
                 arr = np.array(
                     [[v.position.x(), v.position.y(), v.position.z()]
-                     for v in verts])
+                     for v in verts], dtype=np.float64)
+                if m is not None:
+                    mm = np.array(m.data(), dtype=np.float64).reshape(4, 4).T
+                    arr = arr @ mm[:3, :3].T + mm[:3, 3]
                 cache.append((verts, arr))
             self._infer_cache = cache
         proj = getattr(vp, "_project_px", None)
@@ -904,15 +924,15 @@ class PushPullTool(Tool):
             else:
                 # Stub viewports (tests) expose only the scalar projector.
                 cand = []
-                for i, vtx in enumerate(verts):
-                    pix = vp._world_to_pixel(vtx.position)
+                for i in range(len(arr)):
+                    pix = vp._world_to_pixel(QVector3D(*arr[i]))
                     if pix is None:
                         continue
                     dd = (pix[0] - sx) ** 2 + (pix[1] - sy) ** 2
                     if dd <= thr * thr:
                         cand.append((i, dd))
             for i, dd in cand:
-                p = verts[i].position
+                p = QVector3D(*arr[i])          # world, not the prototype's
                 if _key(p) in exclude:
                     continue  # the base's own corners would pin the drag to 0
                 if best is None or dd < best[0]:

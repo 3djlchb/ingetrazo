@@ -87,12 +87,16 @@ class SectionPlaneTool(Tool):
             if self._shift_normal is None:
                 self._shift_normal = QVector3D(self._current_normal())
         elif self._axis_pick is None:
-            pick = getattr(ctx.viewport, "pick_face_any", None)
+            pick = (getattr(ctx.viewport, "pick_face_placement", None)
+                    or getattr(ctx.viewport, "pick_face_any", None))
             face = None
             if pick is not None:
                 face, _grp = pick(ctx.screen.x(), ctx.screen.y())
             if face is not None:
-                self._normal = face.normal().normalized()
+                # World normal: a turned group's face holds its local one.
+                from core.snap import face_plane_world
+                _p, n = face_plane_world(face, getattr(_grp, "xform", None))
+                self._normal = n.normalized()
             else:                                   # ground: horizontal cut
                 self._normal = self._toward_camera(QVector3D(0, 0, 1))
         ctx.viewport.update()

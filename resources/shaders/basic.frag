@@ -57,6 +57,12 @@ uniform int u_stipple;
 flat in vec4 v_line_clip;
 uniform vec2 u_viewport_px;
 uniform float u_dash_px;
+// Overlays ▸ Face Orientation: 1 around the FACE passes only — the side
+// the camera sees is washed blue when it is the face's front and red when
+// it is its back (an inverted face, or the inside of a solid). It goes by
+// the winding alone, so it also tells on the imported groups' faces, whose
+// batched pass otherwise paints both sides alike.
+uniform int u_face_orient;
 
 in vec2 v_uv;
 in vec3 v_color;
@@ -170,6 +176,11 @@ void main() {
         // path), where it is honest "you are looking at the inside" feedback.
         vec4 front = (u_use_vcolor == 1) ? vec4(v_color, u_opacity) : u_color;
         c = (gl_FrontFacing || u_use_vcolor == 1) ? front : u_back_color;
+    }
+    if (u_face_orient == 1) {
+        vec3 side = gl_FrontFacing ? vec3(0.19, 0.42, 0.90)
+                                   : vec3(0.90, 0.16, 0.16);
+        c.rgb = mix(c.rgb, side, 0.72);
     }
     if (u_shadow_enable == 1) {
         if (u_shadow_overlay == 1) {

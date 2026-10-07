@@ -426,9 +426,82 @@ class Scene:
         from core.group import transformed_mesh
         inverse, ok = xform.inverted()
         local = transformed_mesh(edited, inverse if ok else xform)
+        if ok:
+            Scene._keep_untouched_local(local, proto, xform)
         proto.restore_state(local.capture_state())
         group.mesh = proto
         group.xform = xform
+
+    @staticmethod
+    def _keep_untouched_local(local, proto, xform) -> None:
+        """Put back, exactly, the local position of every vertex the edit
+        did not move.
+
+        Through the inverse matrix a corner comes back a rounding or two
+        off in single precision, and EVERY vertex of the definition went
+        through it on EVERY edit — a turned component drifted with each
+        session, and a component far from the origin by whole decimetres
+        (measured 2026-10-07: 0.7 m after 20 edits of a box placed at
+        survey coordinates), so its corners stopped meeting what they used
+        to. A vertex whose world position is where the definition's own
+        corner maps to — within what single precision can tell apart at
+        that distance — takes that corner's local position."""
+        import numpy as np
+        if not proto.vertices or not local.vertices:
+            return
+        m = np.array(xform.data(), dtype=np.float64).reshape(4, 4).T
+        src = np.array([v.position.toTuple() for v in proto.vertices],
+                       dtype=np.float64)
+        world = src @ m[:3, :3].T + m[:3, 3]
+        loc = np.array([v.position.toTuple() for v in local.vertices],
+                       dtype=np.float64)
+        back = loc @ m[:3, :3].T + m[:3, 3]
+        # Two ulps of float32 at the size of the coordinate, never below a
+        # nanometre: a vertex the user really moved moved further than that.
+        mag = np.abs(back).max(axis=1)
+        tol = np.maximum(mag * 2.4e-7, 1e-9)
+        # Beyond ~4 km from the origin single precision cannot tell corners
+        # a millimetre apart: there is nothing exact left to keep, and a
+        # match could pick the neighbour. Those go through the matrix as
+        # before.
+        tol = np.where(tol <= 1e-3, tol, 0.0)
+        if not tol.any():
+            return
+        # Cells of twice the largest tolerance, so a match sits in the same
+        # cell or a neighbour: the 27 neighbours are 27 vectorised searches
+        # over the sorted cell keys (a Python walk cost as much as the
+        # inverse copy itself, ~0.3 s on a 12k-face component).
+        cell = float(tol.max()) * 2.0
+        wk = np.floor(world / cell).astype(np.int64)
+        bk = np.floor(back / cell).astype(np.int64)
+
+        def code(k):
+            # One int64 per cell; a collision only costs a distance test.
+            return (k[:, 0] * 73856093) ^ (k[:, 1] * 19349663) ^ (k[:, 2] * 83492791)
+
+        wcode = code(wk)
+        order = np.argsort(wcode, kind="stable")
+        sorted_codes = wcode[order]
+        best = np.full(len(back), -1, dtype=np.int64)
+        best_d = tol.copy()
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for dz in (-1, 0, 1):
+                    q = code(bk + np.array([dx, dy, dz], dtype=np.int64))
+                    at = np.searchsorted(sorted_codes, q)
+                    ok = at < len(sorted_codes)
+                    at = np.where(ok, at, 0)
+                    ok &= sorted_codes[at] == q
+                    cand = order[at]
+                    d = np.abs(world[cand] - back).max(axis=1)
+                    take = ok & (d <= best_d)
+                    best = np.where(take, cand, best)
+                    best_d = np.where(take, d, best_d)
+        lverts, pverts = local.vertices, proto.vertices
+        for j in np.flatnonzero(best >= 0):
+            v, p = lverts[int(j)], pverts[int(best[j])].position
+            if v.position != p:
+                local.place_vertex(v, p)
 
     @property
     def drawing_frame(self):

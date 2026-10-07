@@ -211,12 +211,17 @@ class ProtractorBase(Tool):
         if self._axis_pick is not None:
             self.work_plane = (ctx.world, QVector3D(_AXES[self._axis_pick]))
             return
-        pick = getattr(ctx.viewport, "pick_face_any", None)
+        pick = (getattr(ctx.viewport, "pick_face_placement", None)
+                or getattr(ctx.viewport, "pick_face_any", None))
         face = None
         if pick is not None:
             face, _group = pick(ctx.screen.x(), ctx.screen.y())
         if face is not None:
-            self.work_plane = (QVector3D(ctx.world), face.normal().normalized())
+            # The face's WORLD normal: a group's or component's face holds
+            # its prototype's, and a turned copy put the protractor askew.
+            from core.snap import face_plane_world
+            _p, n = face_plane_world(face, getattr(_group, "xform", None))
+            self.work_plane = (QVector3D(ctx.world), n.normalized())
         else:
             self.work_plane = None         # ground: measure in plan
 

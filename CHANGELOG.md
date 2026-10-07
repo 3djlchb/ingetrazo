@@ -6,6 +6,87 @@ follow [SemVer](https://semver.org).
 
 ## [Sin publicar]
 
+### Novedades
+- **Overlay ▸ Orientación de cara**: un botón «Overlay» arriba a la
+  derecha del visor abre un menú con la casilla «Orientación de cara».
+  Activada, cada cara se tiñe de **azul** por su frente y de **rojo** por su
+  reverso, así una cara invertida (o el interior de un sólido) salta a la
+  vista. Vale también para grupos y componentes importados, que pintan sus
+  dos lados igual y antes escondían una cara invertida. El menú queda
+  abierto al marcar la casilla, y las exportaciones de imagen y las láminas
+  nunca llevan el overlay.
+
+### Correcciones
+- **Vista paralela tan precisa como la perspectiva**: el rayo del cursor
+  empezaba en el plano cercano de la proyección paralela, a 10 km detrás
+  del ojo, donde la precisión simple solo distingue milímetros; todo punto
+  que el cursor ponía sobre una cara, un plano o una guía quedaba hasta
+  1,6 mm fuera de él. Ahora se calcula en doble precisión desde la cámara y
+  empieza justo detrás del modelo (error < 0,003 mm). La prueba de «está
+  tapado» mira a lo largo de la línea de visión, como corresponde a una
+  vista paralela, y no hacia el ojo. Igual en perspectiva, perspectiva de 2
+  puntos y paralela.
+- **Puntos en el mismo píxel: gana el más cercano a la cámara**: en un
+  alzado o una vista lateral la arista de delante y la de detrás caen en
+  los mismos píxeles, y el snap tomaba cualquiera de las dos.
+- **Medir: las guías paralelas ya no salen inclinadas**: la guía se
+  desplazaba en 3D, perpendicular a su origen, así que una guía del suelo
+  llevada al pie de un muro sobre una losa de 15 cm subía esos 15 cm: la
+  distancia mostrada mezclaba planta y altura, un valor escrito (1,20) la
+  dejaba a 1,19 m en planta y fuera de su nivel, y cada guía siguiente
+  arrastraba el error. Ahora el desplazamiento se ajusta a la dirección
+  limpia perpendicular al origen (horizontal o vertical) cuando va a menos
+  de 10° de ella; en diagonal clara se respeta, y con Alt queda libre.
+- **Un cierre de la app al mover el ratón sobre una cara casi horizontal**:
+  la inferencia «a nivel de un punto en esta cara» dividía por cero cuando
+  la cara era casi paralela al plano del eje.
+- **Las aristas largas se detectan con la cámara cerca**: acercado a un
+  muro largo, su arista superior y su pie pasan por detrás de la cámara, y
+  el snap descartaba cualquier arista con un extremo detrás: el cursor sobre
+  la línea marcaba «En cara» y no se podía enganchar ni seleccionar con un
+  clic, mientras la arista vertical corta de la esquina sí funcionaba. Ahora
+  la arista entra recortada a su parte visible, sobre la misma recta, sin
+  inventar un extremo donde se corta, y el punto medio sigue siendo el de la
+  arista entera.
+- **Lo oculto ya no roba el snap**: los orígenes de componentes y los
+  puntos medios de arco de capas ocultas (los bloques 2D de un plano
+  importado, bajo los muros) se ofrecían como puntos invisibles junto al pie
+  de los muros; y una línea suelta en una capa oculta atraía el cursor. Solo
+  lo que se dibuja da puntos (una capa bloqueada sigue sirviendo de
+  referencia).
+- **El snap ya no se pierde en las caras de grupos y componentes girados**:
+  una cara vista muy de canto (menos de 6°) no daba punto, y sin punto no
+  había ningún snap, ni siquiera la esquina junto al cursor. Pasaba sobre
+  todo en grupos y componentes girados, que ponen sus lados de canto mucho
+  más a menudo que una caja alineada a los ejes: «en unas caras coge y en
+  otras no». Ahora la cara bajo el cursor siempre da su punto, y en un
+  componente anidado el plano se toma de la colocación real.
+- **Esquinas que se enganchan con la cámara baja**: con la vista casi
+  horizontal, una esquina sin nada detrás no daba punto y no se podía
+  enganchar (14 de 304 esquinas de una caja a 12° de inclinación). Ahora se
+  enganchan todas; el cursor sobre el vacío sigue sin dar punto.
+- **Empujar/Tirar hasta la esquina de un componente**: leía las esquinas
+  del componente en sus coordenadas locales, como si estuviera en el origen
+  sin girar, y enganchaba una altura equivocada o ninguna. Ahora toma cada
+  esquina donde está (también en componentes anidados y, con un grupo
+  abierto, la geometría de fuera), con distancia exacta.
+- **Editar un componente ya no mueve lo que no tocaste**: al cerrarlo,
+  todos sus vértices volvían a coordenadas locales por la matriz inversa, y
+  cada edición los desplazaba un poco (medio milímetro tras 20 ediciones de
+  un componente girado a 3 km del origen). Ahora los vértices no editados
+  conservan sus coordenadas exactas.
+- **Puntos sobre guías y líneas largas, mil veces más precisos**: el punto
+  «sobre la guía» y las líneas de bloqueo (ejes, Mayús, referencias) se
+  calculan en doble precisión; en una vista baja quedaban hasta 0,2 mm
+  fuera de la guía.
+- **Transportador, Plano de sección, Colocar componente y Pintar** toman la
+  orientación real de la cara de un grupo o componente girado (antes
+  usaban la del componente sin girar, y el plano salía torcido).
+- **Puntos sobre caras que se apagaban a veces**: la prueba de «está tapado»
+  usaba un margen fijo de 1 mm; vista desde lejos o de canto, una esquina
+  sobre su propia cara se daba por oculta. El margen ahora crece con la
+  distancia.
+
 ## [0.5.8] — 2026-10-06
 
 **Capa activa y escena activa a la vista, Empujar/Tirar que respeta la capa
