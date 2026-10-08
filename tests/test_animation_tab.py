@@ -932,3 +932,113 @@ def test_blender_gets_each_frames_section_and_sync_keeps_the_jobs():
     src = (Path(__file__).resolve().parent.parent / "resources" / "blender"
            / "render_scene.py").read_text(encoding="utf-8")
     assert 'if "section" in req:' in src and "def _uncut" in src
+
+
+
+# ---- the frame buffer while Blender renders: tile sweep / progressive ----------
+
+def test_each_view_mode_asks_blender_for_the_right_preview():
+    from plugins.igz_animacion.blender_renderer import preview_request
+    assert preview_request("final", "cycles", 128) is None
+    assert preview_request("tiles", "cycles", 128, 256) == {"mode": "tiles", "tile": 256}
+    assert preview_request("tiles", "cycles", 128, 300)["tile"] == 512, "unknown size"
+    # EEVEE's screen effects would seam at tile edges: passes instead
+    assert preview_request("tiles", "eevee", 64) == {"mode": "progressive",
+                                                     "steps": [1, 4, 16]}
+    assert preview_request("progressive", "cycles", 20) == {"mode": "progressive",
+                                                            "steps": [1, 4]}
+    assert preview_request("progressive", "cycles", 1) is None, "nothing to preview"
+    src = (Path(__file__).resolve().parent.parent / "resources" / "blender"
+           / "render_scene.py").read_text(encoding="utf-8")
+    assert "def render_tiles" in src and "def render_progressive" in src
+    assert 'preview.get("mode") == "tiles"' in src
+
+
+def test_the_request_carries_the_preview_only_when_asked():
+    from core.camera import OrbitCamera
+    from core.scene import Scene
+    from plugins.igz_animacion.blender_renderer import frame_request
+    plain = json.loads(frame_request(OrbitCamera(), Scene(), "f.png", 64, 48, {}))
+    assert "preview" not in plain
+    tiles = json.loads(frame_request(OrbitCamera(), Scene(), "f.png", 64, 48, {},
+                                     {"mode": "tiles", "tile": 64}))
+    assert tiles["preview"] == {"mode": "tiles", "tile": 64}
+
+
+def test_tiles_from_blender_are_pieced_together_in_place_and_their_files_dropped(tmp_path):
+    from types import SimpleNamespace as NS
+    from PySide6.QtGui import QColor, QImage
+    from plugins.igz_animacion.blender_renderer import BlenderAnimationRender
+    seen = []
+    r = BlenderAnimationRender.__new__(BlenderAnimationRender)
+    r.partial_callback = lambda img, text, rect: seen.append((text, rect))
+    r._canvas = QImage(8, 4, QImage.Format_RGB32)
+    r._canvas.fill(0xFF000000)
+    r._tiles_done = 0
+    for n, (x, colour) in enumerate(((0, 0xFFFF0000), (4, 0xFF00FF00)), 1):
+        full = QImage(8, 4, QImage.Format_RGB32)      # Blender: full size, region drawn
+        full.fill(0xFF0000FF)
+        for yy in range(4):
+            for xx in range(x, x + 4):
+                full.setPixel(xx, yy, colour)
+        path = tmp_path / f"frame.tile{n}.png"
+        full.save(str(path))
+        r._partial_line(f"INGETRAZO tile {n} 2 {x} 0 4 4 {path}")
+        assert not path.exists(), "the piece is gone once shown"
+    assert QColor(r._canvas.pixel(1, 1)).red() == 255
+    assert QColor(r._canvas.pixel(6, 2)).green() == 255
+    assert r._tiles_done == 2
+    assert seen == [("Tile 1/2", (0, 0, 4, 4)), ("Tile 2/2", (4, 0, 4, 4))]
+    noisy = QImage(8, 4, QImage.Format_RGB32)
+    noisy.fill(0xFF808080)
+    pass_path = tmp_path / "with space" / "frame.pass0.png"
+    pass_path.parent.mkdir()
+    noisy.save(str(pass_path))
+    r._partial_line(f"INGETRAZO partial 4 {pass_path}")
+    assert seen[-1] == ("Sampling preview: 4 samples", None) and not pass_path.exists()
+
+
+def test_a_partial_shows_without_joining_the_history_and_respects_looking_back(tmp_path):
+    from PySide6.QtGui import QImage
+    from plugins.igz_animacion.framebuffer import AnimationFrameBuffer
+    fb = AnimationFrameBuffer()
+    try:
+        fb.start(2, {"output": r"C:\Users\x\Secuencia\img_000001.png"})
+        assert "\u200b" in fb._info["output"].text(), "the path wraps at separators"
+        img = QImage(64, 32, QImage.Format_RGB32)
+        img.fill(0xFF336699)
+        fb.show_partial(img, "Tile 1/4", (0, 0, 32, 16))
+        assert fb.partial_label.text() == "Tile 1/4"
+        assert not fb.view.item.pixmap().isNull() and fb._paths == []
+        done = tmp_path / "f1.png"
+        img.save(str(done))
+        fb.add_frame(done, 1, 2)
+        assert fb.partial_label.text() == "" and len(fb._paths) == 1
+        fb.follow.setChecked(False)                      # looking back
+        before = fb.view.item.pixmap().cacheKey()
+        fb.show_partial(img, "Tile 2/4", (32, 0, 32, 16))
+        assert fb.view.item.pixmap().cacheKey() == before, "the old frame stays"
+        assert fb.partial_label.text() == "Tile 2/4"
+    finally:
+        fb.close()
+        fb.deleteLater()
+
+
+def test_the_view_mode_and_tile_size_are_saved_and_shown_when_they_apply():
+    win, vp, panel = _window()
+    try:
+        panel.image_type.setCurrentIndex(1)
+        assert panel.preview_mode.currentData() == "tiles", "the sweep by default"
+        panel.blender_engine.setCurrentIndex(panel.blender_engine.findData("cycles"))
+        assert not panel.tile_size_row.isHidden()
+        panel.blender_engine.setCurrentIndex(panel.blender_engine.findData("eevee"))
+        assert panel.tile_size_row.isHidden(), "EEVEE has no tiles"
+        panel.blender_engine.setCurrentIndex(panel.blender_engine.findData("cycles"))
+        panel.preview_mode.setCurrentIndex(panel.preview_mode.findData("progressive"))
+        assert panel.tile_size_row.isHidden()
+        panel.tile_size.setCurrentIndex(panel.tile_size.findData(128))
+        panel._save_now()
+        st = vp.scene.plugin_data["igz_animacion"]["settings"]
+        assert st["preview_mode"] == "progressive" and st["tile_size"] == 128
+    finally:
+        _close(win)

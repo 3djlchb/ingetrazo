@@ -1126,6 +1126,73 @@ def main():
 
 
 
+#: Overlap of a tile with its neighbours, in pixels: the denoiser sees past
+#: the tile's edge, and only the inside is kept — no seams between tiles.
+TILE_MARGIN = 24
+
+
+def _base(path):
+    return path[:-4] if path.lower().endswith(".png") else path
+
+
+def render_progressive(scene, req, steps):
+    """Quick passes at a few samples first — noisy, then cleaner — each
+    written beside the output and announced («partial <samples> <path>»),
+    so IngeTrazo can show the image refining as Blender's window does; the
+    real render follows. Background Blender cannot hand over the image of
+    a render in progress, hence separate passes."""
+    r = scene.render
+    out = req["output"]
+    final = int(req.get("samples", 16))
+    cyc = scene.cycles if r.engine == "CYCLES" else None
+    keep = (cyc.use_denoising, cyc.use_adaptive_sampling) if cyc else None
+    try:
+        for i, n in enumerate(int(x) for x in steps):
+            if n >= final:
+                break
+            set_samples(scene, n)
+            if cyc:                         # the raw noise, like Blender shows
+                cyc.use_denoising = False
+                cyc.use_adaptive_sampling = False
+            path = "%s.pass%d.png" % (_base(out), i)
+            r.filepath = path
+            bpy.ops.render.render(write_still=True)
+            say("partial", n, path)
+    finally:
+        if cyc:
+            cyc.use_denoising, cyc.use_adaptive_sampling = keep
+        set_samples(scene, final)
+        r.filepath = out
+
+
+def render_tiles(scene, req, tile):
+    """The image a tile at a time (a border render each, rows from the top
+    as Blender sweeps them), every one announced as it is done («tile <n>
+    <total> <x> <y> <w> <h> <path>»: the rectangle to keep, top-left
+    origin). IngeTrazo pieces them together and writes the output."""
+    r = scene.render
+    w, h = r.resolution_x, r.resolution_y
+    tile = max(16, int(tile))
+    m = TILE_MARGIN
+    rects = [(x, y, min(tile, w - x), min(tile, h - y))
+             for y in range(0, h, tile) for x in range(0, w, tile)]
+    r.use_border = True
+    r.use_crop_to_border = False
+    try:
+        for n, (x, y, tw, th) in enumerate(rects, 1):
+            bx0, by0 = max(0, x - m), max(0, y - m)
+            bx1, by1 = min(w, x + tw + m), min(h, y + th + m)
+            r.border_min_x, r.border_max_x = bx0 / w, bx1 / w
+            r.border_min_y, r.border_max_y = (h - by1) / h, (h - by0) / h
+            path = "%s.tile%d.png" % (_base(req["output"]), n)
+            r.filepath = path
+            bpy.ops.render.render(write_still=True)
+            say("tile", n, len(rects), x, y, tw, th, path)
+    finally:
+        r.use_border = False
+        r.filepath = req["output"]
+
+
 def serve(scene, figures, objs=()):
     """Render each camera IngeTrazo sends until told to stop. A request may
     carry ``section`` (the job's format, ``None`` = no cut): the model is
@@ -1162,7 +1229,14 @@ def serve(scene, figures, objs=()):
         r.resolution_x, r.resolution_y = w, h
         r.filepath = req["output"]
         say("rendering", w, "x", h)
-        bpy.ops.render.render(write_still=True)
+        preview = req.get("preview") or {}
+        if preview.get("mode") == "tiles":
+            # The pieces ARE the image: IngeTrazo writes the output.
+            render_tiles(scene, req, preview.get("tile", 512))
+        else:
+            if preview.get("mode") == "progressive":
+                render_progressive(scene, req, preview.get("steps") or (1, 4, 16))
+            bpy.ops.render.render(write_still=True)
         say("done", req["output"])
 
 

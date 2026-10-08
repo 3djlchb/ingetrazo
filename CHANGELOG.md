@@ -109,6 +109,18 @@ follow [SemVer](https://semver.org).
   relleno de su escena) y Blender vuelve al modelo sin cortar y lo corta de
   nuevo cuando cambia; si no cambia, no repite el trabajo. La
   sincronización del visor (Renderizar ▸ Sync) no cambia.
+  **Vista en el frame buffer** mientras Blender renderiza (Renderizador ▸
+  Blender): **Barrido por tiles** (Cycles, por defecto) — la imagen se
+  llena tile a tile, con el tile recién hecho marcado como en la ventana de
+  Blender, y un **Tile size** de 64 a 2048 px; los tiles se solapan y se
+  recortan, así que la imagen final es la misma que sin barrido —;
+  **Muestreo progresivo** — pasadas rápidas a 1, 4 y 16 samples antes del
+  render, el ruido limpiándose (algo más de tiempo; con EEVEE es lo que se
+  ve en vez de los tiles) —; o **Solo imagen final**, como antes. Blender
+  en segundo plano no entrega la imagen de un render a medias, por eso
+  IngeTrazo lo guía por partes. El frame buffer muestra «Tile 3/12» o
+  «Muestreo: 4 samples» en su cabecera, y sus rutas ya no se parten letra
+  a letra.
 - **«No existe escena» en rojo en un archivo sin escenas**: la etiqueta de
   arriba a la izquierda del visor no aparecía hasta crear la primera
   escena; ahora un archivo nuevo dice «No existe escena» en rojo. Con

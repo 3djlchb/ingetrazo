@@ -2703,5 +2703,15 @@
  "Flat colours, the same in the viewport and in a render.": "Colores planos, iguales en el visor y en el render.",
  "Hex:": "Hex:",
  "More colours…": "Más colores…",
- "Search: code or name": "Buscar: código o nombre"
+ "Search: code or name": "Buscar: código o nombre",
+ "Final image only": "Solo imagen final",
+ "Progressive sampling": "Muestreo progresivo",
+ "Tile sweep": "Barrido por tiles",
+ "Frame buffer view:": "Vista en el frame buffer:",
+ "Tile size:": "Tile size:",
+ "Final image only: as fast as it gets. Progressive sampling: quick passes at 1, 4 and 16 samples first, the noise clearing up — a little more time per frame. Tile sweep (Cycles): the image fills in tile by tile, almost free; EEVEE shows progressive sampling instead.": "Solo imagen final: lo más rápido. Muestreo progresivo: primero pasadas rápidas a 1, 4 y 16 samples, con el ruido limpiándose — un poco más de tiempo por fotograma. Barrido por tiles (Cycles): la imagen se llena tile a tile, casi sin coste; con EEVEE se ve el muestreo progresivo.",
+ "Smaller tiles sweep more visibly; each tile is one more pass for Blender, so very small ones add time.": "Tiles más pequeños muestran más el barrido; cada tile es una pasada más para Blender, así que los muy pequeños añaden tiempo.",
+ "Sampling preview: {n} samples": "Muestreo: {n} samples",
+ "Tile {n}/{total}": "Tile {n}/{total}",
+ "Frame buffer view: {mode}": "Vista en el frame buffer: {mode}"
 }

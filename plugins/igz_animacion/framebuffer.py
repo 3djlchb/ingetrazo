@@ -83,6 +83,12 @@ class FrameView(QGraphicsView):
             self.fit()
 
 
+def _breakable(text: str) -> str:
+    """A path breaks at its separators, not letter by letter."""
+    zwsp = chr(0x200B)
+    return text.replace("\\", "\\" + zwsp).replace("/", "/" + zwsp)
+
+
 def _fmt_seconds(seconds: float) -> str:
     seconds = max(0, int(round(seconds)))
     h, rem = divmod(seconds, 3600)
@@ -122,6 +128,10 @@ class AnimationFrameBuffer(QDialog):
         self.frame_label.setStyleSheet("font-weight: 600; font-size: 13px;")
         self.segment_label = QLabel("")
         self.segment_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        # What Blender is doing inside the frame (tile 3/12, a 4-sample pass):
+        # its own place in the header, cleared when the frame is done.
+        self.partial_label = QLabel("")
+        self.partial_label.setStyleSheet("color: #f59e0b; font-weight: 600;")
         self.state_label = QLabel("")
         self.state_label.setStyleSheet("font-weight: 600; padding: 2px 8px; "
                                        "border-radius: 4px;")
@@ -132,6 +142,7 @@ class AnimationFrameBuffer(QDialog):
         self.info_toggle.setToolTip(tr("Show or hide the information panel"))
         hl.addWidget(self.frame_label)
         hl.addWidget(self.segment_label, 1)
+        hl.addWidget(self.partial_label)
         hl.addWidget(self.state_label)
         hl.addWidget(self.info_toggle)
         root.addWidget(header)
@@ -232,10 +243,13 @@ class AnimationFrameBuffer(QDialog):
         self.slider.setEnabled(False)
         self.follow.setChecked(True)
         for key, w in self._info.items():
-            w.setText(str((info or {}).get(key, "—")))
+            text = str((info or {}).get(key, "—"))
+            w.setText(_breakable(text))
+            w.setToolTip(text)
         self.progress.setValue(0)
         self.frame_label.setText(tr("Frame {n} / {total}", n=0, total=self._total))
         self.segment_label.setText("")
+        self.partial_label.setText("")
         self._set_state(RUNNING)
         self.show()
         self.raise_()
@@ -247,6 +261,7 @@ class AnimationFrameBuffer(QDialog):
         while len(self._paths) < n:
             self._paths.append(None)
         self._paths[n - 1] = Path(path)
+        self.partial_label.setText("")
         self._segment = segment
         self.slider.blockSignals(True)
         self.slider.setRange(1, max(1, n))
@@ -264,7 +279,32 @@ class AnimationFrameBuffer(QDialog):
         self._info["remaining"].setText(_fmt_seconds(per * (self._total - n)))
         QApplication.processEvents()
 
+    def show_partial(self, image, text: str = "", rect=None) -> None:
+        """A frame still rendering: a noisy pass, or the image so far with
+        ``rect`` (x, y, w, h — the tile just done) marked by corner brackets,
+        as Blender's render window sweeps. Not kept in the history: the
+        finished frame replaces it. A frame looked back at stays on screen."""
+        self.partial_label.setText(text)
+        if not self.follow.isChecked():
+            return
+        pix = QPixmap.fromImage(image)
+        if rect is not None and not pix.isNull():
+            from PySide6.QtGui import QColor, QPen
+            x, y, w, h = rect
+            arm = max(6, min(w, h) // 5)
+            painter = QPainter(pix)
+            pen = QPen(QColor("#f59e0b"))
+            pen.setWidth(max(2, pix.width() // 480))
+            painter.setPen(pen)
+            for cx, cy, dx, dy in ((x, y, 1, 1), (x + w - 1, y, -1, 1),
+                                   (x, y + h - 1, 1, -1), (x + w - 1, y + h - 1, -1, -1)):
+                painter.drawLine(cx, cy, cx + dx * arm, cy)
+                painter.drawLine(cx, cy, cx, cy + dy * arm)
+            painter.end()
+        self.view.set_pixmap(pix)
+
     def finish(self, state: str = DONE) -> None:
+        self.partial_label.setText("")
         self._set_state(state)
         if state == DONE:
             self.progress.setValue(100)

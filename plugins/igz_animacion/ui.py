@@ -358,6 +358,32 @@ class AnimacionPanel(QWidget):
         self.processing.currentIndexChanged.connect(self._blender_settings_changed)
         bform.addRow(tr("Processing:"), self.processing)
 
+        # What the frame buffer shows while Blender renders a frame.
+        from .blender_renderer import DEFAULT_TILE, TILE_SIZES
+        self.preview_mode = QComboBox()
+        self.preview_mode.addItem(tr("Final image only"), "final")
+        self.preview_mode.addItem(tr("Progressive sampling"), "progressive")
+        self.preview_mode.addItem(tr("Tile sweep"), "tiles")
+        self.preview_mode.setCurrentIndex(2)
+        self.preview_mode.setToolTip(tr(
+            "Final image only: as fast as it gets. Progressive sampling: quick "
+            "passes at 1, 4 and 16 samples first, the noise clearing up — a "
+            "little more time per frame. Tile sweep (Cycles): the image fills "
+            "in tile by tile, almost free; EEVEE shows progressive sampling "
+            "instead."))
+        self.preview_mode.currentIndexChanged.connect(self._blender_settings_changed)
+        bform.addRow(tr("Frame buffer view:"), self.preview_mode)
+        self.tile_size = QComboBox()
+        for t in TILE_SIZES:
+            self.tile_size.addItem(f"{t} px", t)
+        self.tile_size.setCurrentIndex(TILE_SIZES.index(DEFAULT_TILE))
+        self.tile_size.setToolTip(tr(
+            "Smaller tiles sweep more visibly; each tile is one more pass for "
+            "Blender, so very small ones add time."))
+        self.tile_size.currentIndexChanged.connect(self._changed)
+        self.tile_size_row = _form_row(tr("Tile size:"), self.tile_size)
+        bform.addRow(self.tile_size_row)
+
         # Native: what the Render tab's quality means for this engine.
         self.native_quality = QLabel()
         self.native_samples = QLabel()
@@ -833,6 +859,11 @@ class AnimacionPanel(QWidget):
             self.blender_engine.setCurrentIndex(1 if engine == "eevee" else 0)
             processing = str(s.get("processing", PROCESSING_NATIVE)).lower()
             self.processing.setCurrentIndex(1 if processing == PROCESSING_CUSTOM else 0)
+            mode = self.preview_mode.findData(str(s.get("preview_mode", "tiles")))
+            self.preview_mode.setCurrentIndex(mode if mode >= 0 else 2)
+            tile = self.tile_size.findData(int(s.get("tile_size", 512) or 512))
+            if tile >= 0:
+                self.tile_size.setCurrentIndex(tile)
             job = str(s.get("render_job", JOB_ANIMATION))
             self.job_buttons[job if job in JOBS else JOB_ANIMATION].setChecked(True)
             self.resolution_x.setValue(int(s.get("resolution_x", 1920)))
@@ -900,6 +931,8 @@ class AnimacionPanel(QWidget):
             "blender_engine": str(self.blender_engine.currentData() or "cycles"),
             "processing": str(self.processing.currentData() or PROCESSING_NATIVE),
             "render_job": self._render_job(),
+            "preview_mode": str(self.preview_mode.currentData() or "tiles"),
+            "tile_size": int(self.tile_size.currentData() or 512),
             "resolution_x": int(self.resolution_x.value()),
             "resolution_y": int(self.resolution_y.value()),
             "fps": float(self._fps_value()),
@@ -1079,6 +1112,8 @@ class AnimacionPanel(QWidget):
         self.min_samples_row.setVisible(custom and vis["adaptive_samples"])
         self.samples_row.setVisible(custom and vis["fixed_samples"])
         self.time_limit_row.setVisible(custom and vis["time_limit"])
+        self.tile_size_row.setVisible(self.preview_mode.currentData() == "tiles"
+                                      and engine == ENGINE_CYCLES)
         self._update_native_render_info()
 
     def _native_quality(self) -> int:
@@ -1893,7 +1928,10 @@ class AnimacionPanel(QWidget):
                 image_prefix=self._safe_prefix(),
                 sampling=self._blender_sampling_settings(),
                 log_callback=lambda m: self.console_log("[Blender] " + str(m)),
-                control=fb, quality=self._native_quality(), **kw)
+                control=fb, quality=self._native_quality(),
+                preview_mode=str(self.preview_mode.currentData() or "final"),
+                tile_size=int(self.tile_size.currentData() or 512),
+                partial_callback=fb.show_partial, **kw)
 
         try:
             if stills:

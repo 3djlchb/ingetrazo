@@ -34,6 +34,29 @@ RENDER_DATA_KEY = "render_blender"
 STATS_INTERVAL = 0.10
 #: The event loop is pumped at most this often while Blender works.
 PUMP_INTERVAL = 0.05
+#: What the frame buffer shows while Blender renders a frame (``preview``):
+#: only the finished image; quick passes at a few samples first, noisy then
+#: cleaner; or the image swept tile by tile (Cycles).
+PREVIEW_FINAL, PREVIEW_PROGRESSIVE, PREVIEW_TILES = "final", "progressive", "tiles"
+PREVIEW_MODES = (PREVIEW_FINAL, PREVIEW_PROGRESSIVE, PREVIEW_TILES)
+TILE_SIZES = (64, 128, 256, 512, 1024, 2048)
+DEFAULT_TILE = 512
+
+
+def preview_request(mode: str, engine: str, samples: int, tile: int = DEFAULT_TILE):
+    """The request's ``preview`` for ``mode``, or ``None`` (final only).
+
+    Tiles are border renders: right for Cycles, not for EEVEE, whose screen
+    effects (ambient occlusion, bloom…) see only the tile and would seam —
+    EEVEE gets the progressive passes instead. The passes are a few samples
+    each (1, 4, 16, 64), only those well under the frame's own."""
+    if mode == PREVIEW_TILES and engine == "cycles":
+        t = int(tile) if int(tile) in TILE_SIZES else DEFAULT_TILE
+        return {"mode": PREVIEW_TILES, "tile": t}
+    if mode in (PREVIEW_PROGRESSIVE, PREVIEW_TILES):
+        steps = [n for n in (1, 4, 16, 64) if n * 2 <= int(samples)][:3]
+        return {"mode": PREVIEW_PROGRESSIVE, "steps": steps} if steps else None
+    return None
 
 
 def render_settings(scene) -> dict:
@@ -66,7 +89,8 @@ def native_quality() -> int:
         return 1
 
 
-def frame_request(camera, scene, output, width, height, fields) -> str:
+def frame_request(camera, scene, output, width, height, fields,
+                  preview=None) -> str:
     """One serve request for one frame with the animation's sampling
     ``fields`` (``sampling.request_fields``) — not Sync's preview samples —
     and the frame's SECTION: the plane where this frame has it and the
@@ -78,6 +102,8 @@ def frame_request(camera, scene, output, width, height, fields) -> str:
            "width": int(width), "height": int(height),
            "section": rb.section_dict(scene)}
     req.update(fields or {})
+    if preview:
+        req["preview"] = preview
     return json.dumps(req) + "\n"
 
 
@@ -110,7 +136,8 @@ class BlenderAnimationRender:
     def __init__(self, app, views, duration, fps, resolution, engine="cycles",
                  blender_path="", frame_callback=None, output_dir=None,
                  image_prefix="img_", sampling=None, log_callback=None,
-                 control=None, quality=None, stills=None):
+                 control=None, quality=None, stills=None, preview_mode=PREVIEW_FINAL,
+                 tile_size=DEFAULT_TILE, partial_callback=None):
         self.stills = list(stills or [])
         if self.stills:
             if output_dir is None:
@@ -135,6 +162,46 @@ class BlenderAnimationRender:
         self.quality = native_quality() if quality is None else max(0, min(2, int(quality)))
         self.cancelled = False
         self._process = None
+        self.preview_mode = preview_mode if preview_mode in PREVIEW_MODES else PREVIEW_FINAL
+        self.tile_size = int(tile_size)
+        #: ``partial_callback(image, text, rect)`` while a frame renders: a
+        #: noisy pass or the image so far with the tile just done.
+        self.partial_callback = partial_callback
+        self._canvas = None
+
+    def _partial_line(self, line: str) -> None:
+        """«partial <samples> <path>» or «tile <n> <total> <x> <y> <w> <h>
+        <path>» from Blender: show it, then drop the file."""
+        from PySide6.QtCore import QRect
+        from PySide6.QtGui import QImage, QPainter
+        parts = line.split(" ", 8)
+        try:
+            if parts[1] == "partial":
+                n, path = int(parts[2]), line.split(" ", 3)[3]
+                img = QImage(path)
+                if not img.isNull() and self.partial_callback:
+                    self.partial_callback(img, tr("Sampling preview: {n} samples", n=n), None)
+            elif parts[1] == "tile":
+                n, total, x, y, w, h = (int(v) for v in parts[2:8])
+                path = parts[8]
+                img = QImage(path)
+                if img.isNull() or self._canvas is None:
+                    return
+                painter = QPainter(self._canvas)
+                painter.drawImage(QRect(x, y, w, h), img, QRect(x, y, w, h))
+                painter.end()
+                self._tiles_done += 1
+                if self.partial_callback:
+                    self.partial_callback(self._canvas, tr("Tile {n}/{total}", n=n,
+                                                           total=total), (x, y, w, h))
+            else:
+                return
+        except (IndexError, ValueError):
+            return
+        try:
+            Path(path).unlink()
+        except OSError:
+            pass
 
     @property
     def total_frames(self):
@@ -258,7 +325,9 @@ class BlenderAnimationRender:
                     line = line.strip()
                     tail.append(line)
                     del tail[:-40]
-                    if line and throttle.keep(line):
+                    if line.startswith(("INGETRAZO partial ", "INGETRAZO tile ")):
+                        self._partial_line(line)
+                    elif line and throttle.keep(line):
                         self._log(line)
                     if token in line:
                         return
@@ -272,16 +341,31 @@ class BlenderAnimationRender:
 
             plan = self._plan()
             total = len(plan)
+            preview = preview_request(self.preview_mode, self.engine,
+                                      fields.get("samples", 16), self.tile_size)
+            if preview:
+                self._log(tr("Frame buffer view: {mode}", mode=preview["mode"]))
             for i, (go_there, name, message) in enumerate(plan, 1):
                 self._check()
                 go_there()
                 output = output_frames / f"frame_{i:06d}.png"
+                if preview and preview["mode"] == PREVIEW_TILES:
+                    from PySide6.QtGui import QImage
+                    self._canvas = QImage(self.resolution[0], self.resolution[1],
+                                          QImage.Format_RGB32)
+                    self._canvas.fill(0xFF2B2B2B)
+                    self._tiles_done = 0
                 proc.stdin.write(frame_request(
                     self.viewport.camera, scene, output, self.resolution[0],
-                    self.resolution[1], fields))
+                    self.resolution[1], fields, preview))
                 proc.stdin.flush()
                 wait_for("INGETRAZO done")
                 self._check()
+                if preview and preview["mode"] == PREVIEW_TILES and self._canvas is not None:
+                    # The tiles are the image: IngeTrazo writes the frame.
+                    if self._tiles_done:
+                        self._canvas.save(str(output), "PNG")
+                    self._canvas = None
                 if not output.is_file() or output.stat().st_size == 0:
                     raise RuntimeError(tr("Blender produced no frame {n}.", n=i))
                 saved_output = output
