@@ -708,3 +708,22 @@ def test_opening_a_document_in_fixed_render_mode_does_not_mark_it_changed():
         assert panel.file_type.currentData() == 2
     finally:
         _close(win)
+
+
+
+def test_the_render_button_says_which_job_it_runs():
+    win, vp, panel = _window()
+    try:
+        assert panel.export_button.text() == "Render (Animation)"
+        panel.job_buttons["still"].setChecked(True)
+        assert panel.export_button.text() == "Render (Fixed render)"
+        panel.job_buttons["both"].setChecked(True)
+        assert panel.export_button.text() == "Render (Fixed render + Animation)"
+        panel._save_now()                  # no save pending: the reload happens
+        vp.scene.plugin_data = {"igz_animacion": {"version": 5, "settings": {
+            "render_job": "still"}}}
+        vp.scene.version += 1
+        panel._poll()                      # an opened document: its own job
+        assert panel.export_button.text() == "Render (Fixed render)"
+    finally:
+        _close(win)

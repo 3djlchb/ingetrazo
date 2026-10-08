@@ -74,6 +74,10 @@ follow [SemVer](https://semver.org).
   fijo solo, Salida de archivos ▸ Tipo de archivo queda en **Secuencia de
   imágenes** (Video y Secuencia + video no se pueden elegir); con los otros
   dos modos se puede elegir todo y vuelve lo que estaba elegido antes.
+  El botón de render dice qué va a hacer: **Renderizar (Render fijo)**,
+  **Renderizar (Animación)** o **Renderizar (Render fijo + Animación)**;
+  ocupa toda su línea, y Cancelar va junto a «Mostrar el frame buffer»
+  (al lado del botón quedaba reducido a una franja con el panel estrecho).
 - **«No existe escena» en rojo en un archivo sin escenas**: la etiqueta de
   arriba a la izquierda del visor no aparecía hasta crear la primera
   escena; ahora un archivo nuevo dice «No existe escena» en rojo. Con

@@ -635,10 +635,9 @@ class AnimacionPanel(QWidget):
         self.cancel_button = QPushButton(tr("Cancel"))
         self.cancel_button.setEnabled(False)
         self.cancel_button.clicked.connect(self._cancel_render)
-        row = QHBoxLayout()
-        row.addWidget(self.export_button, 1)
-        row.addWidget(self.cancel_button)
-        sec.body_layout.addLayout(row)
+        # The render button has the whole line (it names its job, a long
+        # text); beside it Cancel was squeezed to a sliver in a narrow tray.
+        sec.body_layout.addWidget(self.export_button)
         self.status = QLabel()
         self.status.setWordWrap(True)
         sec.body_layout.addWidget(self.status)
@@ -649,7 +648,10 @@ class AnimacionPanel(QWidget):
         self.show_framebuffer_button.setToolTip(tr(
             "The window the frames appear in as they are rendered."))
         self.show_framebuffer_button.clicked.connect(self.show_framebuffer)
-        sec.body_layout.addWidget(self.show_framebuffer_button)
+        row = QHBoxLayout()
+        row.addWidget(self.cancel_button, 1)
+        row.addWidget(self.show_framebuffer_button, 2)
+        sec.body_layout.addLayout(row)
         layout.addWidget(sec)
 
     def _build_console(self, layout):
@@ -1353,9 +1355,19 @@ class AnimacionPanel(QWidget):
         finally:
             combo.blockSignals(False)
         self._output_locked = still_only
+        self._update_export_label()
         combo.setToolTip(tr("A fixed render makes images only: «Image sequence».")
                          if still_only else "")
         self._update_output_hint()
+
+    def _update_export_label(self):
+        """The render button says what it will do: «Render (Fixed render)»,
+        «Render (Animation)» or «Render (Fixed render + Animation)»."""
+        if not hasattr(self, "export_button"):
+            return
+        text = tr("Render ({job})", job=self.job_buttons[self._render_job()].text())
+        self.export_button.setText(text)
+        self.export_button.setToolTip(text)
 
     def _still_toggled(self, row, on):
         if self._loading:
