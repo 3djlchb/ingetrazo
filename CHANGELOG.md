@@ -89,6 +89,26 @@ follow [SemVer](https://semver.org).
   que el plano se quedaba donde lo dejó el último fotograma y el modelo no
   se cortaba como en la línea de tiempo. Ahora el plano va al punto y la
   normal capturados y el corte se ve igual que al reproducir.
+  **Color de relleno** por escena en la tabla de Planos de sección: una
+  muestra que abre una ventana «Seleccionar color de relleno» con tres
+  pestañas — **Colores** (colores planos: una paleta propia, código
+  hexadecimal y «Más colores…»), **Colores/Material** (los colores RAL de
+  Propiedades ▸ Material, con buscador) y **Texturas/Material** (el resto de
+  la biblioteca: ladrillo, concreto, piedra, madera…). Una textura rellena
+  el corte a su tamaño real, en el visor y en Blender, con los ladrillos de
+  pie en un corte vertical; su color medio queda como respaldo. El relleno
+  es parte del estado capturado de la escena: se ve al mostrarla, cambia
+  en la animación (el color se interpola, la textura cambia a mitad de
+  tramo) y se guarda en el .igz. En el estilo, la textura solo se escribe
+  si la hay: los documentos sin ella quedan igual y las versiones
+  anteriores la ignoran (pintan el color).
+  Corregido: con **Blender**, una animación o los renders fijos salían todos
+  con el corte del momento en que se pulsó Renderizar — Blender recibía la
+  sección una sola vez y entre fotogramas solo cambiaba la cámara. Ahora
+  cada fotograma lleva su corte (el plano donde está en ese fotograma y el
+  relleno de su escena) y Blender vuelve al modelo sin cortar y lo corta de
+  nuevo cuando cambia; si no cambia, no repite el trabajo. La
+  sincronización del visor (Renderizar ▸ Sync) no cambia.
 - **«No existe escena» en rojo en un archivo sin escenas**: la etiqueta de
   arriba a la izquierda del visor no aparecía hasta crear la primera
   escena; ahora un archivo nuevo dice «No existe escena» en rojo. Con

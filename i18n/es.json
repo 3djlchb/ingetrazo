@@ -2692,5 +2692,16 @@
  "Fixed renders: {path}": "Renders fijos: {path}",
  "A fixed render makes images only: «Image sequence».": "Un render fijo solo produce imágenes: «Secuencia de imágenes».",
  "Render ({job})": "Renderizar ({job})",
- "Section planes": "Planos de sección"
+ "Section planes": "Planos de sección",
+ "Capture the scene first: the fill is part of its captured state.": "Captura primero la escena: el relleno es parte de su estado capturado.",
+ "Section fill of this scene — click to change it.": "Relleno de sección de esta escena — haz clic para cambiarlo.",
+ "Section fill of {scene}: {fill}": "Relleno de sección de {scene}: {fill}",
+ "Section fill colour": "Seleccionar color de relleno",
+ "Colors / Material": "Colores/Material",
+ "Textures / Material": "Texturas/Material",
+ "Fill:": "Relleno:",
+ "Flat colours, the same in the viewport and in a render.": "Colores planos, iguales en el visor y en el render.",
+ "Hex:": "Hex:",
+ "More colours…": "Más colores…",
+ "Search: code or name": "Buscar: código o nombre"
 }

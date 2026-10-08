@@ -62,6 +62,14 @@ class Style:
     # Lives in the STYLE, with the other modeling settings.
     section_fill: bool = True
     section_fill_color: tuple = (0.35, 0.37, 0.41)
+    # Optionally a library TEXTURE instead of the flat colour (a brick or
+    # concrete hatch in the cut): its path — relative to resources/textures
+    # when it is one of the library's, so a document travels between
+    # machines — and its real size in metres. The colour stays the texture's
+    # average: what a renderer without the texture (or an older IngeTrazo)
+    # paints. Empty = the flat colour, as always.
+    section_fill_texture: str = ""
+    section_fill_texture_size: tuple = (1.0, 1.0)
 
     def to_dict(self) -> dict:
         return {
@@ -80,6 +88,11 @@ class Style:
             "ground_color": list(self.ground_color),
             "section_fill": self.section_fill,
             "section_fill_color": list(self.section_fill_color),
+            # Only when there is one: a document without a texture stays
+            # byte-for-byte what it was.
+            **({"section_fill_texture": self.section_fill_texture,
+                "section_fill_texture_size": list(self.section_fill_texture_size)}
+               if self.section_fill_texture else {}),
         }
 
     @classmethod
@@ -104,10 +117,49 @@ class Style:
             section_fill=bool(raw.get("section_fill", d.section_fill)),
             section_fill_color=tuple(raw.get("section_fill_color",
                                              d.section_fill_color)),
+            section_fill_texture=str(raw.get("section_fill_texture") or ""),
+            section_fill_texture_size=_tex_size(
+                raw.get("section_fill_texture_size")),
         )
 
     def copy(self) -> "Style":
         return Style.from_dict(self.to_dict())
+
+
+def _tex_size(raw) -> tuple:
+    """A texture's real size (w, h) in metres; anything malformed → 1 × 1."""
+    try:
+        w, h = float(raw[0]), float(raw[1])
+    except (TypeError, ValueError, IndexError, KeyError):
+        return (1.0, 1.0)
+    return (w if w > 1e-6 else 1.0, h if h > 1e-6 else 1.0)
+
+
+def texture_path(stored: str):
+    """The file of a stored texture path: a library-relative one resolves
+    against resources/textures, an absolute one is itself. ``None`` when
+    the file is not there (a document from another machine)."""
+    from pathlib import Path
+    if not stored:
+        return None
+    p = Path(stored)
+    if not p.is_absolute():
+        from core.paths import app_root
+        p = app_root() / "resources" / "textures" / stored
+    return p if p.is_file() else None
+
+
+def stored_texture_path(path) -> str:
+    """How a texture is stored: relative to resources/textures when it is
+    one of the library's (forward slashes on every system), else absolute."""
+    from pathlib import Path
+    from core.paths import app_root
+    p = Path(path).resolve()
+    base = (app_root() / "resources" / "textures").resolve()
+    try:
+        return p.relative_to(base).as_posix()
+    except ValueError:
+        return str(p)
 
 
 def _opt_rgb(raw) -> tuple | None:

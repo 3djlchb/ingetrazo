@@ -1229,6 +1229,8 @@ class Viewport(QOpenGLWidget):
         self._preview_tex_vbo = None
         self._section_vao = None
         self._section_vbo = None
+        self._section_tex_vao = None       # the textured fill (pos + UV)
+        self._section_tex_vbo = None
 
         # Faces hidden from the normal pass while a tool previews — Push/Pull
         # hides the flat inner face it's pushing in (a window/door) so the recess
@@ -1455,6 +1457,7 @@ class Viewport(QOpenGLWidget):
         self._preview_faces_vao, self._preview_faces_vbo = self._create_dynamic()
         self._preview_tex_vao, self._preview_tex_vbo = self._create_dynamic_uv()
         self._section_vao, self._section_vbo = self._create_dynamic()
+        self._section_tex_vao, self._section_tex_vbo = self._create_dynamic_uv()
         self._tile_quad_vao, self._tile_quad_vbo = self._create_dynamic_uv()
         self._terrain_vao, self._terrain_vbo = self._create_dynamic_uv()
         self._photo_vao, self._photo_vbo = self._create_dynamic_uv()
@@ -7184,16 +7187,59 @@ class Viewport(QOpenGLWidget):
         fc = getattr(style, "section_fill_color", (0.35, 0.37, 0.41))
         self._gl.glEnable(GL_POLYGON_OFFSET_FILL)
         self._gl.glPolygonOffset(2.0, 2.0)
-        self._set_color(fc[0], fc[1], fc[2], 1.0)
-        self._program.setUniformValue(
-            self._loc_back_color, QVector4D(fc[0], fc[1], fc[2], 1.0))
-        self._section_vao.bind()
-        self._gl.glDrawArrays(GL_TRIANGLES, 0, 6)
-        self._section_vao.release()
+        tex = self._section_fill_texture(style)
+        if tex is not None:
+            # A library texture in the cut, at the material's real size:
+            # UVs are the corners' coordinates along two axes of the plane,
+            # «up» following world Z on a vertical cut (bricks stand
+            # upright), divided by the texture's size in metres.
+            n = np.array([sp.normal.x(), sp.normal.y(), sp.normal.z()],
+                         dtype=np.float64)
+            n /= max(np.linalg.norm(n), 1e-12)
+            ref = (np.array([0.0, 0.0, 1.0]) if abs(n[2]) < 0.9
+                   else np.array([1.0, 0.0, 0.0]))
+            u = np.cross(ref, n)
+            u /= max(np.linalg.norm(u), 1e-12)
+            v = np.cross(n, u)
+            sw, sh = getattr(style, "section_fill_texture_size", (1.0, 1.0))
+            verts = []
+            for i in (0, 1, 2, 0, 2, 3):
+                p = c[i].astype(np.float64)
+                verts.append([*c[i], float(p @ u) / sw, float(p @ v) / sh])
+            raw = np.array(verts, dtype=np.float32).tobytes()
+            self._section_tex_vbo.bind()
+            self._section_tex_vbo.allocate(raw, len(raw))
+            self._section_tex_vbo.release()
+            self._program.setUniformValue(self._loc_use_tex, 1)
+            self._program.setUniformValue1f(self._loc_shade, 1.0)
+            self._program.setUniformValue(self._loc_hard_cutout, 0)
+            tex.bind(0)
+            self._section_tex_vao.bind()
+            self._gl.glDrawArrays(GL_TRIANGLES, 0, 6)
+            self._section_tex_vao.release()
+            tex.release(0)
+            self._program.setUniformValue(self._loc_use_tex, 0)
+        else:
+            self._set_color(fc[0], fc[1], fc[2], 1.0)
+            self._program.setUniformValue(
+                self._loc_back_color, QVector4D(fc[0], fc[1], fc[2], 1.0))
+            self._section_vao.bind()
+            self._gl.glDrawArrays(GL_TRIANGLES, 0, 6)
+            self._section_vao.release()
         self._gl.glDisable(GL_POLYGON_OFFSET_FILL)
         self._gl.glStencilMask(0xFF)
         self._gl.glDisable(GL_STENCIL_TEST)
         self._set_section_clip(True)
+
+    def _section_fill_texture(self, style):
+        """The style's section-fill texture, ready to bind — ``None`` for
+        the flat colour (or a texture file that is not on this machine)."""
+        stored = getattr(style, "section_fill_texture", "")
+        if not stored or self._section_tex_vao is None:
+            return None
+        from core.style import texture_path
+        path = texture_path(stored)
+        return self._get_texture(str(path)) if path is not None else None
 
     def _draw_section_cut_edges(self) -> None:
         """Thick section-cut lines: quads in the cut plane, sized

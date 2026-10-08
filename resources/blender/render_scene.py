@@ -26,6 +26,7 @@ toward each new camera instead of exporting the model again.
 """
 import json
 import math
+import os
 import sys
 
 import bpy
@@ -638,10 +639,73 @@ def _cap_faces(bm, cut_edges, normal, mat_index):
     return made
 
 
+#: The Section Fill's texture, when the style has one (the job's
+#: ``fill_texture``): its file, size in metres and the cut plane's normal.
+_FILL_TEXTURE = {"path": None, "size": (1.0, 1.0), "normal": None}
+
+
+def _plane_axes(normal):
+    """Two unit axes in the plane, «up» along world Z on a vertical cut --
+    the viewport's, so the hatch lies the same way in both."""
+    n = Vector(normal).normalized()
+    ref = Vector((0.0, 0.0, 1.0)) if abs(n.z) < 0.9 else Vector((1.0, 0.0, 0.0))
+    u = ref.cross(n).normalized()
+    return u, n.cross(u)
+
+
+def _fill_texture_material():
+    """The Section Fill with a library texture: the image, projected on the
+    cut plane at its real size, as emission (flat like the colour fill)."""
+    path = _FILL_TEXTURE["path"]
+    try:
+        image = bpy.data.images.load(path, check_existing=True)
+    except Exception:                      # noqa: BLE001 -- missing / unreadable
+        say("section fill texture not loaded:", path)
+        return None
+    sw, sh = _FILL_TEXTURE["size"]
+    u, v = _plane_axes(_FILL_TEXTURE["normal"])
+    mat = bpy.data.materials.new("IngeTrazo section fill texture")
+    if hasattr(mat, "use_nodes"):
+        mat.use_nodes = True
+    nt = mat.node_tree
+    for node in list(nt.nodes):
+        nt.nodes.remove(node)
+    out = nt.nodes.new("ShaderNodeOutputMaterial")
+    geo = nt.nodes.new("ShaderNodeNewGeometry")
+    coords = []
+    for axis, size in ((u, sw), (v, sh)):
+        dot = nt.nodes.new("ShaderNodeVectorMath")
+        dot.operation = "DOT_PRODUCT"
+        dot.inputs[1].default_value = (axis.x / size, axis.y / size, axis.z / size)
+        nt.links.new(geo.outputs["Position"], dot.inputs[0])
+        coords.append(dot)
+    combine = nt.nodes.new("ShaderNodeCombineXYZ")
+    nt.links.new(coords[0].outputs["Value"], combine.inputs["X"])
+    nt.links.new(coords[1].outputs["Value"], combine.inputs["Y"])
+    tex = nt.nodes.new("ShaderNodeTexImage")
+    tex.image = image
+    tex.extension = "REPEAT"
+    nt.links.new(combine.outputs["Vector"], tex.inputs["Vector"])
+    flat = nt.nodes.new("ShaderNodeEmission")
+    flat.inputs["Strength"].default_value = FILL_STRENGTH
+    nt.links.new(tex.outputs["Color"], flat.inputs["Color"])
+    nt.links.new(flat.outputs["Emission"], out.inputs["Surface"])
+    _FILL["emitters"].append(flat)
+    say("section fill texture", path, "size", sw, "x", sh)
+    return mat
+
+
 def _fill_material(color):
     """The flat Section Fill material the caps wear -- emission at the
     strength that lands on the style's swatch colour (see FILL_STRENGTH);
-    made once, registered for the exposure steps."""
+    made once, registered for the exposure steps. With a fill texture, the
+    textured one instead (the colour is its fallback)."""
+    if _FILL_TEXTURE["path"]:
+        mat = bpy.data.materials.get("IngeTrazo section fill texture")
+        if mat is None:
+            mat = _fill_texture_material()
+        if mat is not None:
+            return mat
     lin = [_srgb_to_linear(float(c)) for c in list(color)[:3]]
     mat = bpy.data.materials.get("IngeTrazo section fill")
     if mat is not None:
@@ -665,6 +729,13 @@ def _fill_material(color):
     nt.links.new(flat.outputs["Emission"], out.inputs["Surface"])
     _FILL["emitters"].append(flat)
     return mat
+
+
+#: Serve mode re-cuts the model when a request brings another section (an
+#: animation moving its plane, fixed renders of scenes with their own cuts):
+#: the cut works on COPIES of the meshes and remembers what it changed, so
+#: the uncut model can come back before the next cut.
+_CUT_STATE = {"serve": False, "restore": [], "key": None}
 
 
 def _cut_clip(objs, planes, fill_color=None):
@@ -708,6 +779,9 @@ def _cut_clip(objs, planes, fill_color=None):
             if max(ds) > 1e-6:
                 crossing.append((p, n))
         if removed:
+            if _CUT_STATE["serve"]:
+                _CUT_STATE["restore"].append(
+                    (obj, (obj.hide_render, obj.hide_viewport)))
             obj.hide_render = True
             obj.hide_viewport = True
             gone += 1
@@ -716,7 +790,12 @@ def _cut_clip(objs, planes, fill_color=None):
             kept += 1
             continue
         mesh = obj.data
-        if mesh.users > 1:                 # shared data: trim THIS object's copy
+        if _CUT_STATE["serve"]:
+            # Keep the original untouched for the next cut.
+            mesh.use_fake_user = True
+            _CUT_STATE["restore"].append((obj, mesh))
+            obj.data = mesh = mesh.copy()
+        elif mesh.users > 1:               # shared data: trim THIS object's copy
             obj.data = mesh = mesh.copy()
         world = obj.matrix_world
         inv = world.inverted()
@@ -916,6 +995,11 @@ def apply_section(scene, objs, section):
         return
     mode = section.get("mode", "clip")
     color = section.get("fill_color") or (0.35, 0.37, 0.41)
+    tex = section.get("fill_texture")
+    if tex and os.path.isfile(str(tex)):
+        size = section.get("fill_texture_size") or (1.0, 1.0)
+        _FILL_TEXTURE.update(path=str(tex), normal=planes[0][1],
+                             size=(float(size[0]) or 1.0, float(size[1]) or 1.0))
     if mode == "shader":
         _cut_shader(objs, planes)
         if section.get("fill"):
@@ -927,13 +1011,56 @@ def apply_section(scene, objs, section):
         _cut_clip(objs, planes, color if section.get("fill") else None)
 
 
+def _uncut():
+    """Put back what the last cut changed: the original meshes, the hidden
+    objects, and no fill materials (the next cut makes its own)."""
+    for obj, original in reversed(_CUT_STATE["restore"]):
+        if isinstance(original, tuple):          # hidden by the cut: as it was
+            obj.hide_render, obj.hide_viewport = original
+            continue
+        cut = obj.data
+        obj.data = original
+        if cut is not original and cut.users == 0:
+            bpy.data.meshes.remove(cut)
+    _CUT_STATE["restore"] = []
+    for name in ("IngeTrazo section fill", "IngeTrazo section fill texture"):
+        mat = bpy.data.materials.get(name)
+        if mat is not None:
+            bpy.data.materials.remove(mat)
+    _FILL["emitters"].clear()
+    _FILL["switches"].clear()
+    _FILL["plane"] = None
+    _FILL_TEXTURE.update(path=None, size=(1.0, 1.0), normal=None)
+
+
+def section_key(section) -> str:
+    return json.dumps(section or None, sort_keys=True)
+
+
+def recut(scene, objs, section):
+    """Serve: the request's section, if it is not the one already cut."""
+    key = section_key(section)
+    if key == _CUT_STATE["key"]:
+        return
+    if section and section.get("mode", "clip") != "clip":
+        say("section", "re-cut supports the clip mode only")
+        return
+    _uncut()
+    apply_section(scene, objs, section)
+    set_fill_exposure(scene.view_settings.exposure)
+    _CUT_STATE["key"] = key
+    say("section", "re-cut" if section else "removed")
+
+
 def main():
     job = load_job()
     bpy.ops.wm.read_factory_settings(use_empty=True)
     scene = bpy.context.scene
     objs = import_model(job["glb"])
     apply_finishes()
+    _CUT_STATE["serve"] = bool(job.get("serve"))
     apply_section(scene, objs, job.get("section"))
+    _CUT_STATE["key"] = section_key(job.get("section"))
     figures = find_figures()
     w, h = int(job["width"]), int(job["height"])
     set_camera(scene, job["camera"], w, h)
@@ -988,7 +1115,7 @@ def main():
     if hasattr(bpy.app.handlers, "render_stats"):
         bpy.app.handlers.render_stats.append(_stats)
     if job.get("serve"):
-        serve(scene, figures)
+        serve(scene, figures, objs)
         return
     say("rendering", w, "x", h)
     bpy.ops.render.render(write_still=True)
@@ -999,8 +1126,11 @@ def main():
 
 
 
-def serve(scene, figures):
-    """Render each camera IngeTrazo sends until told to stop."""
+def serve(scene, figures, objs=()):
+    """Render each camera IngeTrazo sends until told to stop. A request may
+    carry ``section`` (the job's format, ``None`` = no cut): the model is
+    re-cut when it differs from the last one — the viewport's Sync never
+    sends it, so its cut stays the job's."""
     r = scene.render
     # Keep the render data (Cycles' BVH, loaded textures) between cameras:
     # only the camera and the face-me figures change from one request to
@@ -1020,6 +1150,8 @@ def serve(scene, figures):
             continue
         if req.get("quit"):
             break
+        if "section" in req:
+            recut(scene, objs, req["section"])
         w, h = int(req["width"]), int(req["height"])
         set_camera(scene, req["camera"], w, h)
         fit_ortho_clip(scene)

@@ -22,7 +22,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QEvent, QSettings, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
-    QDoubleValidator, QFontDatabase, QIntValidator, QPalette, QTextCursor,
+    QDoubleValidator, QFontDatabase, QIcon, QIntValidator, QPalette, QTextCursor,
 )
 from PySide6.QtWidgets import (
     QAbstractItemView, QAbstractSpinBox, QApplication, QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBox,
@@ -38,8 +38,8 @@ from views.fold_section import FoldSection, narrow
 
 from .core import (
     STILLS_FOLDER, AnimationRender, RenderCancelled, StillRender, apply_frame,
-    _apply_section_state, apply_view, capture_section_state, reset_frame_cache,
-    section_state,
+    _apply_section_state, _apply_section_style, apply_view, capture_section_state,
+    reset_frame_cache, section_state,
 )
 from .exporter import CODECS, FFmpegExporter
 from .ffmpeg_tools import FFmpegManager, remember_ffmpeg
@@ -66,6 +66,8 @@ QUALITY_NAMES = ("Draft", "Medium", "High")
 #: What «Render animation» does (``settings.render_job``): the fixed renders
 #: only, the animation only (what it always did), or both.
 JOB_STILL, JOB_ANIMATION, JOB_BOTH = "still", "animation", "both"
+#: The planes table's «Fill colour» column.
+FILL_COLUMN = 1
 JOBS = (JOB_STILL, JOB_ANIMATION, JOB_BOTH)
 _ASSETS = Path(__file__).resolve().parent / "assets"
 #: The job's radio buttons: blue once chosen.
@@ -502,10 +504,10 @@ class AnimacionPanel(QWidget):
         self.scene_state_label.setMinimumHeight(70)
         sec.body_layout.addWidget(self.scene_state_label)
 
-        self.scene_states_table = QTableWidget(0, 6)
+        self.scene_states_table = QTableWidget(0, 7)
         self.scene_states_table.setHorizontalHeaderLabels([
-            tr("Scene"), tr("Captured"), tr("Plane"), "UID", tr("Point"),
-            tr("Normal vector")])
+            tr("Scene"), tr("Fill colour"), tr("Captured"), tr("Plane"), "UID",
+            tr("Point"), tr("Normal vector")])
         self.scene_states_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.scene_states_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.scene_states_table.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -1436,7 +1438,7 @@ class AnimacionPanel(QWidget):
             record = self._scene_record(row, view) or {}
             section = record.get("section") if record.get("captured") else None
             active = bool(section and section.get("active"))
-            values = [view.name,
+            values = [view.name, "",
                       tr("Yes") if record.get("captured") else "—",
                       str(section.get("symbol") or "—") if active else "—",
                       str(section.get("uid", "—")) if active else "—",
@@ -1446,8 +1448,71 @@ class AnimacionPanel(QWidget):
                 item = QTableWidgetItem(value)
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                 table.setItem(row, col, item)
+            table.setCellWidget(row, FILL_COLUMN, self._fill_button(row, section))
         table.resizeColumnsToContents()
         table.blockSignals(False)
+
+    @staticmethod
+    def _section_fill(section) -> dict:
+        """A captured section's fill as the picker speaks it."""
+        section = section or {}
+        return {"rgb": section.get("fill_color") or [0.35, 0.37, 0.41],
+                "texture": section.get("fill_texture") or "",
+                "size": section.get("fill_texture_size") or [1.0, 1.0],
+                "name": section.get("fill_name") or ""}
+
+    def _fill_button(self, row, section):
+        """The «Fill colour» cell: the swatch of this scene's section fill;
+        a click opens the picker. Only a captured scene has a fill to set."""
+        from .fill_picker import fill_pixmap, hex_of
+        b = QToolButton()
+        b.setAutoRaise(True)
+        b.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        b.setIconSize(QSize(28, 16))
+        if section is None:
+            b.setEnabled(False)
+            b.setText("—")
+            b.setToolTip(tr("Capture the scene first: the fill is part of its "
+                            "captured state."))
+            return b
+        fill = self._section_fill(section)
+        b.setIcon(QIcon(fill_pixmap(fill, 28, 16)))
+        b.setText(fill["name"] or hex_of(fill["rgb"]))
+        b.setToolTip(tr("Section fill of this scene — click to change it."))
+        b.clicked.connect(lambda _=False, r=row: self._pick_fill(r))
+        return b
+
+    def _pick_fill(self, row):
+        """Choose this scene's section fill (colour, RAL colour or library
+        texture); the viewport shows it at once if the scene is on screen."""
+        from .fill_picker import pick_fill
+        record = self._scene_record(row, create=False) or {}
+        section = record.get("section") if record.get("captured") else None
+        if section is None:
+            return
+        fill = pick_fill(self, self._section_fill(section))
+        if fill is None:
+            return
+        section["fill"] = True
+        section["fill_color"] = list(fill["rgb"])
+        section["fill_texture"] = fill["texture"]
+        section["fill_name"] = fill["name"]
+        if fill["texture"]:
+            section["fill_texture_size"] = list(fill["size"])
+        else:
+            section.pop("fill_texture_size", None)
+        view = self.scenes.item(row).data(Qt.UserRole)
+        self._attach_animation_state(view, row)
+        scene = self.app.scene
+        if getattr(scene, "active_view", None) is view:
+            _apply_section_style(scene, section)
+            scene.bump_view()
+            self.app.viewport.update()
+        self._refresh_scene_states_table()
+        self._select_table_row(row)
+        self._changed()
+        self.console_log(tr("Section fill of {scene}: {fill}",
+                            scene=view.name, fill=fill["name"]))
 
     @staticmethod
     def _format_vector(values):
@@ -1628,6 +1693,7 @@ class AnimacionPanel(QWidget):
         scene = self.app.scene
         view.recapture(scene, self.app.viewport.camera)
         scene.active_view = view
+        self._last_active_view = view
         section = capture_section_state(self.app.viewport)
         record = self._scene_record(row, view)
         record["captured"] = True

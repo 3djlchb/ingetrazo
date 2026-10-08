@@ -107,6 +107,11 @@ def capture_section_state(viewport):
         color = getattr(style, "section_fill_color", None)
         if color is not None and len(color) == 3:
             state["fill_color"] = [float(color[0]), float(color[1]), float(color[2])]
+        texture = str(getattr(style, "section_fill_texture", "") or "")
+        state["fill_texture"] = texture
+        if texture:
+            size = getattr(style, "section_fill_texture_size", (1.0, 1.0))
+            state["fill_texture_size"] = [float(size[0]), float(size[1])]
     if plane is None:
         return state
     state.update({
@@ -131,6 +136,19 @@ def _apply_section_style(scene, state):
     color = state.get("fill_color")
     if isinstance(color, (list, tuple)) and len(color) == 3:
         style.section_fill_color = tuple(float(x) for x in color)
+        changed = True
+        # A state captured with a colour and no texture (every state before
+        # textures existed) is a flat fill: no texture left over from
+        # another scene.
+        style.section_fill_texture = str(state.get("fill_texture") or "")
+    if state.get("fill_texture"):
+        style.section_fill_texture = str(state["fill_texture"])
+        size = state.get("fill_texture_size") or (1.0, 1.0)
+        try:
+            style.section_fill_texture_size = (float(size[0]) or 1.0,
+                                               float(size[1]) or 1.0)
+        except (TypeError, ValueError, IndexError):
+            style.section_fill_texture_size = (1.0, 1.0)
         changed = True
     if changed:
         scene.display_style = style
@@ -221,6 +239,12 @@ def interpolate_section(a, b, t):
         result["fill_color"] = list(ca)
     elif isinstance(cb, (list, tuple)) and len(cb) == 3 and t >= 0.5:
         result["fill_color"] = list(cb)
+    # A texture cannot blend: each scene's shows for its half of the segment.
+    near = b if t >= 0.5 else a
+    if "fill_texture" in a or "fill_texture" in b:
+        result["fill_texture"] = str(near.get("fill_texture") or "")
+        if near.get("fill_texture_size"):
+            result["fill_texture_size"] = list(near["fill_texture_size"])
     return result
 
 

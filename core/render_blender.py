@@ -338,12 +338,21 @@ def section_dict(scene) -> Optional[dict]:
         return None
     style = getattr(scene, "display_style", None)
     colour = getattr(style, "section_fill_color", (0.35, 0.37, 0.41))
-    return {"mode": "clip",
-            "fill": bool(getattr(style, "section_fill", True)),
-            "fill_color": [float(c) for c in colour[:3]],
-            "planes": [{"point": [sp.point.x(), sp.point.y(), sp.point.z()],
-                        "normal": [sp.normal.x(), sp.normal.y(),
-                                   sp.normal.z()]}]}
+    out = {"mode": "clip",
+           "fill": bool(getattr(style, "section_fill", True)),
+           "fill_color": [float(c) for c in colour[:3]],
+           "planes": [{"point": [sp.point.x(), sp.point.y(), sp.point.z()],
+                       "normal": [sp.normal.x(), sp.normal.y(),
+                                  sp.normal.z()]}]}
+    # A library texture in the cut (the style's): Blender reads the file
+    # itself, so the path goes absolute; the colour stays as the fallback.
+    from core.style import texture_path
+    tex = texture_path(getattr(style, "section_fill_texture", ""))
+    if tex is not None:
+        out["fill_texture"] = str(tex)
+        out["fill_texture_size"] = [float(x) for x in getattr(
+            style, "section_fill_texture_size", (1.0, 1.0))[:2]]
+    return out
 
 
 # ---- Ambience and lights --------------------------------------------------------

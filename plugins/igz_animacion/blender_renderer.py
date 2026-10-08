@@ -68,11 +68,15 @@ def native_quality() -> int:
 
 def frame_request(camera, scene, output, width, height, fields) -> str:
     """One serve request for one frame with the animation's sampling
-    ``fields`` (``sampling.request_fields``) — not Sync's preview samples."""
+    ``fields`` (``sampling.request_fields``) — not Sync's preview samples —
+    and the frame's SECTION: the plane where this frame has it and the
+    scene's fill (Blender re-cuts the model when it changes; it used to keep
+    the cut of the moment Render was pressed for every frame)."""
     from core import render_blender as rb
     req = {"camera": rb.camera_dict(camera, scene),
            "output": str(output),
-           "width": int(width), "height": int(height)}
+           "width": int(width), "height": int(height),
+           "section": rb.section_dict(scene)}
     req.update(fields or {})
     return json.dumps(req) + "\n"
 

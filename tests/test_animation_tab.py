@@ -786,3 +786,149 @@ def test_showing_a_scene_puts_its_captured_cut_where_it_was_captured():
         assert sc.active_section() is plane
     finally:
         _close(win)
+
+
+
+# ---- section fill: colour, RAL colour or library texture -----------------------
+
+BRICK = "library/brick/brick_red.png"
+
+
+def test_a_style_without_a_fill_texture_saves_as_before_and_old_ones_open():
+    from core.style import Style, texture_path
+    plain = Style().to_dict()
+    assert "section_fill_texture" not in plain, "old documents stay byte-identical"
+    assert Style.from_dict(plain).section_fill_texture == ""
+    s = Style()
+    s.section_fill_texture, s.section_fill_texture_size = BRICK, (1.0, 0.6)
+    back = Style.from_dict(s.to_dict())
+    assert back.section_fill_texture == BRICK
+    assert back.section_fill_texture_size == (1.0, 0.6)
+    assert texture_path(BRICK) is not None and texture_path(BRICK).is_file()
+    assert texture_path("library/none/missing.png") is None
+
+
+def test_blender_gets_the_fill_texture_as_an_absolute_file():
+    from core.render_blender import section_dict
+    from core.scene import Scene
+    from core.section import SectionPlane
+    sc = Scene()
+    plane = SectionPlane(V(0, 0, 0), V(1, 0, 0))
+    sc.section_planes.append(plane)
+    sc.set_active_section(plane)
+    assert "fill_texture" not in section_dict(sc)
+    sc.display_style.section_fill_texture = BRICK
+    sc.display_style.section_fill_texture_size = (1.0, 0.6)
+    job = section_dict(sc)
+    assert Path(job["fill_texture"]).is_absolute() and Path(job["fill_texture"]).is_file()
+    assert job["fill_texture_size"] == [1.0, 0.6]
+    src = (Path(__file__).resolve().parent.parent / "resources" / "blender"
+           / "render_scene.py").read_text(encoding="utf-8")
+    assert '_FILL_TEXTURE.update(' in src and "ShaderNodeTexImage" in src
+
+
+def test_a_captured_fill_texture_is_applied_and_a_flat_one_clears_it():
+    from core.scene import Scene
+    from plugins.igz_animacion.core import _apply_section_style, interpolate_section
+    sc = Scene()
+    _apply_section_style(sc, {"fill": True, "fill_color": [0.6, 0.2, 0.1],
+                              "fill_texture": BRICK, "fill_texture_size": [1.0, 0.6]})
+    st = sc.display_style
+    assert st.section_fill_texture == BRICK and st.section_fill_texture_size == (1.0, 0.6)
+    _apply_section_style(sc, {"fill": True, "fill_color": [0.1, 0.2, 0.3]})
+    assert sc.display_style.section_fill_texture == "", "a flat state clears it"
+    a = {"active": True, "uid": 1, "point": [0, 0, 0], "normal": [1, 0, 0],
+         "fill_color": [0, 0, 0], "fill_texture": BRICK, "fill_texture_size": [1, 0.6]}
+    b = dict(a, point=[2, 0, 0], fill_color=[1, 1, 1], fill_texture="")
+    assert interpolate_section(a, b, 0.25)["fill_texture"] == BRICK
+    assert interpolate_section(a, b, 0.75)["fill_texture"] == ""
+    assert interpolate_section(a, b, 0.5)["fill_color"] == [0.5, 0.5, 0.5]
+
+
+def test_the_fill_picker_has_its_three_tabs_and_returns_each_kind():
+    from plugins.igz_animacion.fill_picker import FillPickerDialog
+    dlg = FillPickerDialog(None, {"rgb": [0.35, 0.37, 0.41]})
+    try:
+        assert [dlg.tabs.tabText(i) for i in range(3)] == [
+            "Colors", "Colors / Material", "Textures / Material"]
+        assert len(dlg.palette_buttons) == 7 * 12
+        dlg.palette_buttons[0].click()
+        f = dlg.result_fill()
+        assert f["texture"] == "" and f["name"].startswith("#")
+        dlg.hex_edit.setText("#FF8000")
+        dlg._hex_typed()
+        assert dlg.result_fill()["rgb"] == pytest.approx([1.0, 128 / 255, 0.0], abs=1e-6)
+        assert dlg.ral_list.count() > 200                   # Properties' RAL colours
+        dlg.ral_list.itemClicked.emit(dlg.ral_list.item(0))
+        assert dlg.result_fill()["name"].startswith("RAL")
+        cats = [dlg.category.itemData(i) for i in range(dlg.category.count())]
+        assert "brick" in cats and "colors" not in cats
+        dlg.category.setCurrentIndex(cats.index("brick"))
+        dlg.texture_list.itemClicked.emit(dlg.texture_list.item(0))
+        f = dlg.result_fill()
+        assert f["texture"].startswith("library/brick/"), "stored relative"
+        assert f["size"][0] > 0 and f["rgb"] != [0.35, 0.37, 0.41]
+    finally:
+        dlg.deleteLater()
+
+
+def test_the_planes_table_has_a_fill_colour_column_per_captured_scene(monkeypatch):
+    import sys
+    from core.section import SectionPlane
+    win, vp, panel = _window()
+    try:
+        sc = vp.scene
+        plane = SectionPlane(V(1, 0, 0), V(1, 0, 0))
+        sc.section_planes.append(plane)
+        _two_scenes(vp)
+        panel._poll()
+        table = panel.scene_states_table
+        assert table.horizontalHeaderItem(1).text() == "Fill colour"
+        assert not table.cellWidget(0, 1).isEnabled(), "not captured yet"
+        sc.set_active_section(plane)
+        panel.scenes.setCurrentRow(1)
+        panel._capture_selected_scene()                  # «Final» is on screen
+        assert table.cellWidget(1, 1).isEnabled()
+        picker = sys.modules[type(panel).__module__.rsplit(".", 1)[0] + ".fill_picker"]
+        monkeypatch.setattr(picker, "pick_fill", lambda *_a, **_k: {
+            "rgb": [0.6, 0.3, 0.2], "name": "brick_red", "texture": BRICK,
+            "size": [1.0, 0.6]})
+        table.cellWidget(1, 1).click()
+        rec = panel._scene_record(1)
+        assert rec["section"]["fill_texture"] == BRICK
+        assert sc.display_style.section_fill_texture == BRICK, "shown at once"
+        assert table.cellWidget(1, 1).text() == "brick_red"
+        panel._save_now()
+        saved = vp.scene.plugin_data["igz_animacion"]["scenes"][1]["section"]
+        assert saved["fill_texture"] == BRICK and saved["fill_name"] == "brick_red"
+        monkeypatch.setattr(picker, "pick_fill", lambda *_a, **_k: None)
+        table.cellWidget(1, 1).click()                   # cancelled: unchanged
+        assert panel._scene_record(1)["section"]["fill_texture"] == BRICK
+    finally:
+        _close(win)
+
+
+
+def test_blender_gets_each_frames_section_and_sync_keeps_the_jobs():
+    """Serve mode only moved the camera: every frame and every fixed render
+    came out with the cut of the moment Render was pressed."""
+    from core import render_blender as rb
+    from core.camera import OrbitCamera
+    from core.scene import Scene
+    from core.section import SectionPlane
+    from plugins.igz_animacion.blender_renderer import frame_request
+    sc = Scene()
+    plane = SectionPlane(V(1, 2, 0), V(0, -1, 0))
+    sc.section_planes.append(plane)
+    req = json.loads(frame_request(OrbitCamera(), sc, "f.png", 64, 48, {"samples": 4}))
+    assert "section" in req and req["section"] is None, "no cut: said so"
+    sc.set_active_section(plane)
+    sc.display_style.section_fill_texture = BRICK
+    req = json.loads(frame_request(OrbitCamera(), sc, "f.png", 64, 48, {"samples": 4}))
+    assert req["section"]["planes"][0]["point"] == [1.0, 2.0, 0.0]
+    assert req["section"]["fill_texture"].endswith("brick_red.png")
+    sync = json.loads(rb.sync_request(OrbitCamera(), "f.png", 64, 48, engine="eevee"))
+    assert "section" not in sync, "the viewport's Sync is unchanged"
+    src = (Path(__file__).resolve().parent.parent / "resources" / "blender"
+           / "render_scene.py").read_text(encoding="utf-8")
+    assert 'if "section" in req:' in src and "def _uncut" in src
