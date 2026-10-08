@@ -2691,5 +2691,6 @@
  "Fixed renders: {n} scene(s) → {path}": "Renders fijos: {n} escena(s) → {path}",
  "Fixed renders: {path}": "Renders fijos: {path}",
  "A fixed render makes images only: «Image sequence».": "Un render fijo solo produce imágenes: «Secuencia de imágenes».",
- "Render ({job})": "Renderizar ({job})"
+ "Render ({job})": "Renderizar ({job})",
+ "Section planes": "Planos de sección"
 }

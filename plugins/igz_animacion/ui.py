@@ -38,7 +38,8 @@ from views.fold_section import FoldSection, narrow
 
 from .core import (
     STILLS_FOLDER, AnimationRender, RenderCancelled, StillRender, apply_frame,
-    capture_section_state,
+    _apply_section_state, apply_view, capture_section_state, reset_frame_cache,
+    section_state,
 )
 from .exporter import CODECS, FFmpegExporter
 from .ffmpeg_tools import FFmpegManager, remember_ffmpeg
@@ -258,6 +259,9 @@ class AnimacionPanel(QWidget):
         # «Image sequence» and the user's own choice is kept for later.
         self._output_locked = False
         self._file_type_choice = 0
+        # The scene last shown anywhere (Properties ▸ Scenes, the viewport's
+        # scene tabs, this tab): a new one gets its captured cut.
+        self._last_active_view = None
         # What the panel knows of the document, to tell a real change from
         # its own echo: the scene object (New / Open replace it), the scene
         # list as objects (a scene added, deleted or moved in Properties),
@@ -463,6 +467,12 @@ class AnimacionPanel(QWidget):
         buttons.addWidget(self.delete_scene_button)
         buttons2.addWidget(self.capture_scene_button)
         sec.body_layout.addLayout(buttons)
+        layout.addWidget(sec)
+
+        # «Section planes»: what moves a cut through the animation — the same
+        # controls, given their own fold under Scenes.
+        sec = _section(tr("Section planes"), "section_planes")
+        self.section_planes_section = sec
         sec.body_layout.addLayout(buttons2)
 
         self.activate_section_button = QPushButton(tr("Activate selected section plane"))
@@ -783,6 +793,8 @@ class AnimacionPanel(QWidget):
         scene = getattr(self.app, "scene", None)
         if scene is not self._scene_obj:
             self._scene_obj = scene
+            # An opened document keeps its cut as saved: nothing applied.
+            self._last_active_view = getattr(scene, "active_view", None)
             self._views_snapshot = []
             self._load_document_data()
             self.refresh_scenes()
@@ -795,6 +807,11 @@ class AnimacionPanel(QWidget):
                 self._load_document_data()
                 self.refresh_scenes()
                 return
+        active = getattr(scene, "active_view", None)
+        if active is not self._last_active_view:
+            self._last_active_view = active
+            if active is not None:
+                self._apply_captured_section(active)
         views = list(getattr(scene, "saved_views", None) or [])
         if ([id(v) for v in views] != [id(v) for v in self._views_snapshot]
                 or [v.name for v in views] != getattr(self, "_names_snapshot", [])):
@@ -1531,14 +1548,40 @@ class AnimacionPanel(QWidget):
         if view is None:
             return
         scene = self.app.scene
-        view.apply(scene, self.app.viewport.camera)
+        # The native recall AND the section this scene captured for the
+        # animation (its plane's point and normal), exactly as the timeline
+        # shows it: SavedView keeps only WHICH plane cuts, not where, so the
+        # plane stayed wherever the last frame left it and the cut did not
+        # match the scene.
+        vp = self.app.viewport
+        self._attach_animation_state(view, item.row())
+        reset_frame_cache(vp)
+        apply_view(vp, view)
         scene.active_view = view
+        self._last_active_view = view
         window = getattr(self.app, "window", None)
         sync = getattr(window, "_sync_style_menu", None)
         if callable(sync):
             sync()
         self._touch_scenes()
         self.status.setText(tr("Scene shown: {name}", name=view.name))
+
+    def _apply_captured_section(self, view):
+        """A scene was shown elsewhere (Properties ▸ Scenes recalls only
+        WHICH plane cuts): put that plane where this scene captured it."""
+        views = list(getattr(self.app.scene, "saved_views", None) or [])
+        index = next((i for i, v in enumerate(views) if v is view), None)
+        if index is None:
+            return
+        self._attach_animation_state(view, index)
+        state = section_state(view)
+        if state is None:
+            return
+        vp = self.app.viewport
+        reset_frame_cache(vp)
+        _apply_section_state(vp, state)
+        vp.scene.bump_view()
+        vp.update()
 
     def _activate_selected_section_plane(self):
         from core.history import SetActiveSectionCommand

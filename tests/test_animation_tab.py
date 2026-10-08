@@ -727,3 +727,62 @@ def test_the_render_button_says_which_job_it_runs():
         assert panel.export_button.text() == "Render (Fixed render)"
     finally:
         _close(win)
+
+
+
+def test_the_section_plane_controls_have_their_own_fold_under_scenes():
+    from views.fold_section import FoldSection
+    win, vp, panel = _window()
+    try:
+        folds = [f for f in panel.findChildren(FoldSection)]
+        titles = [f.header.text() for f in sorted(folds, key=lambda f: f.y())]
+        i = titles.index("Scenes")
+        assert titles[i + 1] == "Section planes"
+        planes = panel.section_planes_section
+        for w in (panel.capture_scene_button, panel.activate_section_button,
+                  panel.section_feedback, panel.scene_state_label,
+                  panel.scene_states_table, panel.interpolate_section_checkbox):
+            assert planes.isAncestorOf(w), w
+        for w in (panel.scenes, panel.create_scene_button, panel.delete_scene_button):
+            assert not planes.isAncestorOf(w), w
+    finally:
+        _close(win)
+
+
+
+def test_showing_a_scene_puts_its_captured_cut_where_it_was_captured():
+    """Double-clicking a scene recalled only the native view, which keeps
+    WHICH plane cuts but not where: the plane stayed where the last frame
+    left it and the model was not cut as captured; the timeline was right."""
+    from core.section import SectionPlane
+    win, vp, panel = _window()
+    try:
+        sc = vp.scene
+        plane = SectionPlane(V(9.0, 0, 0), V(1, 0, 0))
+        plane.symbol = "B"
+        sc.section_planes.append(plane)
+        _two_scenes(vp)
+        panel._poll()
+        sc.set_active_section(plane)
+        for row, x in ((0, 9.0), (1, 1.0)):              # capture each position
+            plane.point = V(x, 0, 0)
+            panel.scenes.setCurrentRow(row)
+            panel._capture_selected_scene()
+        plane.point = V(5.0, 0, 0)                       # «the last frame»
+        sc.set_active_section(None)
+        panel._show_selected_scene(panel.scenes.item(0))
+        assert sc.active_section() is plane
+        assert abs(plane.point.x() - 9.0) < 1e-9
+        panel._show_selected_scene(panel.scenes.item(1))
+        assert abs(plane.point.x() - 1.0) < 1e-9
+        assert sc.active_view is sc.saved_views[1]
+        # Properties ▸ Scenes recalls the native way: the tab adds the cut
+        plane.point = V(5.0, 0, 0)
+        tray = win.tray.scenes
+        tray.refresh()
+        tray._on_activate(tray.tree.topLevelItem(0))
+        panel._poll()
+        assert abs(plane.point.x() - 9.0) < 1e-9
+        assert sc.active_section() is plane
+    finally:
+        _close(win)

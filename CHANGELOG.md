@@ -78,6 +78,17 @@ follow [SemVer](https://semver.org).
   **Renderizar (Animación)** o **Renderizar (Render fijo + Animación)**;
   ocupa toda su línea, y Cancelar va junto a «Mostrar el frame buffer»
   (al lado del botón quedaba reducido a una franja con el panel estrecho).
+  Nueva sección desplegable **Planos de sección**, bajo Escenas, con lo que
+  mueve un corte en la animación: Capturar estado actual, Activar plano
+  seleccionado, la ayuda, el estado de la escena, la tabla de planos e
+  Interpolar el plano de sección. Escenas queda con los modos, la tabla de
+  escenas y Crear / Eliminar escena. Todo funciona igual.
+  Corregido: al mostrar una escena (doble clic en la pestaña Animación, o
+  desde Propiedades ▸ Escenas) el visor no mostraba el corte capturado en
+  esa escena: la escena nativa solo guarda qué plano corta, no dónde, así
+  que el plano se quedaba donde lo dejó el último fotograma y el modelo no
+  se cortaba como en la línea de tiempo. Ahora el plano va al punto y la
+  normal capturados y el corte se ve igual que al reproducir.
 - **«No existe escena» en rojo en un archivo sin escenas**: la etiqueta de
   arriba a la izquierda del visor no aparecía hasta crear la primera
   escena; ahora un archivo nuevo dice «No existe escena» en rojo. Con
