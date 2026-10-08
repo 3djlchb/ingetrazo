@@ -376,3 +376,27 @@ class PythonConsoleTool(Tool):
 
     def on_deactivate(self, viewport) -> None:
         pass
+
+
+class EmbeddedPythonConsole(PythonConsoleDialog):
+    """The console inside an area (Window ▸ Layout ▸ Areas) rather than a
+    window of its own: no frame, no minimum size, and Esc does not close
+    it (an area has nothing to go back to)."""
+
+    def __init__(self, viewport, parent=None) -> None:
+        super().__init__(viewport, parent)
+        self.setWindowFlags(Qt.Widget)
+        self.setMinimumSize(0, 0)
+
+    def reject(self) -> None:  # Esc
+        pass
+
+
+def setup(app) -> None:
+    """The console as an area editor (Scripting), beside its menu entry."""
+    add = getattr(app, "add_editor", None)
+    if add is None:                       # an IngeTrazo without areas
+        return
+    add("python_console", "Python Console",
+        lambda window, area: EmbeddedPythonConsole(window.viewport, area),
+        category="Scripting")
