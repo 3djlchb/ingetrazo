@@ -2670,5 +2670,7 @@
  "=== Render cancelled ===": "=== Renderizado cancelado ===",
  "[ERROR] The render failed: {error}": "[ERROR] El renderizado falló: {error}",
  "Saved to:": "Guardado en:",
- "Custom settings": "Personalizado"
+ "Custom settings": "Personalizado",
+ "Select a section plane in the viewport first (click its border with Select), then press the button again.": "Selecciona primero un plano de sección en el visor (clic en su borde con Seleccionar) y vuelve a pulsar el botón.",
+ "Plane {name} (UID {uid}) is already the active cut.": "El plano {name} (UID {uid}) ya es el corte activo."
 }

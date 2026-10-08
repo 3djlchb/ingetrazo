@@ -341,6 +341,12 @@ class AnimacionPanel(QWidget):
             "cut here."))
         self.activate_section_button.clicked.connect(self._activate_selected_section_plane)
         sec.body_layout.addWidget(self.activate_section_button)
+        # The button's answer, right under it (it went to the Render
+        # section's status line, out of sight: the button looked dead).
+        self.section_feedback = QLabel()
+        self.section_feedback.setWordWrap(True)
+        self.section_feedback.setVisible(False)
+        sec.body_layout.addWidget(self.section_feedback)
 
         hint = QLabel(tr(
             "To move a section: show a scene → activate its plane → move the "
@@ -1314,19 +1320,34 @@ class AnimacionPanel(QWidget):
         from core.section import SectionPlane
         planes = [e for e in self.app.scene.selection if isinstance(e, SectionPlane)]
         if not planes:
-            self.status.setText(tr("Select a section plane in the viewport first."))
+            self._section_feedback(tr(
+                "Select a section plane in the viewport first (click its "
+                "border with Select), then press the button again."), ok=False)
             return
         plane = planes[0]
-        if not bool(getattr(plane, "active", False)):
+        # Section planes have a symbol (A, B…) and usually no name.
+        label = (getattr(plane, "name", "") or getattr(plane, "symbol", "")
+                 or "—")
+        was_active = bool(getattr(plane, "active", False))
+        if not was_active:
             self.app.viewport.history.execute(SetActiveSectionCommand(plane))
         self.app.scene.show_section_planes = True
         self.app.scene.show_section_cuts = True
         self.app.scene.bump_view()
         self.app.viewport.update()
-        self.status.setText(tr(
+        text = tr("Plane {name} (UID {uid}) is already the active cut.",
+                  name=label, uid=getattr(plane, "uid", "—")) if was_active else tr(
             "Active section plane: {name} (UID {uid}). Move it, then capture "
-            "the scene.", name=getattr(plane, "name", "—"),
-            uid=getattr(plane, "uid", "—")))
+            "the scene.", name=label, uid=getattr(plane, "uid", "—"))
+        self._section_feedback(text, ok=True)
+
+    def _section_feedback(self, text: str, ok: bool) -> None:
+        color = "#16a34a" if ok else "#d97706"
+        self.section_feedback.setStyleSheet(f"color: {color}; font-weight: 600;")
+        self.section_feedback.setText(text)
+        self.section_feedback.setVisible(True)
+        self.status.setText(text)
+        self.console_log(text)
 
     def _capture_selected_scene(self):
         row = self.scenes.currentRow()

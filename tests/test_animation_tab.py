@@ -492,3 +492,28 @@ def test_the_tab_narrows_with_the_tray_instead_of_cutting_off_its_right_side():
         assert dock.minimumSizeHint().width() <= 245
     finally:
         _close(win)
+
+
+def test_activate_section_plane_answers_right_under_the_button():
+    """It worked but answered in the Render section's status line, out of
+    sight, so the button looked dead; and the plane's name came out empty
+    (planes carry a symbol, A, B…, not a name)."""
+    from core.section import SectionPlane
+    win, vp, panel = _window()
+    try:
+        sc = vp.scene
+        plane = SectionPlane(V(2, 0, 0), V(0, 1, 0))
+        plane.symbol = "B"
+        sc.section_planes.append(plane)
+        panel._activate_selected_section_plane()           # nothing selected
+        assert not panel.section_feedback.isHidden()
+        assert sc.active_section() is None
+        sc.select([plane])
+        panel._activate_selected_section_plane()
+        assert sc.active_section() is plane
+        assert " B " in panel.section_feedback.text()
+        panel._activate_selected_section_plane()           # already active
+        assert sc.active_section() is plane
+        assert panel.console_output.toPlainText().count("UID") >= 2
+    finally:
+        _close(win)

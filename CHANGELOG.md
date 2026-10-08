@@ -54,6 +54,10 @@ follow [SemVer](https://semver.org).
   ruta de FFmpeg, los combos y las filas con varios campos fijaban un
   ancho mínimo); ahora los controles se ajustan, las rutas largas se parten
   y Ancho/Alto y Códec/Calidad van en filas separadas.
+  «Activar plano seleccionado» responde justo debajo del botón (y en la
+  Consola): avisaba en la línea de estado de la sección Renderizar, fuera
+  de la vista, y parecía no hacer nada; dice también si el plano ya era el
+  corte activo, y nombra el plano por su símbolo (A, B…), que salía vacío.
 - **«No existe escena» en rojo en un archivo sin escenas**: la etiqueta de
   arriba a la izquierda del visor no aparecía hasta crear la primera
   escena; ahora un archivo nuevo dice «No existe escena» en rojo. Con
