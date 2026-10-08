@@ -468,3 +468,27 @@ def test_cancel_in_the_frame_buffer_stops_the_native_render(tmp_path, monkeypatc
         if panel.framebuffer is not None:
             panel.framebuffer.close()
         _close(win)
+
+
+def test_the_tab_narrows_with_the_tray_instead_of_cutting_off_its_right_side():
+    """The widest control (FFmpeg's path, a combo, the output paths) set the
+    tab's minimum width, so a narrow tray cut its right-hand side off; the
+    Render tab's controls shrink instead (2026-10-08)."""
+    from PySide6.QtWidgets import QScrollArea
+    from views.fold_section import FoldSection
+    win, vp, panel = _window()
+    try:
+        panel.image_type.setCurrentIndex(1)
+        for sec in panel.findChildren(FoldSection):
+            sec.set_open(True)
+        long_path = (r"C:\Users\someone_with_a_long_name\AppData\Roaming"
+                     r"\ingetrazo\tools\ffmpeg\ffmpeg.exe")
+        panel.ffmpeg_manager.find = lambda: long_path
+        panel.refresh_ffmpeg_status()
+        assert panel.ffmpeg_label.toolTip() == long_path
+        dock = win.extension_panels()["extension_igz_animacion_animacion"]
+        inner = panel.findChild(QScrollArea).widget()
+        assert inner.minimumSizeHint().width() <= 245
+        assert dock.minimumSizeHint().width() <= 245
+    finally:
+        _close(win)

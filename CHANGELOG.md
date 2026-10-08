@@ -49,6 +49,11 @@ follow [SemVer](https://semver.org).
   una vez por tramo y no en cada fotograma. Los datos se guardan
   directamente en el espacio de la extensión, como v0.22.66; los .igz con
   el formato anterior se siguen abriendo y se reescriben al primer cambio.
+  La pestaña se estrecha con el panel derecho como Renderizar: antes, al
+  angostar el panel, la parte derecha de los controles quedaba cortada (la
+  ruta de FFmpeg, los combos y las filas con varios campos fijaban un
+  ancho mínimo); ahora los controles se ajustan, las rutas largas se parten
+  y Ancho/Alto y Códec/Calidad van en filas separadas.
 - **«No existe escena» en rojo en un archivo sin escenas**: la etiqueta de
   arriba a la izquierda del visor no aparecía hasta crear la primera
   escena; ahora un archivo nuevo dice «No existe escena» en rojo. Con

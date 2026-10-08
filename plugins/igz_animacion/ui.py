@@ -25,15 +25,15 @@ from PySide6.QtGui import (
     QDoubleValidator, QFontDatabase, QIntValidator, QPalette, QTextCursor,
 )
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
+    QAbstractItemView, QAbstractSpinBox, QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
     QFileDialog, QFormLayout, QFrame, QHBoxLayout, QInputDialog, QLabel,
     QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPlainTextEdit,
     QProgressBar, QProgressDialog, QPushButton, QScrollArea, QSizePolicy,
-    QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QSpinBox, QTableWidget, QTableWidgetItem, QToolButton, QVBoxLayout, QWidget,
 )
 
 from core.i18n import tr
-from views.fold_section import FoldSection
+from views.fold_section import FoldSection, narrow
 
 from .core import AnimationRender, RenderCancelled, apply_frame, capture_section_state
 from .exporter import CODECS, FFmpegExporter
@@ -77,6 +77,37 @@ def _form_row(label: str, field) -> QWidget:
     form.setContentsMargins(0, 0, 0, 0)
     form.addRow(label, field)
     return w
+
+
+#: A break opportunity after each path separator, so a long path wraps in
+#: the narrow tray instead of widening it (a path has no spaces to break at).
+_ZWSP = "\u200b"
+
+
+def breakable(text: str) -> str:
+    return str(text).replace("\\", "\\" + _ZWSP).replace("/", "/" + _ZWSP)
+
+
+def fit_to_tray(root: QWidget) -> None:
+    """Let every control under ``root`` shrink with the side tray, as the
+    Render tab does: the widest of them set the tab's minimum width, and
+    the tray then cut off the right-hand side instead of narrowing them."""
+    # Labels keep their width: a form's label squeezed under its text ran
+    # into the field; long texts wrap (paths at their separators).
+    kinds = (QComboBox, QLineEdit, QAbstractSpinBox, QPushButton, QCheckBox,
+             QListWidget, QTableWidget, QPlainTextEdit, QProgressBar)
+    for w in root.findChildren(QWidget):
+        if isinstance(w, kinds):
+            if w.maximumWidth() < 100:          # a fixed little «…» button
+                continue
+            narrow(w)
+        elif isinstance(w, QToolButton) and isinstance(w.parent(), FoldSection):
+            w.setSizePolicy(QSizePolicy.Ignored, w.sizePolicy().verticalPolicy())
+            w.setMinimumWidth(40)
+    for form in root.findChildren(QFormLayout):
+        # The label goes above its field when both do not fit side by side.
+        form.setRowWrapPolicy(QFormLayout.WrapLongRows)
+        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
 
 
 def frame_segment_text(views, frame: int, total: int) -> str:
@@ -164,6 +195,7 @@ class AnimacionPanel(QWidget):
         self.refresh_ffmpeg_status()
         self._refresh_output_defaults(force=True)
         self._update_renderer_controls()
+        fit_to_tray(body)
         self._guard.start()
         # Every edit reaches here: only a CHEAP check, never a reload (the
         # stand-alone plugin reloaded its whole state on every edit, which
@@ -359,9 +391,9 @@ class AnimacionPanel(QWidget):
         self.resolution_y.setRange(16, 16384)
         self.resolution_y.setValue(1080)
         self.resolution_y.setSuffix(" px")
-        form.addRow(tr("Resolution:"),
-                    _row("X:", self.resolution_x, "Y:", self.resolution_y,
-                         stretch_first=False))
+        # One per line: side by side they did not fit the narrow tray.
+        form.addRow(tr("Width:"), self.resolution_x)
+        form.addRow(tr("Height:"), self.resolution_y)
 
         self.fps_combo = QComboBox()
         for value in FPS_PRESETS:
@@ -393,8 +425,8 @@ class AnimacionPanel(QWidget):
         self.crf.setRange(0, 51)
         self.crf.setValue(20)
         self.crf.setToolTip(tr("Lower is better quality and a bigger file; 18–23 is usual."))
-        form.addRow(tr("Codec:"), _row(self.codec_combo, tr("Quality (CRF):"),
-                                       self.crf))
+        form.addRow(tr("Codec:"), self.codec_combo)
+        form.addRow(tr("Quality (CRF):"), self.crf)
         sec.body_layout.addLayout(form)
 
         for w in (self.resolution_x, self.resolution_y, self.duration):
@@ -419,7 +451,9 @@ class AnimacionPanel(QWidget):
         self.igz_path = QLineEdit()
         self.igz_path.setPlaceholderText(tr("Where the .igz is (the output goes beside it)"))
         self.igz_path.setReadOnly(True)
-        browse = QPushButton(tr("Browse…"))
+        browse = QPushButton("…")
+        browse.setFixedWidth(34)
+        browse.setToolTip(tr("Browse…"))
         browse.clicked.connect(self.choose_igz_file)
         form.addRow(tr("Document:"), _row(self.igz_path, browse))
 
@@ -833,7 +867,8 @@ class AnimacionPanel(QWidget):
             lines.append(tr("Images: {path}", path=images))
         if kind in (OUT_VIDEO, OUT_BOTH):
             lines.append(tr("Video: {path}", path=video))
-        self.output_info.setText("\n".join(lines))
+        self.output_info.setText(breakable("\n".join(lines)))
+        self.output_info.setToolTip("\n".join(lines))
         self._update_render_status()
 
     def choose_igz_file(self):
@@ -1345,8 +1380,9 @@ class AnimacionPanel(QWidget):
     # ---- FFmpeg ----------------------------------------------------------------
     def refresh_ffmpeg_status(self):
         p = self.ffmpeg_manager.find()
+        self.ffmpeg_label.setToolTip(str(p or ""))
         self.ffmpeg_label.setText(
-            tr("Found: {path}", path=p) if p else
+            tr("Found: {path}", path=breakable(p)) if p else
             tr("Not found — needed for video only (an image sequence works "
                "without it)."))
 
