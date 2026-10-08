@@ -517,3 +517,194 @@ def test_activate_section_plane_answers_right_under_the_button():
         assert panel.console_output.toPlainText().count("UID") >= 2
     finally:
         _close(win)
+
+
+
+# ---- fixed renders (Render fijo / Animación / Render fijo + Animación) --------
+
+def _fake_capture_in(panel, monkeypatch, shots=None):
+    import sys
+    from PySide6.QtGui import QImage
+    anim_core = sys.modules[type(panel).__module__.rsplit(".", 1)[0] + ".core"]
+
+    def fake_capture(viewport, path, resolution=None):
+        img = QImage(int(resolution[0]), int(resolution[1]), QImage.Format_RGB32)
+        img.fill(0xFF808080)
+        assert img.save(str(path), "PNG")
+        if shots is not None:
+            shots.append(Path(path).name)
+
+    monkeypatch.setattr(anim_core, "capture", fake_capture)
+
+
+def _small_job(panel, tmp_path):
+    panel.igz_path.setText(str(tmp_path / "x.igz"))
+    panel._igz_path_edited = True
+    panel.file_type.setCurrentIndex(0)
+    panel.resolution_x.setValue(32)
+    panel.resolution_y.setValue(24)
+    panel.duration.setValue(1)
+    panel.fps_combo.setCurrentIndex(panel.fps_combo.findData(6))
+
+
+def test_still_names_are_safe_and_never_overwrite_each_other():
+    from types import SimpleNamespace as NS
+    from plugins.igz_animacion.core import safe_file_name, still_file_names
+    assert safe_file_name('Corte A/A: "norte"?') == "Corte A_A_ _norte__"
+    assert still_file_names([NS(name="Vista"), NS(name="vista"), NS(name="Otra")]) == [
+        "Vista.png", "vista_2.png", "Otra.png"]
+
+
+def test_the_fixed_render_column_is_locked_while_only_the_animation_renders():
+    win, vp, panel = _window()
+    try:
+        _two_scenes(vp)
+        panel._poll()
+        t = panel.scenes
+        assert t.columnCount() == 2
+        assert panel.job_buttons["animation"].isChecked()      # as it always was
+        assert not t.still_box(0).isEnabled() and not t.still_box(0).isChecked()
+        panel.job_buttons["still"].setChecked(True)
+        assert t.still_box(0).isEnabled() and t.still_box(1).isEnabled()
+        t.still_box(1).setChecked(True)
+        panel.job_buttons["animation"].setChecked(True)
+        assert not t.still_box(1).isEnabled()
+        assert t.still_box(1).isChecked(), "the tick is kept while locked"
+        panel.job_buttons["both"].setChecked(True)
+        assert t.still_box(1).isEnabled()
+    finally:
+        _close(win)
+
+
+def test_the_job_and_the_fixed_render_ticks_travel_and_follow_their_scene():
+    win, vp, panel = _window()
+    try:
+        _two_scenes(vp)
+        panel._poll()
+        panel.job_buttons["both"].setChecked(True)
+        panel.scenes.still_box(1).setChecked(True)               # «Final»
+        panel._save_now()
+        data = vp.scene.plugin_data["igz_animacion"]
+        assert data["settings"]["render_job"] == "both"
+        assert [r["still"] for r in data["scenes"]] == [False, True]
+        del vp.scene.saved_views[0]                              # «Inicio» goes
+        panel._poll()
+        assert panel.scenes.count() == 1 and panel.scenes.is_still(0)
+        # a document without the new keys opens as before
+        vp.scene.plugin_data = {"igz_animacion": {"version": 5, "settings": {}}}
+        vp.scene.version += 1
+        panel._poll()
+        assert panel.job_buttons["animation"].isChecked()
+        assert not panel.scenes.is_still(0)
+    finally:
+        _close(win)
+
+
+def test_a_fixed_render_saves_each_scene_named_after_it_and_no_animation(
+        tmp_path, monkeypatch):
+    win, vp, panel = _window()
+    shots = []
+    _fake_capture_in(panel, monkeypatch, shots)
+    try:
+        _two_scenes(vp)
+        panel._poll()
+        _small_job(panel, tmp_path)
+        panel.job_buttons["still"].setChecked(True)
+        from PySide6.QtCore import Qt
+        panel.scenes.item(0).setCheckState(Qt.Unchecked)   # not a keyframe: still rendered
+        panel.scenes.still_box(0).setChecked(True)
+        panel.scenes.still_box(1).setChecked(True)
+        yaw0 = vp.camera.yaw
+        panel.export()
+        still_dir = tmp_path / "Secuencia" / "Renders escenas fijas"
+        assert sorted(p.name for p in still_dir.glob("*.png")) == ["Final.png", "Inicio.png"]
+        assert not list((tmp_path / "Secuencia").glob("img_*.png")), "no animation"
+        assert shots == ["Inicio.png", "Final.png"]
+        assert abs(vp.camera.yaw - yaw0) < 1e-9
+        assert panel.framebuffer._state == "done"
+    finally:
+        if panel.framebuffer is not None:
+            panel.framebuffer.close()
+        _close(win)
+
+
+def test_fixed_render_plus_animation_does_both_jobs(tmp_path, monkeypatch):
+    win, vp, panel = _window()
+    _fake_capture_in(panel, monkeypatch)
+    try:
+        _two_scenes(vp)
+        panel._poll()
+        _small_job(panel, tmp_path)
+        panel.job_buttons["both"].setChecked(True)
+        panel.scenes.still_box(1).setChecked(True)
+        panel.export()
+        out = tmp_path / "Secuencia"
+        assert [p.name for p in (out / "Renders escenas fijas").glob("*.png")] == ["Final.png"]
+        assert len(list(out.glob("img_*.png"))) == 6
+    finally:
+        if panel.framebuffer is not None:
+            panel.framebuffer.close()
+        _close(win)
+
+
+def test_a_fixed_render_without_ticked_scenes_says_so(monkeypatch):
+    win, vp, panel = _window()
+    try:
+        _two_scenes(vp)
+        panel._poll()
+        panel.job_buttons["still"].setChecked(True)
+        said = []
+        monkeypatch.setattr(QMessageBox_of(panel), "warning",
+                            lambda *a, **k: said.append(a[2]))
+        panel.export()
+        assert said and ("Fixed render" in said[0] or "Render fijo" in said[0])
+        assert panel.framebuffer is None, "nothing was started"
+    finally:
+        _close(win)
+
+
+def QMessageBox_of(panel):
+    import sys
+    return sys.modules[type(panel).__module__].QMessageBox
+
+
+
+def test_a_fixed_render_alone_offers_only_an_image_sequence():
+    win, vp, panel = _window()
+    try:
+        combo = panel.file_type
+        combo.setCurrentIndex(combo.findData(1))                  # Video
+        panel._save_now()
+        panel.job_buttons["still"].setChecked(True)
+        assert combo.currentData() == 0, "held at Image sequence"
+        enabled = [combo.model().item(i).isEnabled() for i in range(combo.count())]
+        assert enabled == [True, False, False]
+        panel._save_now()
+        assert vp.scene.plugin_data["igz_animacion"]["settings"]["file_type"] == 1,             "the user's own choice is what the document keeps"
+        assert "Renders escenas fijas" in panel.output_info.toolTip()
+        panel.job_buttons["both"].setChecked(True)
+        assert combo.currentData() == 1, "the choice comes back"
+        assert all(combo.model().item(i).isEnabled() for i in range(combo.count()))
+        panel.job_buttons["still"].setChecked(True)
+        panel.job_buttons["animation"].setChecked(True)
+        assert combo.currentData() == 1
+    finally:
+        _close(win)
+
+
+def test_opening_a_document_in_fixed_render_mode_does_not_mark_it_changed():
+    win, vp, panel = _window()
+    try:
+        vp.scene.plugin_data = {"igz_animacion": {"version": 5, "settings": {
+            "render_job": "still", "file_type": 2}}}
+        before = len(vp.history.undo_stack)
+        vp.scene.version += 1
+        panel._poll()
+        assert panel.job_buttons["still"].isChecked()
+        assert panel.file_type.currentData() == 0
+        assert not panel._save_timer.isActive()
+        assert len(vp.history.undo_stack) == before
+        panel.job_buttons["animation"].setChecked(True)
+        assert panel.file_type.currentData() == 2
+    finally:
+        _close(win)

@@ -58,6 +58,22 @@ follow [SemVer](https://semver.org).
   Consola): avisaba en la línea de estado de la sección Renderizar, fuera
   de la vista, y parecía no hacer nada; dice también si el plano ya era el
   corte activo, y nombra el plano por su símbolo (A, B…), que salía vacío.
+  **Render fijo**: en Escenas, tres opciones antes de la tabla —
+  **Render fijo**, **Animación** (lo de siempre, por defecto) y **Render
+  fijo + Animación** (marcada en azul). La tabla de escenas tiene dos
+  columnas, **Escena keyframe** y **Render fijo**; la casilla blanca de
+  Render fijo de cada escena solo se puede marcar con Render fijo o Render
+  fijo + Animación (con Animación queda bloqueada, sin perder lo marcado).
+  Cada escena marcada se renderiza tal como está, sin animación, a la
+  resolución de Ajustes, con el nombre de la escena (`Vista 1.png`; dos
+  escenas con el mismo nombre no se pisan), en la subcarpeta **Renders
+  escenas fijas** de la carpeta de salida. Con el Visor 3D o con Blender
+  (Nativo o Personalizado, el mismo Blender para todas las imágenes); con
+  las dos cosas, primero los renders fijos y luego la animación. La opción
+  y las casillas se guardan en el .igz y siguen a su escena. Con Render
+  fijo solo, Salida de archivos ▸ Tipo de archivo queda en **Secuencia de
+  imágenes** (Video y Secuencia + video no se pueden elegir); con los otros
+  dos modos se puede elegir todo y vuelve lo que estaba elegido antes.
 - **«No existe escena» en rojo en un archivo sin escenas**: la etiqueta de
   arriba a la izquierda del visor no aparecía hasta crear la primera
   escena; ahora un archivo nuevo dice «No existe escena» en rojo. Con

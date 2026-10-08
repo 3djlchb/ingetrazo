@@ -23,8 +23,8 @@ from PySide6.QtWidgets import QApplication
 from core.i18n import tr
 
 from .core import (
-    RenderCancelled, _apply_section_state, apply_frame, capture_section_state,
-    reset_frame_cache,
+    RenderCancelled, _apply_section_state, apply_frame, apply_view,
+    capture_section_state, reset_frame_cache, still_file_names,
 )
 from .sampling import PROCESSING_NATIVE, describe, request_fields
 
@@ -97,13 +97,21 @@ class StatsThrottle:
 
 
 class BlenderAnimationRender:
-    """Render every frame in one long-lived Blender (``serve`` mode)."""
+    """Render every frame in one long-lived Blender (``serve`` mode).
+
+    With ``stills`` (a list of scenes) it renders those scenes instead, each
+    as it is and saved as ``<scene name>.png`` in ``output_dir`` — the fixed
+    renders, through the same Blender, sampling and lights."""
 
     def __init__(self, app, views, duration, fps, resolution, engine="cycles",
                  blender_path="", frame_callback=None, output_dir=None,
                  image_prefix="img_", sampling=None, log_callback=None,
-                 control=None, quality=None):
-        if len(views) < 2:
+                 control=None, quality=None, stills=None):
+        self.stills = list(stills or [])
+        if self.stills:
+            if output_dir is None:
+                raise ValueError("fixed renders need an output folder")
+        elif len(views) < 2:
             raise ValueError(tr("At least two scenes are needed."))
         self.app = app
         self.viewport = app.viewport
@@ -126,7 +134,33 @@ class BlenderAnimationRender:
 
     @property
     def total_frames(self):
+        if self.stills:
+            return len(self.stills)
         return max(1, int(round(self.duration * self.fps)))
+
+    def _plan(self) -> list:
+        """``(put the viewport there, file name, progress text)`` per image."""
+        vp = self.viewport
+        if self.stills:
+            def still(view):
+                def go():
+                    reset_frame_cache(vp)
+                    apply_view(vp, view)
+                return go
+            total = len(self.stills)
+            return [(still(v), name,
+                     tr("Blender ({engine}) — fixed render {n}/{total}: {name}",
+                        engine=self.engine, n=i, total=total, name=v.name))
+                    for i, (v, name) in enumerate(
+                        zip(self.stills, still_file_names(self.stills)), 1)]
+        total = self.total_frames
+
+        def frame(i):
+            return lambda: apply_frame(vp, self.views, i, total)
+        return [(frame(i), f"{self.image_prefix}{i:06d}.png",
+                 tr("Blender ({engine}) — frame {n}/{total}",
+                    engine=self.engine, n=i, total=total))
+                for i in range(1, total + 1)]
 
     @property
     def processing(self) -> str:
@@ -232,10 +266,11 @@ class BlenderAnimationRender:
             wait_for("INGETRAZO ready")
             self._log(tr("Blender ready: rendering the frames."))
 
-            total = self.total_frames
-            for i in range(1, total + 1):
+            plan = self._plan()
+            total = len(plan)
+            for i, (go_there, name, message) in enumerate(plan, 1):
                 self._check()
-                apply_frame(self.viewport, self.views, i, total)
+                go_there()
                 output = output_frames / f"frame_{i:06d}.png"
                 proc.stdin.write(frame_request(
                     self.viewport.camera, scene, output, self.resolution[0],
@@ -248,13 +283,12 @@ class BlenderAnimationRender:
                 saved_output = output
                 if self.output_dir is not None:
                     self.output_dir.mkdir(parents=True, exist_ok=True)
-                    saved_output = self.output_dir / f"{self.image_prefix}{i:06d}.png"
+                    saved_output = self.output_dir / name
                     shutil.copy2(output, saved_output)
                 if self.frame_callback:
                     self.frame_callback(saved_output, i, total)
                 if progress:
-                    progress(i, total, tr("Blender ({engine}) — frame {n}/{total}",
-                                          engine=self.engine, n=i, total=total))
+                    progress(i, total, message)
 
             proc.stdin.write(json.dumps({"quit": True}) + "\n")
             proc.stdin.flush()

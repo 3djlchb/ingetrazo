@@ -20,22 +20,26 @@ import shutil
 import webbrowser
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QSettings, QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QSettings, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QDoubleValidator, QFontDatabase, QIntValidator, QPalette, QTextCursor,
 )
 from PySide6.QtWidgets import (
-    QAbstractItemView, QAbstractSpinBox, QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
+    QAbstractItemView, QAbstractSpinBox, QApplication, QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBox,
     QFileDialog, QFormLayout, QFrame, QHBoxLayout, QInputDialog, QLabel,
     QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPlainTextEdit,
-    QProgressBar, QProgressDialog, QPushButton, QScrollArea, QSizePolicy,
+    QHeaderView, QProgressBar, QProgressDialog, QPushButton, QRadioButton,
+    QScrollArea, QSizePolicy,
     QSpinBox, QTableWidget, QTableWidgetItem, QToolButton, QVBoxLayout, QWidget,
 )
 
 from core.i18n import tr
 from views.fold_section import FoldSection, narrow
 
-from .core import AnimationRender, RenderCancelled, apply_frame, capture_section_state
+from .core import (
+    STILLS_FOLDER, AnimationRender, RenderCancelled, StillRender, apply_frame,
+    capture_section_state,
+)
 from .exporter import CODECS, FFmpegExporter
 from .ffmpeg_tools import FFmpegManager, remember_ffmpeg
 from .framebuffer import CANCELLED, DONE, FAILED, AnimationFrameBuffer
@@ -58,6 +62,107 @@ SHOW_TIMELINE_KEY = "igz_animacion/show_timeline"
 #: QSettings prefix of the sections' open / folded state.
 _SECTION_KEY = "igz_animacion/open_"
 QUALITY_NAMES = ("Draft", "Medium", "High")
+#: What «Render animation» does (``settings.render_job``): the fixed renders
+#: only, the animation only (what it always did), or both.
+JOB_STILL, JOB_ANIMATION, JOB_BOTH = "still", "animation", "both"
+JOBS = (JOB_STILL, JOB_ANIMATION, JOB_BOTH)
+_ASSETS = Path(__file__).resolve().parent / "assets"
+#: The job's radio buttons: blue once chosen.
+RADIO_STYLE = (
+    "QRadioButton::indicator { width: 12px; height: 12px; border-radius: 7px;"
+    " border: 1px solid #8a8f98; background: palette(base); }"
+    "QRadioButton::indicator:checked { border: 1px solid #2563eb; background:"
+    " qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5,"
+    " stop:0 #ffffff, stop:0.32 #ffffff, stop:0.42 #2563eb, stop:1 #2563eb); }"
+    "QRadioButton:checked { color: #3b82f6; font-weight: 600; }")
+#: «Fixed render» check boxes: white; grey while locked.
+STILL_BOX_STYLE = (
+    "QCheckBox::indicator { width: 14px; height: 14px; border-radius: 2px;"
+    " border: 1px solid #9ca3af; background: #ffffff; }"
+    "QCheckBox::indicator:checked { image: url(%s); }"
+    "QCheckBox::indicator:disabled { background: #4b5563; border: 1px solid #4b5563; }"
+    ) % (_ASSETS / "check_dark.svg").as_posix()
+
+
+class SceneTable(QTableWidget):
+    """The scenes: «Keyframe scene» (ticked = in the animation) and «Fixed
+    render» (rendered on its own as well). It answers the list calls the
+    tab always made (``count``, ``item(row)``, ``addItem``,
+    ``setCurrentRow``…), so the rest of the tab is unchanged."""
+
+    stillToggled = Signal(int, bool)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(0, 2, parent)
+        self.setHorizontalHeaderLabels([tr("Keyframe scene"), tr("Fixed render")])
+        self.verticalHeader().setVisible(False)
+        head = self.horizontalHeader()
+        head.setSectionResizeMode(0, QHeaderView.Stretch)
+        head.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        head.setHighlightSections(False)
+        self.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.setShowGrid(False)
+        self._still_enabled = False
+
+    # the list calls ------------------------------------------------------------
+    def count(self) -> int:
+        return self.rowCount()
+
+    def item(self, row, column=0):
+        return super().item(row, column)
+
+    def clear(self) -> None:          # keep the headers
+        self.setRowCount(0)
+
+    def currentItem(self):
+        row = self.currentRow()
+        return self.item(row) if row >= 0 else None
+
+    def setCurrentRow(self, row) -> None:
+        self.setCurrentCell(row, 0)
+
+    def addItem(self, item, still: bool = False) -> None:
+        row = self.rowCount()
+        self.insertRow(row)
+        self.setItem(row, 0, item)
+        box = QCheckBox()
+        box.setChecked(bool(still))
+        box.setEnabled(self._still_enabled)
+        box.setStyleSheet(STILL_BOX_STYLE)
+        box.setToolTip(tr("Also render this scene on its own, as it is, "
+                          "named after the scene."))
+        box.toggled.connect(lambda on, b=box: self._box_toggled(b, on))
+        holder = QWidget()
+        lay = QHBoxLayout(holder)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setAlignment(Qt.AlignCenter)
+        lay.addWidget(box)
+        self.setCellWidget(row, 1, holder)
+        self.setRowHeight(row, 26)
+
+    # the «Fixed render» column -------------------------------------------------
+    def still_box(self, row):
+        holder = self.cellWidget(row, 1)
+        return holder.findChild(QCheckBox) if holder is not None else None
+
+    def is_still(self, row) -> bool:
+        box = self.still_box(row)
+        return bool(box is not None and box.isChecked())
+
+    def set_still_enabled(self, on: bool) -> None:
+        self._still_enabled = bool(on)
+        for row in range(self.rowCount()):
+            box = self.still_box(row)
+            if box is not None:
+                box.setEnabled(self._still_enabled)
+
+    def _box_toggled(self, box, on) -> None:
+        for row in range(self.rowCount()):
+            if self.still_box(row) is box:
+                self.stillToggled.emit(row, bool(on))
+                return
 
 
 def _section(title: str, key: str, default_open: bool = True) -> FoldSection:
@@ -95,7 +200,7 @@ def fit_to_tray(root: QWidget) -> None:
     # Labels keep their width: a form's label squeezed under its text ran
     # into the field; long texts wrap (paths at their separators).
     kinds = (QComboBox, QLineEdit, QAbstractSpinBox, QPushButton, QCheckBox,
-             QListWidget, QTableWidget, QPlainTextEdit, QProgressBar)
+             QRadioButton, QListWidget, QTableWidget, QPlainTextEdit, QProgressBar)
     for w in root.findChildren(QWidget):
         if isinstance(w, kinds):
             if w.maximumWidth() < 100:          # a fixed little «…» button
@@ -149,6 +254,10 @@ class AnimacionPanel(QWidget):
         self._renderer = None
         self._video_name_edited = False
         self._igz_path_edited = False
+        # «Fixed render» alone makes images only: the output kind is held at
+        # «Image sequence» and the user's own choice is kept for later.
+        self._output_locked = False
+        self._file_type_choice = 0
         # What the panel knows of the document, to tell a real change from
         # its own echo: the scene object (New / Open replace it), the scene
         # list as objects (a scene added, deleted or moved in Properties),
@@ -304,13 +413,34 @@ class AnimacionPanel(QWidget):
 
     def _build_scenes(self, layout):
         sec = _section(tr("Scenes"), "scenes")
-        self.scenes = QListWidget()
+        # What «Render animation» renders.
+        self.job_group = QButtonGroup(self)
+        self.job_buttons = {}
+        for job, text, tip in (
+                (JOB_STILL, tr("Fixed render"),
+                 tr("Only the scenes ticked in «Fixed render», each as it is, "
+                    "no animation.")),
+                (JOB_ANIMATION, tr("Animation"),
+                 tr("The animation through the keyframe scenes, as set in "
+                    "Settings and Output.")),
+                (JOB_BOTH, tr("Fixed render + Animation"),
+                 tr("Both jobs: first the fixed renders, then the animation."))):
+            radio = QRadioButton(text)
+            radio.setToolTip(tip)
+            radio.setStyleSheet(RADIO_STYLE)
+            self.job_group.addButton(radio)
+            self.job_buttons[job] = radio
+            sec.body_layout.addWidget(radio)
+        self.job_buttons[JOB_ANIMATION].setChecked(True)
+        self.job_group.buttonToggled.connect(self._job_toggled)
+
+        self.scenes = SceneTable()
         self.scenes.setMinimumHeight(120)
-        self.scenes.setMaximumHeight(190)
-        self.scenes.setSelectionMode(QListWidget.SingleSelection)
+        self.scenes.setMaximumHeight(220)
         self.scenes.setToolTip(tr(
             "Ticked scenes are the animation's keyframes, in this order. "
             "Double-click a scene to show it."))
+        self.scenes.stillToggled.connect(self._still_toggled)
         self.scenes.itemChanged.connect(self._scenes_changed)
         self.scenes.itemSelectionChanged.connect(self._scene_selection_changed)
         self.scenes.itemDoubleClicked.connect(self._show_selected_scene)
@@ -682,6 +812,8 @@ class AnimacionPanel(QWidget):
             self.blender_engine.setCurrentIndex(1 if engine == "eevee" else 0)
             processing = str(s.get("processing", PROCESSING_NATIVE)).lower()
             self.processing.setCurrentIndex(1 if processing == PROCESSING_CUSTOM else 0)
+            job = str(s.get("render_job", JOB_ANIMATION))
+            self.job_buttons[job if job in JOBS else JOB_ANIMATION].setChecked(True)
             self.resolution_x.setValue(int(s.get("resolution_x", 1920)))
             self.resolution_y.setValue(int(s.get("resolution_y", 1080)))
             self.duration.setValue(int(s.get("duration", 10)))
@@ -725,6 +857,8 @@ class AnimacionPanel(QWidget):
             self._interpolate_section = True
         finally:
             self._loading = False
+        self._output_locked = False            # a new document: its own choice
+        self._apply_job_to_output()
         self._update_renderer_controls()
         self._load_blender_path()
 
@@ -744,6 +878,7 @@ class AnimacionPanel(QWidget):
             "renderer_mode": int(self.image_type.currentData() or 0),
             "blender_engine": str(self.blender_engine.currentData() or "cycles"),
             "processing": str(self.processing.currentData() or PROCESSING_NATIVE),
+            "render_job": self._render_job(),
             "resolution_x": int(self.resolution_x.value()),
             "resolution_y": int(self.resolution_y.value()),
             "fps": float(self._fps_value()),
@@ -752,7 +887,8 @@ class AnimacionPanel(QWidget):
             "crf": int(self.crf.value()),
             "codec": self.codec_combo.currentText(),
             "duration": int(self.duration.value()),
-            "file_type": int(self.file_type.currentData() or 0),
+            "file_type": int(self._file_type_choice if self._output_locked
+                             else (self.file_type.currentData() or 0)),
             "image_prefix": self._safe_prefix(),
             "output_folder_name": self._safe_folder_name(),
             "igz_path": self.igz_path.text().strip() if self._igz_path_edited else "",
@@ -868,11 +1004,16 @@ class AnimacionPanel(QWidget):
         images = str(base / (self._safe_prefix() + "000001.png")) + " …"
         video = str(base / self._safe_video_name())
         kind = self.file_type.currentData()
+        job = self._render_job()
         lines = []
-        if kind in (OUT_IMAGES, OUT_BOTH):
-            lines.append(tr("Images: {path}", path=images))
-        if kind in (OUT_VIDEO, OUT_BOTH):
-            lines.append(tr("Video: {path}", path=video))
+        if job in (JOB_STILL, JOB_BOTH):
+            lines.append(tr("Fixed renders: {path}",
+                            path=str(base / STILLS_FOLDER / "<escena>.png")))
+        if job in (JOB_ANIMATION, JOB_BOTH):
+            if kind in (OUT_IMAGES, OUT_BOTH):
+                lines.append(tr("Images: {path}", path=images))
+            if kind in (OUT_VIDEO, OUT_BOTH):
+                lines.append(tr("Video: {path}", path=video))
         self.output_info.setText(breakable("\n".join(lines)))
         self.output_info.setToolTip("\n".join(lines))
         self._update_render_status()
@@ -1033,9 +1174,17 @@ class AnimacionPanel(QWidget):
         if self.image_type.currentData() == RENDER_BLENDER:
             renderer += " · " + self.blender_engine.currentText()
             renderer += " · " + self.processing.currentText()
-        self.status.setText(tr(
-            "{n} scene(s) ticked to animate.\nRenderer: {renderer}\nOutput: {output}",
-            n=count, renderer=renderer, output=self.file_type.currentText()))
+        job = self._render_job()
+        lines = []
+        if job in (JOB_STILL, JOB_BOTH):
+            stills = len(self.still_views()) if hasattr(self, "scenes") else 0
+            lines.append(tr("{n} scene(s) for fixed render.", n=stills))
+        if job in (JOB_ANIMATION, JOB_BOTH):
+            lines.append(tr("{n} scene(s) ticked to animate.", n=count))
+        lines.append(tr("Renderer: {renderer}", renderer=renderer))
+        if job in (JOB_ANIMATION, JOB_BOTH):
+            lines.append(tr("Output: {output}", output=self.file_type.currentText()))
+        self.status.setText("\n".join(lines))
 
     # ---- Scenes --------------------------------------------------------------
     def _remap_records(self, views):
@@ -1080,15 +1229,16 @@ class AnimacionPanel(QWidget):
         self.scenes.clear()
         for n, view in enumerate(views, 1):
             self._attach_animation_state(view, n - 1)
-            item = QListWidgetItem(f"{n:02d}  {view.name}")
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item = QTableWidgetItem(f"{n:02d}  {view.name}")
+            item.setFlags((item.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEditable)
             checked = (not self._selection_saved) or ((n - 1) in self._selected_indices)
             item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
             item.setData(Qt.UserRole, view)
             item.setToolTip(view.name)
-            item.setSizeHint(QSize(260, 26))
-            self.scenes.addItem(item)
+            record = self._scene_record(n - 1, view) or {}
+            self.scenes.addItem(item, still=bool(record.get("still", False)))
         self.scenes.blockSignals(False)
+        self.scenes.set_still_enabled(self._render_job() in (JOB_STILL, JOB_BOTH))
         self._views_snapshot = views
         self._names_snapshot = [v.name for v in views]
         self._reconcile_records(views)
@@ -1111,7 +1261,7 @@ class AnimacionPanel(QWidget):
         for idx, view in enumerate(views):
             rec = by_index.setdefault(idx, {"id": new_scene_id(), "index": idx,
                                             "name": view.name, "captured": False,
-                                            "section": None})
+                                            "section": None, "still": False})
             rec["index"] = idx
             rec["name"] = view.name
         self._animation_data["scenes"] = [by_index[i] for i in sorted(by_index)]
@@ -1132,7 +1282,7 @@ class AnimacionPanel(QWidget):
         if not create:
             return None
         record = {"id": new_scene_id(), "index": index, "name": view.name,
-                  "captured": False, "section": None}
+                  "captured": False, "section": None, "still": False}
         records.append(record)
         return record
 
@@ -1152,6 +1302,69 @@ class AnimacionPanel(QWidget):
                 self._attach_animation_state(view, i)
                 views.append(view)
         return views
+
+    def still_views(self):
+        """The scenes ticked in «Fixed render», in the list's order."""
+        views = []
+        for i in range(self.scenes.count()):
+            if self.scenes.is_still(i):
+                view = self.scenes.item(i).data(Qt.UserRole)
+                self._attach_animation_state(view, i)
+                views.append(view)
+        return views
+
+    def _render_job(self) -> str:
+        if not hasattr(self, "job_buttons"):
+            return JOB_ANIMATION
+        for job, radio in self.job_buttons.items():
+            if radio.isChecked():
+                return job
+        return JOB_ANIMATION
+
+    def _job_toggled(self, _button, checked):
+        if not checked:
+            return
+        # «Fixed render» is locked while only the animation is rendered (the
+        # ticks are kept for when it is unlocked again).
+        self.scenes.set_still_enabled(self._render_job() in (JOB_STILL, JOB_BOTH))
+        self._apply_job_to_output()
+        self._update_render_status()
+        self._changed()
+
+    def _apply_job_to_output(self):
+        """«Fixed render» alone: only «Image sequence» can be chosen (a
+        fixed render is images). The other jobs: every kind, and the one
+        chosen before comes back."""
+        still_only = self._render_job() == JOB_STILL
+        combo = self.file_type
+        images = combo.findData(OUT_IMAGES)
+        combo.blockSignals(True)
+        try:
+            if still_only and not self._output_locked:
+                self._file_type_choice = int(combo.currentData() or 0)
+                combo.setCurrentIndex(images)
+            elif not still_only and self._output_locked:
+                combo.setCurrentIndex(max(0, combo.findData(self._file_type_choice)))
+            model = combo.model()
+            for i in range(combo.count()):
+                item = model.item(i)
+                if item is not None:
+                    item.setEnabled(not still_only or combo.itemData(i) == OUT_IMAGES)
+        finally:
+            combo.blockSignals(False)
+        self._output_locked = still_only
+        combo.setToolTip(tr("A fixed render makes images only: «Image sequence».")
+                         if still_only else "")
+        self._update_output_hint()
+
+    def _still_toggled(self, row, on):
+        if self._loading:
+            return
+        record = self._scene_record(row)
+        if record is not None:
+            record["still"] = bool(on)
+        self._update_render_status()
+        self._changed()
 
     def _scenes_changed(self, *_args):
         self._selected_indices = {i for i in range(self.scenes.count())
@@ -1469,14 +1682,23 @@ class AnimacionPanel(QWidget):
         self.status.setText(tr("Cancelling…"))
 
     def export(self):
-        views = self.selected_views()
-        if len(views) < 2:
+        job = self._render_job()
+        do_stills = job in (JOB_STILL, JOB_BOTH)
+        do_anim = job in (JOB_ANIMATION, JOB_BOTH)
+        views = self.selected_views() if do_anim else []
+        stills = self.still_views() if do_stills else []
+        if do_anim and len(views) < 2:
             QMessageBox.warning(self, tr("Animation"), tr("Tick at least two scenes."))
             return
+        if do_stills and not stills:
+            QMessageBox.warning(self, tr("Animation"),
+                                tr("Tick «Fixed render» on at least one scene."))
+            return
         kind = self.file_type.currentData()
-        want_images = kind in (OUT_IMAGES, OUT_BOTH)
-        want_video = kind in (OUT_VIDEO, OUT_BOTH)
+        want_images = do_anim and kind in (OUT_IMAGES, OUT_BOTH)
+        want_video = do_anim and kind in (OUT_VIDEO, OUT_BOTH)
         outdir = self._default_output_dir()
+        still_dir = outdir / STILLS_FOLDER
         try:
             outdir.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
@@ -1503,15 +1725,9 @@ class AnimacionPanel(QWidget):
         if blender:
             renderer_text += " · " + self.blender_engine.currentText()
         sampling_text = self._sampling_text() if blender else "—"
-        outputs = []
-        if want_images:
-            outputs.append(str(outdir / (self._safe_prefix() + "000001.png")) + " …")
-        if want_video:
-            outputs.append(str(outdir / self._safe_video_name()))
         self.console_log(tr("=== Render started ==="))
-        self.console_log(tr("Scenes: {n} · Output: {output} · Renderer: {renderer}",
-                            n=len(views), output=self.file_type.currentText(),
-                            renderer=renderer_text))
+        self.console_log(tr("Job: {job}", job=self.job_buttons[job].text()))
+        self.console_log(tr("Renderer: {renderer}", renderer=renderer_text))
         self.console_log(tr("Resolution: {w} × {h} px · {fps:g} fps",
                             w=size[0], h=size[1], fps=fps))
         if blender:
@@ -1519,61 +1735,95 @@ class AnimacionPanel(QWidget):
 
         self.show_framebuffer()
         fb = self.framebuffer
-        frames = None
         self.progress.setVisible(True)
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
         self.export_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
+        temps = []
+        done = []
 
-        def frame_callback(path, done, total):
-            fb.add_frame(path, done, total, frame_segment_text(views, done, total))
+        def progress(n, total, message):
+            self.progress.setValue(int(n * 100 / max(1, total)))
+            self.status.setText(message)
+            self.console_log(f"[{n}/{total}] {message}")
 
-        try:
-            if blender:
-                from .blender_renderer import BlenderAnimationRender
-                self._renderer = BlenderAnimationRender(
-                    self.app, views, self.duration.value(), fps, size,
-                    engine=str(self.blender_engine.currentData() or "cycles"),
-                    blender_path=self.blender_path.text().strip(),
-                    frame_callback=frame_callback,
-                    output_dir=outdir if want_images else None,
-                    image_prefix=self._safe_prefix(),
-                    sampling=self._blender_sampling_settings(),
-                    log_callback=lambda m: self.console_log("[Blender] " + str(m)),
-                    control=fb, quality=self._native_quality())
-                cancel_hook = self._renderer.request_cancel
-            else:
-                self._renderer = AnimationRender(
-                    self.app.viewport, views, self.duration.value(), fps, size,
-                    output_dir=outdir if want_images else None,
-                    image_prefix=self._safe_prefix(),
-                    frame_callback=frame_callback, control=fb)
-                cancel_hook = None
-            fb.start(self._renderer.total_frames, {
+        def run(renderer, output_text, segment):
+            """One job through the frame buffer; returns what render gave."""
+            self._renderer = renderer
+            fb.start(renderer.total_frames, {
                 "renderer": renderer_text, "sampling": sampling_text,
                 "resolution": f"{size[0]} × {size[1]} px",
-                "fps": f"{fps:g} fps", "output": "\n".join(outputs)},
-                cancel_hook=cancel_hook)
+                "fps": f"{fps:g} fps" if segment is None else "—",
+                "output": output_text},
+                cancel_hook=getattr(renderer, "request_cancel", None))
+            try:
+                return renderer.render(progress)
+            finally:
+                if getattr(renderer, "temp_dir", None) is not None:
+                    temps.append(renderer.temp_dir)
 
-            def progress(done, total, message):
-                self.progress.setValue(int(done * 100 / max(1, total)))
-                self.status.setText(message)
-                self.console_log(f"[{done}/{total}] {message}")
+        def blender_job(**kw):
+            from .blender_renderer import BlenderAnimationRender
+            return BlenderAnimationRender(
+                self.app, kw.pop("views", []), self.duration.value(), fps, size,
+                engine=str(self.blender_engine.currentData() or "cycles"),
+                blender_path=self.blender_path.text().strip(),
+                image_prefix=self._safe_prefix(),
+                sampling=self._blender_sampling_settings(),
+                log_callback=lambda m: self.console_log("[Blender] " + str(m)),
+                control=fb, quality=self._native_quality(), **kw)
 
-            frames = self._renderer.render(progress)
-            done = []
-            if want_images:
-                done.append(tr("Images: {path}", path=outdir))
-            if want_video:
-                video_path = outdir / self._safe_video_name()
-                self.status.setText(tr("Encoding the video…"))
-                self.console_log(tr("Encoding the video…"))
-                QApplication.processEvents()
-                FFmpegExporter(ffmpeg).export_png_sequence(
-                    frames, fps, video_path, self.crf.value(),
-                    codec=self.codec_combo.currentText())
-                done.append(tr("Video: {path}", path=video_path))
+        try:
+            if stills:
+                self.console_log(tr("Fixed renders: {n} scene(s) → {path}",
+                                    n=len(stills), path=still_dir))
+
+                def still_frame(path, n, total):
+                    fb.add_frame(path, n, total, stills[n - 1].name)
+
+                if blender:
+                    renderer = blender_job(stills=stills, output_dir=still_dir,
+                                           frame_callback=still_frame)
+                else:
+                    renderer = StillRender(self.app.viewport, stills, size,
+                                           output_dir=still_dir,
+                                           frame_callback=still_frame, control=fb)
+                run(renderer, str(still_dir), segment=True)
+                done.append(tr("Fixed renders: {path}", path=still_dir))
+            if do_anim:
+                if want_images:
+                    out_text = str(outdir / (self._safe_prefix() + "000001.png")) + " …"
+                else:
+                    out_text = str(outdir / self._safe_video_name())
+                self.console_log(tr("Scenes: {n} · Output: {output} · Renderer: {renderer}",
+                                    n=len(views), output=self.file_type.currentText(),
+                                    renderer=renderer_text))
+
+                def frame_callback(path, n, total):
+                    fb.add_frame(path, n, total, frame_segment_text(views, n, total))
+
+                image_dir = outdir if want_images else None
+                if blender:
+                    renderer = blender_job(views=views, output_dir=image_dir,
+                                           frame_callback=frame_callback)
+                else:
+                    renderer = AnimationRender(
+                        self.app.viewport, views, self.duration.value(), fps, size,
+                        output_dir=image_dir, image_prefix=self._safe_prefix(),
+                        frame_callback=frame_callback, control=fb)
+                frames = run(renderer, out_text, segment=None)
+                if want_images:
+                    done.append(tr("Images: {path}", path=outdir))
+                if want_video:
+                    video_path = outdir / self._safe_video_name()
+                    self.status.setText(tr("Encoding the video…"))
+                    self.console_log(tr("Encoding the video…"))
+                    QApplication.processEvents()
+                    FFmpegExporter(ffmpeg).export_png_sequence(
+                        frames, fps, video_path, self.crf.value(),
+                        codec=self.codec_combo.currentText())
+                    done.append(tr("Video: {path}", path=video_path))
             self.progress.setValue(100)
             fb.finish(DONE)
             self.status.setText(tr("Animation rendered.") + "\n" + "\n".join(done))
@@ -1590,8 +1840,7 @@ class AnimacionPanel(QWidget):
             self.console_log(tr("[ERROR] The render failed: {error}", error=exc))
             QMessageBox.critical(self, tr("Animation"), str(exc))
         finally:
-            temp = getattr(self._renderer, "temp_dir", None)
-            if temp is not None:
+            for temp in temps:
                 shutil.rmtree(temp, ignore_errors=True)
             fb.forget_missing()
             self._renderer = None

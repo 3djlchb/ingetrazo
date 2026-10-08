@@ -71,6 +71,8 @@ def normalize_scene_record(raw: object) -> dict | None:
         "name": name,
         "captured": bool(raw.get("captured", False)),
         "section": deepcopy(section),
+        # «Fixed render»: this scene is also rendered on its own, as it is.
+        "still": bool(raw.get("still", False)),
     }
 
 

@@ -400,3 +400,88 @@ class AnimationRender:
             self.viewport.scene.bump_view()
             self.viewport.update()
             QApplication.processEvents()
+
+
+#: Where the fixed renders go, inside the output folder (the name the user
+#: asked for, the same in every language so the folder is easy to find).
+STILLS_FOLDER = "Renders escenas fijas"
+_BAD_FILE_CHARS = '<>:"/\\|?*'
+
+
+def safe_file_name(name: str) -> str:
+    """A scene name as a file name on every system."""
+    text = "".join("_" if c in _BAD_FILE_CHARS or ord(c) < 32 else c
+                   for c in str(name or "")).strip().rstrip(".")
+    return text or "escena"
+
+
+def still_file_names(views) -> list:
+    """``<scene name>.png`` per scene; two scenes with one name get
+    ``name_2.png``… instead of overwriting each other."""
+    seen: dict = {}
+    names = []
+    for view in views:
+        base = safe_file_name(getattr(view, "name", ""))
+        key = base.lower()
+        seen[key] = seen.get(key, 0) + 1
+        names.append(f"{base}.png" if seen[key] == 1 else f"{base}_{seen[key]}.png")
+    return names
+
+
+class StillRender:
+    """Fixed renders with the viewport's own renderer: each scene exactly as
+    it is (camera, layers, style, its captured section), one image named
+    after the scene, no animation."""
+
+    def __init__(self, viewport, views, resolution=(1920, 1080), output_dir=None,
+                 frame_callback=None, control=None):
+        if not views:
+            raise ValueError(tr("Tick «Fixed render» on at least one scene."))
+        self.viewport = viewport
+        self.views = list(views)
+        self.resolution = (max(16, int(resolution[0])), max(16, int(resolution[1])))
+        self.output_dir = Path(output_dir).expanduser()
+        self.frame_callback = frame_callback
+        self.control = control
+        self.cancelled = False
+        self.temp_dir = None
+
+    @property
+    def total_frames(self):
+        return len(self.views)
+
+    def _check(self):
+        if self.cancelled:
+            raise RenderCancelled(tr("Render cancelled."))
+        if self.control is not None:
+            self.control.check()
+
+    def render(self, progress=None):
+        from core.saved_views import SavedView
+        restore_view = SavedView.capture("__igz_animacion_restore__",
+                                         self.viewport.scene, self.viewport.camera)
+        restore_section = capture_section_state(self.viewport)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        total = len(self.views)
+        paths = []
+        try:
+            for i, (view, name) in enumerate(zip(self.views, still_file_names(self.views)), 1):
+                self._check()
+                reset_frame_cache(self.viewport)
+                apply_view(self.viewport, view)
+                path = self.output_dir / name
+                capture(self.viewport, path, self.resolution)
+                paths.append(path)
+                if self.frame_callback:
+                    self.frame_callback(path, i, total)
+                if progress:
+                    progress(i, total, tr("Fixed render {n}/{total}: {name}",
+                                          n=i, total=total, name=view.name))
+            return paths
+        finally:
+            reset_frame_cache(self.viewport)
+            restore_view.apply(self.viewport.scene, self.viewport.camera)
+            _apply_section_state(self.viewport, restore_section)
+            self.viewport.scene.bump_view()
+            self.viewport.update()
+            QApplication.processEvents()
