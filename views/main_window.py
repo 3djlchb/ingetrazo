@@ -290,10 +290,15 @@ class MainWindow(QMainWindow):
         # Window ▸ Layout: the classic centre (default) or areas.
         self.area_manager = None
         self._properties_editor = None          # the tray as an area, if any
+        # Window ▸ Workspace: named arrangements, for either layout.
+        from views.workspace import WorkspaceManager
+        self.workspaces = WorkspaceManager(self)
         from views.areas import MODE_AREAS, MODE_KEY, register_core_editors
         register_core_editors(self)
-        if str(st.value(MODE_KEY, "classic")) == MODE_AREAS:
+        start_mode = self.workspaces.mode() or str(st.value(MODE_KEY, "classic"))
+        if start_mode == MODE_AREAS:
             self.set_layout_mode(MODE_AREAS, remember=False)
+        self._build_workspace_ui()
 
         self._setup_autosave()
         # An untitled recovery slot on disk means the last session died with
@@ -1331,14 +1336,19 @@ class MainWindow(QMainWindow):
         reset.setStatusTip(tr("Back to the starting areas: the 3D viewport "
                               "on top, the Python console under it."))
         reset.triggered.connect(self.reset_areas)
+        # Only with areas: in the classic layout there is nothing to reset.
+        reset.setEnabled(False)
+        self._act_reset_areas = reset
         window_menu.addMenu(layout_menu)
         self._layout_menu = layout_menu
+        self._window_menu = window_menu
 
         toggle_profile = self.profile_dock.toggleViewAction()
         toggle_profile.setText(tr("Terrain profile"))
         toggle_profile.setStatusTip(tr(
             "Show or hide the panel with the terrain profile along a path."))
         window_menu.addAction(toggle_profile)
+        self._act_profile = toggle_profile
 
 
         # AutoCAD's Ctrl+0 clean screen: nothing but the model, for
@@ -1756,7 +1766,8 @@ class MainWindow(QMainWindow):
         from views.areas import MODE_AREAS, MODE_CLASSIC
         return MODE_AREAS if self.area_manager is not None else MODE_CLASSIC
 
-    def set_layout_mode(self, mode: str, remember: bool = True) -> None:
+    def set_layout_mode(self, mode: str, remember: bool = True,
+                        capture: bool = True) -> None:
         """Classic (the viewport alone in the centre) or areas (the centre
         split into editors, views/areas.py). Live: the viewport moves into
         its area and back, and redraws (Qt rebuilds its GL context)."""
@@ -1771,6 +1782,9 @@ class MainWindow(QMainWindow):
                 and self._act_clean_screen.isChecked():
             self._act_clean_screen.setChecked(False)
         vp = self.viewport
+        ws = getattr(self, "workspaces", None)
+        if ws is not None and self.isVisible() and capture:
+            ws.capture()                         # the layout being left
         # No in-between state painted: the window updates once, at the end.
         self.setUpdatesEnabled(False)
         # The side tray keeps its width across the switch (a new centre
@@ -1788,10 +1802,15 @@ class MainWindow(QMainWindow):
                                         else getattr(self, "_classic_tray_width", 440))
             manager = AreaManager(self, None)   # built below, once registered
             self.area_manager = manager
-            layout = saved_layout()
+            layout = (ws.areas_layout() if ws is not None else None) or saved_layout()
             front = next((d for d in self._sidebar_docks() if d.isVisible()
                           and not d.visibleRegion().isEmpty()), None)
             self._tray_front = front
+            # The classic profile panel: put away (its place is an area
+            # now), back with the classic layout.
+            self._profile_dock_open = (not self.profile_dock.isHidden()
+                                       and self.profile_dock.widget() is not None)
+            self.profile_dock.hide()
             self.stage.set_manager(manager)
             manager.build(layout or DEFAULT_LAYOUT)
             # With areas the side tray is only ever the Properties AREA: a
@@ -1827,10 +1846,18 @@ class MainWindow(QMainWindow):
             front = getattr(self, "_tray_front", None)
             if front is not None and not front.isHidden():
                 front.raise_()
+            if getattr(self, "_profile_dock_open", False):
+                self.profile_dock.show()
             trays = [self.tray] if not self.tray.isHidden() else []
             tray_widths = [getattr(self, "_classic_tray_width", 440)] if trays else []
+            if ws is not None and isinstance(ws.space().get("classic"), dict):
+                ws.apply_classic()               # this workspace's classic look
+                trays, tray_widths = [], []      # its saved widths rule
         self.setUpdatesEnabled(True)
         self.stage.place()
+        self._sync_profile_action()
+        if ws is not None:
+            ws.set_mode(mode)                    # the workspace's layout now
         if remember:
             QSettings().setValue(MODE_KEY, mode)
         self._sync_layout_menu()
@@ -1840,10 +1867,49 @@ class MainWindow(QMainWindow):
         self._place_sidebar_handle()
         QTimer.singleShot(0, self._place_sidebar_handle)
 
+    def _build_workspace_ui(self) -> None:
+        """Window ▸ Workspace (after Layout) and the list or tabs on the
+        menu bar's line."""
+        menu = getattr(self, "_window_menu", None)
+        layout_menu = getattr(self, "_layout_menu", None)
+        if menu is None:
+            return
+        ws_menu = self.workspaces.build_menu(menu)
+        # At start-up the classic window keeps its own rules (every tray
+        # opens unless Window ▸ Panels closed it; new toolbars packed): the
+        # last session's state is already back. A workspace's arrangement
+        # is put back when the user switches to it.
+        # right after Window ▸ Layout
+        if layout_menu is not None:
+            menu.removeAction(ws_menu.menuAction())
+            acts = menu.actions()
+            idx = acts.index(layout_menu.menuAction()) + 1
+            before = acts[idx] if idx < len(acts) else None
+            menu.insertMenu(before, ws_menu) if before is not None else menu.addMenu(ws_menu)
+        self.workspaces.install_bar()
+
+    def _sync_profile_action(self) -> None:
+        """Window ▸ Terrain profile shows the classic bottom panel; with
+        areas the profile is an area's editor, so the entry is locked — it
+        put a second profile beside the areas (Jose, video «Perfil
+        terreno»)."""
+        act = getattr(self, "_act_profile", None)
+        if act is None:
+            return
+        areas = self.area_manager is not None
+        act.setEnabled(not areas)
+        act.setStatusTip(
+            tr("With areas, pick «Terrain profile» as an area's editor.")
+            if areas else
+            tr("Show or hide the panel with the terrain profile along a path."))
+
     def _sync_layout_menu(self) -> None:
         acts = getattr(self, "_layout_actions", None)
         if acts:
             acts[self.layout_mode()].setChecked(True)
+        reset = getattr(self, "_act_reset_areas", None)
+        if reset is not None:
+            reset.setEnabled(self.area_manager is not None)
 
     def _fit_starting_areas(self, panel_width: int) -> None:
         """The starting layout: the Properties area's PANEL ``panel_width``
@@ -1863,6 +1929,9 @@ class MainWindow(QMainWindow):
         back narrower."""
         from views.areas import DEFAULT_LAYOUT, LAYOUT_KEY, MODE_AREAS
         QSettings().remove(LAYOUT_KEY)
+        ws = getattr(self, "workspaces", None)
+        if ws is not None:
+            ws.space()["areas"] = None           # this workspace starts over
         m = self.area_manager
         if m is None:
             self.set_layout_mode(MODE_AREAS)
@@ -6383,6 +6452,10 @@ class MainWindow(QMainWindow):
             state = self._classic_state          # the trays sit in an area
         st.setValue("ui/window_state", state)
         st.setValue("ui/window_geometry", self.saveGeometry())
+        ws = getattr(self, "workspaces", None)
+        if ws is not None:
+            ws.capture()
+            ws.save()
         if getattr(self, "area_manager", None) is not None:
             self.area_manager._save_timer.stop()   # nothing pending after close
             self.area_manager.save()

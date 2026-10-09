@@ -17,12 +17,14 @@ from views.areas import (DEFAULT_LAYOUT, EMPTY, LAYOUT_KEY, MODE_KEY, VIEWPORT,
 
 @pytest.fixture(autouse=True)
 def _fresh_layout():
+    from views.workspace import CURRENT_KEY, LIST_KEY, VIEW_KEY
+    keys = (MODE_KEY, LAYOUT_KEY, LIST_KEY, CURRENT_KEY, VIEW_KEY)
     st = QSettings()
-    st.remove(MODE_KEY)
-    st.remove(LAYOUT_KEY)
+    for k in keys:
+        st.remove(k)
     yield
-    st.remove(MODE_KEY)
-    st.remove(LAYOUT_KEY)
+    for k in keys:
+        st.remove(k)
 
 
 def _window():
@@ -304,10 +306,12 @@ def test_closing_in_areas_keeps_the_classic_trays_for_next_time():
         _pump()
     finally:
         _close(win)
-    QSettings().setValue(MODE_KEY, "classic")
     win = _window()
     try:
         win.show()
+        _pump()
+        assert win.layout_mode() == "areas", "the workspace's layout"
+        win.set_layout_mode("classic")
         _pump()
         assert not win.tray.isHidden() and win.tray.widget() is not None
     finally:
@@ -443,5 +447,50 @@ def test_the_viewport_never_moves_and_sits_over_its_area():
         assert vp.parentWidget() is parent
         assert vp.geometry() == win.stage.rect() and vp.isVisible()
         assert vp.minimumWidth() == 640, "its classic minimum is back"
+    finally:
+        _close(win)
+
+
+def test_the_classic_profile_entry_is_locked_with_areas():
+    """Window ▸ Terrain profile showed the classic bottom panel beside an
+    area already holding the profile — a second one (Jose, video «Perfil
+    terreno»). Locked with areas; the classic layout as before."""
+    win = _window()
+    try:
+        win.show()
+        _pump()
+        act = win._act_profile
+        assert act.isEnabled()
+        act.trigger()                                   # classic: it opens
+        assert not win.profile_dock.isHidden()
+        win.set_layout_mode("areas")
+        assert not act.isEnabled()
+        assert win.profile_dock.isHidden(), "put away beside the areas"
+        m = win.area_manager
+        m.set_editor(m.split(m.area_with(VIEWPORT), Qt.Vertical), "terrain_profile")
+        assert win.profile_dock.isHidden()
+        win.set_layout_mode("classic")
+        assert act.isEnabled()
+        assert not win.profile_dock.isHidden(), "back as it was"
+        assert win.profile_dock.widget() is not None
+    finally:
+        _close(win)
+
+
+def test_reset_the_areas_only_works_with_areas():
+    win = _window()
+    try:
+        act = win._act_reset_areas
+        assert not act.isEnabled(), "classic: nothing to reset"
+        win.set_layout_mode("areas")
+        assert act.isEnabled()
+        win.set_layout_mode("classic")
+        assert not act.isEnabled()
+        win.set_layout_mode("areas")                    # closed in areas
+    finally:
+        _close(win)
+    win = _window()
+    try:
+        assert win.layout_mode() == "areas" and win._act_reset_areas.isEnabled(),             "opened in areas: active from the start"
     finally:
         _close(win)
