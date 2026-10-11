@@ -110,6 +110,24 @@ class ExtensionApp:
         self.viewport.sceneVersionChanged.connect(lambda _v: fn())
 
     # ---- Side panel ----------------------------------------------------------
+    def add_editor(self, editor_id: str, title: str, create, *,
+                   category: str = "General", release=None,
+                   single: bool = False) -> None:
+        """An editor type for Window ▸ Layout ▸ Areas: it appears in every
+        area's editor menu under ``category`` (General, Animation, Data,
+        Scripting…), titled ``title`` (English, shown through ``tr``).
+
+        ``create(window, area)`` returns the widget the area shows; it is
+        deleted when the area shows something else — unless ``release``
+        is given, ``release(window, widget)``, for a widget lent from
+        elsewhere. ``single``: in one area at most (picking it in another
+        moves it). An area left waiting for this editor (a saved layout,
+        the extension loaded later) shows it as soon as it is registered.
+        Harmless in the classic layout: the menu is simply not there."""
+        from views.areas import EditorType, register_editor
+        register_editor(self._window, EditorType(
+            editor_id, title, create, category, release=release, single=single))
+
     def add_panel(self, title: str, widget, name: str | None = None, *,
                   panel: str | None = None, stretch: int = 0):
         """Put ``widget`` in the side tray as a tab of its own, beside

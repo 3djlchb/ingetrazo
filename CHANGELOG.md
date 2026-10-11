@@ -126,6 +126,66 @@ follow [SemVer](https://semver.org).
   escena; ahora un archivo nuevo dice «No existe escena» en rojo. Con
   escenas todo sigue igual: «Escena: nombre», y «Sin escena» en naranja
   cuando la vista se aleja de la escena activa.
+- **Ventana ▸ Espacio de trabajo** — etapa 2 del administrador de
+  ventanas: disposiciones con nombre («Espacio de trabajo 1», «2»…), como
+  los de Blender. Cada una guarda **su Distribución** (Clásica o Áreas) y
+  su disposición en cada una — en Clásica las barras de herramientas, qué
+  pestañas de la bandeja están abiertas y cuál al frente; en Áreas sus
+  divisiones y editores —: elegir «Normal» puede llevar a la Clásica y
+  «Render» a las Áreas, cada uno como se dejó; cambiar de Distribución
+  dentro de un espacio la vuelve la suya. **Nuevo espacio de trabajo**
+  parte de una copia del actual. Ventana ▸ Espacio de trabajo ▸
+  **Visualización**: como **Pestañas** justo después de los menús, en una
+  franja gris azulada con borde y tras un separador más claro (con
+  «+ Nuevo» al final), o como **Lista desplegable** a la derecha de la
+  barra de menús («Espacio de trabajo: [ ▾ ]», con «Nuevo…» al final).
+  Clic derecho — sobre una pestaña, sobre la lista o sobre un espacio de
+  la lista desplegada —: Renombrar, Duplicar, Eliminar; doble clic en una
+  pestaña la renombra. Se guardan en las preferencias del usuario, nunca
+  en el .igz; en macOS, cuya barra de menús es la del sistema, la lista o
+  las pestañas van en una barra delgada debajo. **Preferencias ▸ Espacios
+  de trabajo**: la lista con la distribución de cada uno, **Exportar…** a
+  una plantilla `.igzws` (para llevarlos a otra computadora o guardarlos
+  como punto de partida), **Importar…** una plantilla — reemplazando los
+  actuales o añadiéndola después (un nombre repetido lleva un número); un
+  archivo que no es plantilla no toca nada — y **Restablecer** a un solo
+  espacio con la ventana como está.
+- **Ventana ▸ Distribución: Clásica o Áreas (estilo Blender)** — etapa 1
+  del administrador de ventanas. **Clásica** sigue siendo la de siempre y
+  la que trae el programa. Con **Áreas**, el centro de la ventana se
+  divide en áreas, cada una con una cabecera: arriba a la izquierda el
+  **tipo de editor** (Visor 3D, Consola de Python, Perfil del terreno,
+  Vacío — por categorías, como en Blender) y a la derecha su menú «⋯»
+  (dividir vertical u horizontalmente, unir con la vecina, maximizar con
+  Ctrl+Espacio, cerrar). Los bordes se arrastran. Empieza con el Visor 3D
+  arriba, la Consola de Python abajo y, a la derecha, el área
+  **Propiedades** (Datos ▸ Propiedades): toda la bandeja lateral —
+  Propiedades, BIM, Terreno y las pestañas de las extensiones — dentro de
+  un área, con las pestañas en una franja estrecha a la izquierda del
+  panel y sus nombres escritos de arriba abajo, como en Blender, y
+  el panel tan ancho como en la distribución clásica. Con Áreas la bandeja
+  solo existe como esa área: si el área pasa a otro editor (o la
+  distribución no tiene Propiedades) los paneles quedan guardados, nunca
+  sueltos al lado de las áreas, y vuelven al elegir Propiedades en un
+  área. Ventana ▸ Paneles muestra u oculta sus pestañas; al volver a
+  Clásica cada panel vuelve a su pestaña de siempre. Igual con el Perfil
+  del terreno: con Áreas es el editor de un área, y Ventana ▸ Perfil del
+  terreno queda bloqueado (ponía un segundo perfil al lado); al volver a
+  Clásica el panel inferior vuelve como estaba. Un área se puede hacer más pequeña que su
+  contenido (se desplaza en vez de imponer su tamaño). El
+  Visor 3D está siempre en un área: elegirlo en otra lo mueve (las dos
+  áreas intercambian editores). La distribución y el modo se recuerdan
+  entre sesiones (preferencias del usuario, nunca en el .igz), y Ventana ▸
+  Distribución ▸ Restablecer las áreas vuelve a la inicial sin salir del
+  modo Áreas y con el panel de Propiedades del mismo ancho (solo está
+  activo con Áreas; en Clásica aparece desactivado). Cambiar de
+  distribución o restablecer ya no parpadea y es unas cuatro veces más
+  rápido (~0,15 s): el Visor 3D nunca cambia de lugar en la ventana — en
+  Áreas se coloca sobre su área — y su contexto OpenGL ya no se destruye y
+  reconstruye en cada cambio. Pantalla
+  limpia (Ctrl+0) deja solo el visor. Las extensiones añaden sus editores
+  con `ExtensionApp.add_editor`; un área que espera un editor no cargado
+  queda «Vacía» con el aviso, y lo muestra en cuanto llega.
 - **Grupos y componentes anidados creados desde dentro**: abre un grupo o
   componente (doble clic), dibuja, selecciona y Crear grupo / Crear
   componente: el nuevo queda **dentro** del abierto. Repite dentro de ese y

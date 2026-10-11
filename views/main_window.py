@@ -249,7 +249,11 @@ class MainWindow(QMainWindow):
         except (TypeError, ValueError):
             self.viewport.history.max_steps = 200
         self.viewport.glReady.connect(self._on_gl_ready)
-        self.setCentralWidget(self.viewport)
+        # The centre is a stage the viewport never leaves (views/areas.py):
+        # the classic layout and the areas only place it.
+        from views.areas import Stage
+        self.stage = Stage(self.viewport)
+        self.setCentralWidget(self.stage)
 
         self._extension_docks: list = []   # side panels added by plugins
         self._build_toolbar()
@@ -282,6 +286,19 @@ class MainWindow(QMainWindow):
         geo = st.value("ui/window_geometry")
         if geo:
             self.restoreGeometry(geo)
+
+        # Window ▸ Layout: the classic centre (default) or areas.
+        self.area_manager = None
+        self._properties_editor = None          # the tray as an area, if any
+        # Window ▸ Workspace: named arrangements, for either layout.
+        from views.workspace import WorkspaceManager
+        self.workspaces = WorkspaceManager(self)
+        from views.areas import MODE_AREAS, MODE_KEY, register_core_editors
+        register_core_editors(self)
+        start_mode = self.workspaces.mode() or str(st.value(MODE_KEY, "classic"))
+        if start_mode == MODE_AREAS:
+            self.set_layout_mode(MODE_AREAS, remember=False)
+        self._build_workspace_ui()
 
         self._setup_autosave()
         # An untitled recovery slot on disk means the last session died with
@@ -1295,11 +1312,43 @@ class MainWindow(QMainWindow):
         window_menu.addMenu(panels_menu)
         self._panels_menu = panels_menu
 
+        # Window ▸ Layout: the classic window or Blender-style areas.
+        from views.areas import MODE_AREAS, MODE_CLASSIC
+        layout_menu = QMenu(tr("Window layout"), window_menu)
+        group = QActionGroup(layout_menu)
+        group.setExclusive(True)
+        self._layout_actions = {}
+        for mode, text, tip in (
+                (MODE_CLASSIC, tr("Classic layout"),
+                 tr("The 3D viewport alone in the centre, as always.")),
+                (MODE_AREAS, tr("Areas (Blender style)"),
+                 tr("The centre split into areas, each showing the editor "
+                    "chosen at its top left."))):
+            act = layout_menu.addAction(text)
+            act.setCheckable(True)
+            act.setStatusTip(tip)
+            act.setActionGroup(group)
+            act.triggered.connect(lambda _=False, m=mode: self.set_layout_mode(m))
+            self._layout_actions[mode] = act
+        self._layout_actions[MODE_CLASSIC].setChecked(True)
+        layout_menu.addSeparator()
+        reset = layout_menu.addAction(tr("Reset the areas"))
+        reset.setStatusTip(tr("Back to the starting areas: the 3D viewport "
+                              "on top, the Python console under it."))
+        reset.triggered.connect(self.reset_areas)
+        # Only with areas: in the classic layout there is nothing to reset.
+        reset.setEnabled(False)
+        self._act_reset_areas = reset
+        window_menu.addMenu(layout_menu)
+        self._layout_menu = layout_menu
+        self._window_menu = window_menu
+
         toggle_profile = self.profile_dock.toggleViewAction()
         toggle_profile.setText(tr("Terrain profile"))
         toggle_profile.setStatusTip(tr(
             "Show or hide the panel with the terrain profile along a path."))
         window_menu.addAction(toggle_profile)
+        self._act_profile = toggle_profile
 
 
         # AutoCAD's Ctrl+0 clean screen: nothing but the model, for
@@ -1471,6 +1520,15 @@ class MainWindow(QMainWindow):
     def set_tray_shown(self, dock, shown: bool) -> None:
         """Show (in front) or hide one side-tray tab and remember it. A
         folded sidebar unfolds first: asking for a tab means seeing it."""
+        if getattr(self, "area_manager", None) is not None:
+            prop = getattr(self, "_properties_editor", None)
+            if prop is not None:                 # the Properties area's tabs
+                prop.set_shown(dock, shown)
+            elif shown:
+                self.statusBar().showMessage(tr(
+                    "Pick Properties in an area to see this panel."), 5000)
+            self._remember_tray_choice(dock, shown)
+            return
         if shown:
             act = getattr(self, "_act_sidebar", None)
             if act is not None and not act.isChecked():
@@ -1573,11 +1631,17 @@ class MainWindow(QMainWindow):
         btn = getattr(self, "_sidebar_handle", None)
         if btn is None:
             return
+        if getattr(self, "area_manager", None) is not None:
+            btn.hide()                           # the trays are an area there
+            return
         from PySide6.QtCore import QPoint
-        edge = self.viewport.mapTo(self, QPoint(self.viewport.width(), 0))
+        # The centre's right edge: the viewport in the classic layout, the
+        # whole area manager with areas (whatever area is rightmost).
+        centre = self.centralWidget() or self.viewport
+        edge = centre.mapTo(self, QPoint(centre.width(), 0))
         x = edge.x() - btn.width() // 2
         x = max(0, min(x, self.width() - btn.width()))
-        y = edge.y() + (self.viewport.height() - btn.height()) // 2
+        y = edge.y() + (centre.height() - btn.height()) // 2
         btn.move(x, max(0, y))
         btn.raise_()
         btn.setVisible(not self._act_clean_screen.isChecked()
@@ -1589,6 +1653,8 @@ class MainWindow(QMainWindow):
     def _set_sidebar_visible(self, on: bool) -> None:
         """Fold the trays away (remembering which were open) or bring
         them back; the chevron turns to point the way."""
+        if getattr(self, "area_manager", None) is not None:
+            return          # areas: the trays are the Properties area
         docks = self._sidebar_docks()
         if on:
             shown = getattr(self, "_sidebar_was", None) or docks[:1]
@@ -1620,6 +1686,18 @@ class MainWindow(QMainWindow):
         the model remains (presentations); Ctrl+0 again restores the
         workspace exactly as it was."""
         from PySide6.QtWidgets import QDockWidget
+        m = getattr(self, "area_manager", None)
+        if m is not None:
+            from views.areas import VIEWPORT
+            m.set_headers_visible(not on)
+            area = m.area_with(VIEWPORT)
+            if on and m.maximized is None and area is not None:
+                m.toggle_maximize(area)
+                self._clean_maximized = True
+            elif not on and getattr(self, "_clean_maximized", False):
+                if m.maximized is not None:
+                    m.toggle_maximize(m.maximized)
+                self._clean_maximized = False
         if on:
             self._clean_screen_state = self.saveState()
             for tb in self.findChildren(QToolBar):
@@ -1677,9 +1755,219 @@ class MainWindow(QMainWindow):
         btn.move(self.viewport.width() - btn.width() - 12, 12)
         btn.raise_()
 
+    # ---- Window ▸ Layout: classic or areas ---------------------------------
+    def command_search_area(self):
+        """Where F3's box goes: inside the modelling area — the viewport,
+        wherever the layout has put it."""
+        vp = self.viewport
+        return vp if vp.isVisible() else self.centralWidget()
+
+    def layout_mode(self) -> str:
+        from views.areas import MODE_AREAS, MODE_CLASSIC
+        return MODE_AREAS if self.area_manager is not None else MODE_CLASSIC
+
+    def set_layout_mode(self, mode: str, remember: bool = True,
+                        capture: bool = True) -> None:
+        """Classic (the viewport alone in the centre) or areas (the centre
+        split into editors, views/areas.py). Live: the viewport moves into
+        its area and back, and redraws (Qt rebuilds its GL context)."""
+        from PySide6.QtCore import QTimer
+        from PySide6.QtGui import QKeySequence, QShortcut
+        from views.areas import (DEFAULT_LAYOUT, MODE_AREAS, MODE_CLASSIC,
+                                 MODE_KEY, AreaManager, saved_layout)
+        if mode not in (MODE_AREAS, MODE_CLASSIC) or mode == self.layout_mode():
+            self._sync_layout_menu()
+            return
+        if getattr(self, "_act_clean_screen", None) is not None \
+                and self._act_clean_screen.isChecked():
+            self._act_clean_screen.setChecked(False)
+        vp = self.viewport
+        ws = getattr(self, "workspaces", None)
+        if ws is not None and self.isVisible() and capture:
+            ws.capture()                         # the layout being left
+        # No in-between state painted: the window updates once, at the end.
+        self.setUpdatesEnabled(False)
+        # The side tray keeps its width across the switch (a new centre
+        # widget makes the window share the room out anew).
+        # The tab ON SCREEN: every tabbed tray reports itself visible, with
+        # a stale width of its own (the last one, 273 px, used to win).
+        trays = [d for d in self._sidebar_docks()
+                 if d.isVisible() and not d.visibleRegion().isEmpty()][:1]
+        tray_widths = [d.width() for d in trays] if self.isVisible() else []
+        if mode == MODE_AREAS:
+            # The classic arrangement (docks, their widths) for closing in
+            # areas mode and for coming back: the trays go into an area.
+            self._classic_state = self.saveState()
+            self._classic_tray_width = (tray_widths[0] if tray_widths
+                                        else getattr(self, "_classic_tray_width", 440))
+            manager = AreaManager(self, None)   # built below, once registered
+            self.area_manager = manager
+            layout = (ws.areas_layout() if ws is not None else None) or saved_layout()
+            front = next((d for d in self._sidebar_docks() if d.isVisible()
+                          and not d.visibleRegion().isEmpty()), None)
+            self._tray_front = front
+            # The classic profile panel: put away (its place is an area
+            # now), back with the classic layout.
+            self._profile_dock_open = (not self.profile_dock.isHidden()
+                                       and self.profile_dock.widget() is not None)
+            self.profile_dock.hide()
+            self.stage.set_manager(manager)
+            manager.build(layout or DEFAULT_LAYOUT)
+            # With areas the side tray is only ever the Properties AREA: a
+            # layout without one leaves the panels put away, not floating
+            # beside the areas.
+            for d in self._sidebar_docks():
+                d.hide()
+            manager.installEventFilter(self)
+            sc = QShortcut(QKeySequence("Ctrl+Space"), manager)
+            sc.setContext(Qt.WidgetWithChildrenShortcut)
+            sc.activated.connect(self._maximize_area_here)
+            if layout is None:
+                self._fit_starting_areas(self._classic_tray_width)
+            tray_widths = []                     # the trays are in an area now
+        else:
+            manager = self.area_manager
+            # The tray comes back as wide as its area was.
+            prop = getattr(self, "_properties_editor", None)
+            page = prop.currentWidget() if prop is not None else None
+            if page is not None and page.width() > 0:
+                # The panel's width, not the area's (its side tabs stay).
+                self._classic_tray_width = page.width()
+            manager.save()
+            manager.dismantle()
+            self.area_manager = None
+            self.stage.set_manager(None)
+            manager.hide()
+            manager.setParent(None)
+            manager.deleteLater()
+            hidden = self._hidden_tray_names(QSettings())
+            for d in self._sidebar_docks():
+                d.setVisible(d.objectName() not in hidden)
+            front = getattr(self, "_tray_front", None)
+            if front is not None and not front.isHidden():
+                front.raise_()
+            if getattr(self, "_profile_dock_open", False):
+                self.profile_dock.show()
+            trays = [self.tray] if not self.tray.isHidden() else []
+            tray_widths = [getattr(self, "_classic_tray_width", 440)] if trays else []
+            if ws is not None and isinstance(ws.space().get("classic"), dict):
+                ws.apply_classic()               # this workspace's classic look
+                trays, tray_widths = [], []      # its saved widths rule
+        self.setUpdatesEnabled(True)
+        self.stage.place()
+        self._sync_profile_action()
+        if ws is not None:
+            ws.set_mode(mode)                    # the workspace's layout now
+        if remember:
+            QSettings().setValue(MODE_KEY, mode)
+        self._sync_layout_menu()
+        if trays and tray_widths:
+            QTimer.singleShot(0, lambda: self.resizeDocks(
+                trays, tray_widths, Qt.Horizontal))
+        self._place_sidebar_handle()
+        QTimer.singleShot(0, self._place_sidebar_handle)
+
+    def _build_workspace_ui(self) -> None:
+        """Window ▸ Workspace (after Layout) and the list or tabs on the
+        menu bar's line."""
+        menu = getattr(self, "_window_menu", None)
+        layout_menu = getattr(self, "_layout_menu", None)
+        if menu is None:
+            return
+        ws_menu = self.workspaces.build_menu(menu)
+        # At start-up the classic window keeps its own rules (every tray
+        # opens unless Window ▸ Panels closed it; new toolbars packed): the
+        # last session's state is already back. A workspace's arrangement
+        # is put back when the user switches to it.
+        # right after Window ▸ Layout
+        if layout_menu is not None:
+            menu.removeAction(ws_menu.menuAction())
+            acts = menu.actions()
+            idx = acts.index(layout_menu.menuAction()) + 1
+            before = acts[idx] if idx < len(acts) else None
+            menu.insertMenu(before, ws_menu) if before is not None else menu.addMenu(ws_menu)
+        self.workspaces.install_bar()
+
+    def _sync_profile_action(self) -> None:
+        """Window ▸ Terrain profile shows the classic bottom panel; with
+        areas the profile is an area's editor, so the entry is locked — it
+        put a second profile beside the areas (Jose, video «Perfil
+        terreno»)."""
+        act = getattr(self, "_act_profile", None)
+        if act is None:
+            return
+        areas = self.area_manager is not None
+        act.setEnabled(not areas)
+        act.setStatusTip(
+            tr("With areas, pick «Terrain profile» as an area's editor.")
+            if areas else
+            tr("Show or hide the panel with the terrain profile along a path."))
+
+    def _sync_layout_menu(self) -> None:
+        acts = getattr(self, "_layout_actions", None)
+        if acts:
+            acts[self.layout_mode()].setChecked(True)
+        reset = getattr(self, "_act_reset_areas", None)
+        if reset is not None:
+            reset.setEnabled(self.area_manager is not None)
+
+    def _fit_starting_areas(self, panel_width: int) -> None:
+        """The starting layout: the Properties area's PANEL ``panel_width``
+        wide (the classic tray's); growing the window widens the viewport's
+        side, as the tray keeps its width."""
+        root = self.area_manager._root
+        root.setStretchFactor(0, 1)
+        root.setStretchFactor(1, 0)
+        prop = getattr(self, "_properties_editor", None)
+        if prop is not None:
+            prop.fit_panel_width(panel_width)
+
+    def reset_areas(self) -> None:
+        """Window ▸ Layout ▸ Reset the areas: the starting layout, rebuilt
+        IN PLACE. Going through the classic layout and back measured the
+        tray before it had its width again, and the Properties area came
+        back narrower."""
+        from views.areas import DEFAULT_LAYOUT, LAYOUT_KEY, MODE_AREAS
+        QSettings().remove(LAYOUT_KEY)
+        ws = getattr(self, "workspaces", None)
+        if ws is not None:
+            ws.space()["areas"] = None           # this workspace starts over
+        m = self.area_manager
+        if m is None:
+            self.set_layout_mode(MODE_AREAS)
+            return
+        prop = getattr(self, "_properties_editor", None)
+        page = prop.currentWidget() if prop is not None else None
+        width = (page.width() if page is not None and page.width() > 0
+                 else getattr(self, "_classic_tray_width", 440))
+        self._classic_tray_width = width
+        self.setUpdatesEnabled(False)
+        m.rebuild(DEFAULT_LAYOUT)
+        for d in self._sidebar_docks():
+            d.hide()                              # the tray is an area here
+        self._fit_starting_areas(width)
+        self.setUpdatesEnabled(True)
+
+    def _maximize_area_here(self) -> None:
+        """Ctrl+Space: the area with the keyboard focus (or under the mouse,
+        or the viewport's) alone, or back to the layout."""
+        from PySide6.QtGui import QCursor
+        from PySide6.QtWidgets import QApplication
+        from views.areas import VIEWPORT, Area
+        m = self.area_manager
+        if m is None:
+            return
+        w = QApplication.focusWidget() or QApplication.widgetAt(QCursor.pos())
+        while w is not None and not isinstance(w, Area):
+            w = w.parentWidget()
+        area = w if isinstance(w, Area) and w.manager is m else m.area_with(VIEWPORT)
+        if area is not None:
+            m.toggle_maximize(m.maximized if m.maximized is not None else area)
+
     def eventFilter(self, obj, event):  # noqa: N802 — Qt override
         from PySide6.QtCore import QEvent
-        if obj is getattr(self, "viewport", None) and event.type() in (
+        if obj in (getattr(self, "viewport", None),
+                   getattr(self, "area_manager", None)) and event.type() in (
                 QEvent.Resize, QEvent.Move, QEvent.Show):
             self._place_clean_screen_exit()
             self._place_sidebar_handle()
@@ -1916,6 +2204,13 @@ class MainWindow(QMainWindow):
                 self.tabifyDockWidget(anchor, dock)
         self._extension_docks.append(dock)
         self._keep_docked(dock)
+        if getattr(self, "area_manager", None) is not None:
+            prop = getattr(self, "_properties_editor", None)
+            if prop is not None and dock.objectName() not in \
+                    self._hidden_tray_names(QSettings()):
+                prop.adopt(dock)
+            else:
+                dock.hide()                      # never beside the areas
         menu = getattr(self, "_panels_menu", None)
         if menu is not None:
             self._fill_panels_menu(menu)
@@ -6149,11 +6444,21 @@ class MainWindow(QMainWindow):
         act = getattr(self, "_act_clean_screen", None)
         clean_state = getattr(self, "_clean_screen_state", None)
         st = QSettings()
-        st.setValue("ui/window_state",
-                    clean_state if (act is not None and act.isChecked()
-                                    and clean_state is not None)
-                    else self.saveState())
+        state = (clean_state if (act is not None and act.isChecked()
+                                 and clean_state is not None)
+                 else self.saveState())
+        if getattr(self, "area_manager", None) is not None \
+                and getattr(self, "_classic_state", None) is not None:
+            state = self._classic_state          # the trays sit in an area
+        st.setValue("ui/window_state", state)
         st.setValue("ui/window_geometry", self.saveGeometry())
+        ws = getattr(self, "workspaces", None)
+        if ws is not None:
+            ws.capture()
+            ws.save()
+        if getattr(self, "area_manager", None) is not None:
+            self.area_manager._save_timer.stop()   # nothing pending after close
+            self.area_manager.save()
         # Free every GL texture while a GL context still exists — the survey
         # atlases (hundreds of MB), the tile and terrain textures, and the
         # general texture cache (faces, reference images). Letting Qt tear

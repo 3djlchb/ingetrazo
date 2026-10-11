@@ -337,6 +337,12 @@ class PreferencesDialog(QDialog):
         from views.shortcuts import ShortcutsPanel
         self._shortcuts = ShortcutsPanel(self._window)
         tabs.addTab(self._shortcuts, tr("Keyboard shortcuts"))
+
+        # ---- Workspaces: templates to export, import, reset -----------------
+        if getattr(self._window, "workspaces", None) is not None:
+            from views.workspace import WorkspacesPrefsPanel
+            self._workspaces = WorkspacesPrefsPanel(self._window, self)
+            tabs.addTab(self._workspaces, tr("Workspaces"))
         self._tabs = tabs
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok

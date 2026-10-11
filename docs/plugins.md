@@ -207,6 +207,26 @@ with it:
   room: a report, a console, an image. Model Info, the Python Console and
   the render's image viewer do this. Parent it to `app.window`, make it
   non-modal unless it must block, and reuse one instance.
+- **An area editor** (`add_editor`) — for Window ▸ Layout ▸ Areas, the
+  Blender-style layout: your editor appears in every area's editor menu,
+  under a category (General, Animation, Data, Scripting…), and fills the
+  area the user picks it in. The Python Console registers itself this way.
+
+  ```python
+  def setup(app):
+      add = getattr(app, "add_editor", None)
+      if add is not None:           # an IngeTrazo with areas
+          add("my_timeline", "Timeline",
+              lambda window, area: MyTimeline(window, area),
+              category="Animation")
+  ```
+
+  The widget is deleted when the area shows something else; pass
+  `release=fn(window, widget)` for one lent from elsewhere, and
+  `single=True` to keep it in one area at most. A saved layout that names
+  your editor waits for it (the area shows *Empty*) and fills in as soon
+  as you register it. In the classic layout (the default) it is simply
+  not shown, so keep your other entry points too.
 - **Only a menu entry or a tool** — for one-shot commands.
 - **A workspace** (below) — when the extension has a document of its own
   that replaces the model for a while.
