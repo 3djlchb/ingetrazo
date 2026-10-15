@@ -436,7 +436,7 @@ class AnimacionPanel(QWidget):
         sec = _section(tr("Timeline"), "timeline")
         self.show_timeline = QCheckBox(tr("Show the timeline"))
         self.show_timeline.setToolTip(tr(
-            "The animation's timeline along the bottom of the 3D viewport."))
+            "Show the animation timeline in its own window."))
         self.show_timeline.setChecked(
             QSettings().value(SHOW_TIMELINE_KEY, False, bool))
         self.show_timeline.toggled.connect(self.toggle_timeline)
@@ -775,7 +775,9 @@ class AnimacionPanel(QWidget):
     def set_timeline(self, timeline, dock):
         self.timeline = timeline
         self.timeline_dock = dock
-        self.timeline.frameChanged.connect(self.preview_frame)
+        if getattr(self, "_timeline_signal_source", None) is not timeline:
+            timeline.frameChanged.connect(self.preview_frame)
+            self._timeline_signal_source = timeline
         self.timeline_dock.setVisible(self.show_timeline.isChecked())
         self._update_timeline()
 
@@ -783,8 +785,6 @@ class AnimacionPanel(QWidget):
         QSettings().setValue(SHOW_TIMELINE_KEY, bool(visible))
         if self.timeline_dock is not None:
             self.timeline_dock.setVisible(bool(visible))
-            if visible and hasattr(self, "_fit_timeline_width"):
-                self._fit_timeline_width()
 
     def _update_timeline(self):
         frames = max(1, int(round(self.duration.value() * self._fps_value())))
