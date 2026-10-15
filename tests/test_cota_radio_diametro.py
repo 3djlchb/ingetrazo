@@ -406,11 +406,14 @@ def test_hovering_an_arc_ghosts_the_dimension_before_the_click():
 
 
 def test_its_panel_edits_the_selected_one(monkeypatch):
-    """The panel's handler asked for a helper that never existed, so every
-    change in the panel of a radius dimension raised and did nothing (app
-    bench, 10-10)."""
+    """The panel's controls update the selected radius, type and line width.
+
+    A missing selection helper once made every panel edit raise and do
+    nothing (app bench, 10-10).
+    """
     from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
     from PySide6.QtGui import QMouseEvent
+    from PySide6.QtWidgets import QApplication
     from views.composer import ComposerWindow, CotaRadialCanvasItem
     from views.main_window import MainWindow
     monkeypatch.setattr(ComposerWindow, "render_frame", lambda self, f: None)
@@ -426,15 +429,22 @@ def test_its_panel_edits_the_selected_one(monkeypatch):
                 QEvent.MouseButtonPress, QPointF(px),
                 view.mapToGlobal(QPoint(px)),
                 Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
-        ct = comp.comp.cotas_rad[0]
+        model = comp.comp.cotas_rad[0]
         comp._rebuild_canvas()
         item = next(i for i in comp.canvas.items()
-                    if isinstance(i, CotaRadialCanvasItem) and i.model is ct)
+                    if isinstance(i, CotaRadialCanvasItem)
+                    and i.model is model)
         comp.canvas.clearSelection()
         item.setSelected(True)
+        QApplication.processEvents()
+        assert comp.props.currentIndex() == 15          # the radius page
+
         comp.crad_radius.setValue(42.0)
-        comp._on_cota_rad_props()
-        assert comp.comp.cotas_rad[0].radius_mm == pytest.approx(42.0)
+        comp.crad_stroke.setValue(0.7)
+        comp.crad_kind.setCurrentIndex(comp.crad_kind.findData("diameter"))
+        assert model.radius_mm == pytest.approx(42.0)
+        assert model.stroke_mm == pytest.approx(0.7)
+        assert model.kind == "diameter"
     finally:
         if comp is not None:
             comp.close()
