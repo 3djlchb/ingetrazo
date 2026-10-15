@@ -282,8 +282,8 @@ def test_the_scenes_panel_marks_the_active_scene_and_the_viewport_names_it():
         assert vp.active_scene_label()[1] == "Planta"
         panel._on_add()                                 # «+ Scene» is shown
         assert scene.active_view is scene.saved_views[-1]
-        # A rename follows; a delete clears it.
-        panel._rename(scene.active_view, "Fachada")
+        # Editing the row renames it; deleting the active scene clears it.
+        _row(tree, scene.active_view.name).setText(1, "Fachada")
         assert vp.active_scene_label()[1] == "Fachada"
         panel.refresh()
         tree.setCurrentItem(_row(tree, "Fachada"))

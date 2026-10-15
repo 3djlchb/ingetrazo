@@ -100,7 +100,9 @@ def test_the_properties_area_holds_the_trays_panels_and_gives_them_back():
         assert isinstance(prop, PropertiesEditor)
         assert prop.tabPosition() == prop.TabPosition.West, "down the left, as Blender"
         titles = [prop.tabText(i) for i in range(prop.count())]
-        assert titles[:3] == ["Properties", "BIM", "Terrain"]
+        # BIM and Terrain start hidden (Window > Panels); the default open
+        # panels are Properties, Browser and AI.
+        assert titles[:3] == ["Properties", "Browser", "AI"]
         assert tray_inner.parentWidget() is not win.tray, "the same panel, lent"
         assert win.tray.isHidden() and win.bim_tray.isHidden()
         assert win._sidebar_handle.isHidden(), "nothing to fold with areas"
