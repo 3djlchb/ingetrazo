@@ -23,12 +23,13 @@ from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QColor, QIcon, QImage, QPixmap, QRegularExpressionValidator
 from PySide6.QtCore import QRegularExpression
 from PySide6.QtWidgets import (
-    QColorDialog, QComboBox, QDialog, QDialogButtonBox, QFrame, QGridLayout,
+    QComboBox, QDialog, QDialogButtonBox, QFrame, QGridLayout,
     QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton,
     QTabWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
 from core.i18n import current_language, tr
+from views.color_dialog import get_color
 
 SWATCH = 22
 THUMB = 48
@@ -204,8 +205,8 @@ class FillPickerDialog(QDialog):
             self.choose_color(rgb)
 
     def _more_colors(self):
-        c = QColorDialog.getColor(QColor.fromRgbF(*self._fill["rgb"]), self,
-                                  tr("More colours…"))
+        c = get_color(QColor.fromRgbF(*self._fill["rgb"]), self,
+                      tr("More colours…"))
         if c.isValid():
             self.choose_color((c.redF(), c.greenF(), c.blueF()))
 
