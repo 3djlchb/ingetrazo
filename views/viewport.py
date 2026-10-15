@@ -14656,7 +14656,7 @@ class Viewport(QOpenGLWidget):
     #: Snaps that land on a definite point of the model, whatever the
     #: candidate the cursor gave: the only ones worth keeping when the
     #: candidate itself was a stand-in (see :meth:`_snap_candidate`).
-    _POINT_SNAPS = _NAMED_SNAPS | {"on_line"}
+    _POINT_SNAPS = InferenceEngine._NAMED_SNAPS | {"on_line"}
 
     def _snap_candidate(self, px: float, py: float):
         """``(world, points_only)``: the cursor's point on the work plane,
