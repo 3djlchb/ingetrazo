@@ -133,13 +133,13 @@ def test_each_workspace_keeps_its_own_classic_arrangement():
     win = _window()
     try:
         ws = win.workspaces
-        assert not win.bim_tray.isHidden()
+        assert not win.project_browser.isHidden()
         ws.new()
-        win.bim_tray.hide()                              # only in Workspace 2
+        win.project_browser.hide()                              # only in Workspace 2
         ws.switch(0)
-        assert not win.bim_tray.isHidden()
+        assert not win.project_browser.isHidden()
         ws.switch(1)
-        assert win.bim_tray.isHidden()
+        assert win.project_browser.isHidden()
     finally:
         _close(win)
 
@@ -153,19 +153,19 @@ def test_each_workspace_keeps_its_own_layout_too():
         ws.rename(0, "Normal")
         ws.new()                                         # a copy: classic too
         ws.rename(1, "Render")
-        win.bim_tray.hide()
+        win.project_browser.hide()
         win.set_layout_mode("areas")                     # Render is areas now
         m = win.area_manager
         m.split(m.area_with(VIEWPORT), Qt.Vertical)
         assert ws.mode() == "areas"
         ws.switch(0)                                     # Normal
         assert win.layout_mode() == "classic"
-        assert not win.bim_tray.isHidden(), "Normal's classic look"
+        assert not win.project_browser.isHidden(), "Normal's classic look"
         ws.switch(1)                                     # Render
         assert win.layout_mode() == "areas"
         assert "empty" in _leaves(win.area_manager.to_dict()), "Render's areas"
         win.set_layout_mode("classic")                   # Render in classic…
-        assert ws.mode() == "classic" and win.bim_tray.isHidden(),             "…with the classic look it had"
+        assert ws.mode() == "classic" and win.project_browser.isHidden(),             "…with the classic look it had"
         ws.switch(0)
         ws.switch(1)
         assert win.layout_mode() == "classic"
@@ -271,7 +271,7 @@ def test_workspaces_come_back_next_session():
         ws = win.workspaces
         ws.new()
         ws.rename(1, "Modelado")
-        win.bim_tray.hide()
+        win.project_browser.hide()
     finally:
         _close(win)
     win = _window()
@@ -279,12 +279,12 @@ def test_workspaces_come_back_next_session():
         ws = win.workspaces
         assert ws.names() == ["Workspace 1", "Modelado"] and ws.current == 1
         # start-up keeps the classic rules: every tray open
-        assert not win.bim_tray.isHidden()
-        win.bim_tray.hide()
+        assert not win.project_browser.isHidden()
+        win.project_browser.hide()
         ws.switch(0)
-        assert not win.bim_tray.isHidden(), "Workspace 1's arrangement"
+        assert not win.project_browser.isHidden(), "Workspace 1's arrangement"
         ws.switch(1)
-        assert win.bim_tray.isHidden(), "Modelado's"
+        assert win.project_browser.isHidden(), "Modelado's"
     finally:
         _close(win)
 

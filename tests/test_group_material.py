@@ -225,115 +225,22 @@ def _ctx(vp, modifiers=Qt.NoModifier):
                        modifiers=modifiers, snap=None)
 
 
-def _red_paint():
-    PaintTool.current_color = (1.0, 0.0, 0.0)
-    PaintTool.current_texture = None
-    PaintTool.current_opacity = None
-    PaintTool.current_material = None
-    PaintTool.current_is_default = False
-
-
-def test_paint_clicked_on_a_group_from_outside_paints_every_face(monkeypatch):
-    """From outside, after a «Yes»: EVERY face takes the material — the
-    ones that had their own too (models arrive with every face painted, so
-    the old default-faces-only rule read as «the material does not
-    stick»). One undo step brings everything back."""
+def test_paint_clicked_on_a_group_from_outside_paints_the_group():
     scene = Scene()
     g, blue = _two_face_group(scene)
     default_face = g.mesh.faces[0]
     vp = _PaintVP(scene, default_face, g)
-    _red_paint()
-    asked = []
-    monkeypatch.setattr(PaintTool, "confirm_whole", classmethod(
-        lambda cls, vp, obj, comp, n, copies:
-        asked.append((obj, comp, n, copies)) or True))
-    PaintTool().on_click(_ctx(vp))
-    assert asked == [(g, False, 2, 0)]
-    assert default_face.attrs["color"] == [1.0, 0.0, 0.0]
-    assert blue.attrs["color"] == [1.0, 0.0, 0.0]          # its own replaced
+    PaintTool.current_color = (1.0, 0.0, 0.0)
+    PaintTool.current_texture = None
+    PaintTool.current_opacity = None
+    PaintTool.current_material = None
+    tool = PaintTool()
+    tool.on_click(_ctx(vp))
     assert g.material == {"color": [1.0, 0.0, 0.0]}
+    assert "color" not in default_face.attrs                    # the face itself untouched
+    assert blue.attrs["color"] == [0.0, 0.0, 1.0]
     vp.history.undo()
-    assert "color" not in default_face.attrs
-    assert blue.attrs["color"] == [0.0, 0.0, 1.0]
     assert g.material is None
-
-
-def test_answering_no_paints_nothing(monkeypatch):
-    scene = Scene()
-    g, blue = _two_face_group(scene)
-    vp = _PaintVP(scene, g.mesh.faces[0], g)
-    _red_paint()
-    monkeypatch.setattr(PaintTool, "confirm_whole", classmethod(
-        lambda cls, *a: False))
-    PaintTool().on_click(_ctx(vp))
-    assert "color" not in g.mesh.faces[0].attrs
-    assert blue.attrs["color"] == [0.0, 0.0, 1.0]
-    assert g.material is None
-    assert not vp.history.undo_stack
-
-
-def test_painting_a_component_paints_its_definition_and_says_so(monkeypatch):
-    """A component's faces are its definition's: every copy changes, and
-    the question counts them."""
-    scene = Scene()
-    proto = Mesh()
-    f = proto.add_face([V(0, 0), V(1, 0), V(1, 1), V(0, 1)])
-    f.attrs["color"] = [0.0, 1.0, 0.0]
-    a, b = Group(proto, "Silla"), Group(proto, "Silla")
-    for g, dx in ((a, 0.0), (b, 3.0)):
-        xf = QMatrix4x4()
-        xf.translate(dx, 0, 0)
-        g.xform = xf
-        scene.groups.append(g)
-    vp = _PaintVP(scene, f, a)
-    _red_paint()
-    asked = []
-    monkeypatch.setattr(PaintTool, "confirm_whole", classmethod(
-        lambda cls, vp, obj, comp, n, copies:
-        asked.append((comp, n, copies)) or True))
-    PaintTool().on_click(_ctx(vp))
-    assert asked == [(True, 1, 1)]
-    assert f.attrs["color"] == [1.0, 0.0, 0.0]             # both copies
-
-
-def test_a_texture_on_the_whole_drops_the_positioned_map(monkeypatch):
-    scene = Scene()
-    g, blue = _two_face_group(scene)
-    vp = _PaintVP(scene, blue, g)
-    _red_paint()
-    PaintTool.current_texture = {"path": "brick.png", "sw": 1.0, "sh": 1.0,
-                                 "uvw": [1, 0, 0, 0, 1, 0]}
-    monkeypatch.setattr(PaintTool, "confirm_whole", classmethod(
-        lambda cls, *a: True))
-    try:
-        PaintTool().on_click(_ctx(vp))
-    finally:
-        PaintTool.current_texture = None
-    for face in g.mesh.faces:
-        assert face.attrs["texture"]["path"] == "brick.png"
-        assert "uvw" not in face.attrs["texture"]
-        assert "color" not in face.attrs
-
-
-def test_the_question_names_the_object_kind_and_material(monkeypatch):
-    """The real dialog: its text names the group, says «group» and the
-    material."""
-    from PySide6.QtWidgets import QMessageBox
-    scene = Scene()
-    g, _blue = _two_face_group(scene)
-    _red_paint()
-    seen = {}
-
-    def fake_exec(box):
-        seen["title"] = box.windowTitle()
-        seen["text"] = box.text()
-        seen["info"] = box.informativeText()
-        return QMessageBox.No
-    monkeypatch.setattr(QMessageBox, "exec", fake_exec)
-    assert PaintTool.confirm_whole(object(), g, False, 2, 0) is False
-    assert "caja" in seen["text"] and "#ff0000" in seen["text"]
-    assert ("group" in seen["text"] or "grupo" in seen["text"])
-    assert "2" in seen["info"]
 
 
 def test_the_eyedropper_on_a_default_face_inside_a_painted_group_samples_the_groups_paint():

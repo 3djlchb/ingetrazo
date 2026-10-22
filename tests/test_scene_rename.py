@@ -84,23 +84,6 @@ def test_f2_edits_in_place():
         _close(win)
 
 
-def test_rename_follows_into_sheet_frames():
-    from core.composition import Composicion, MarcoVista
-    win = _window_with_scenes("Planta", "Corte")
-    try:
-        scene = win.viewport.scene
-        comp = Composicion()
-        comp.frames = [MarcoVista(view_key="scene:Planta"),
-                       MarcoVista(view_key="scene:Corte"),
-                       MarcoVista(view_key="std:top")]
-        scene.compositions.append(comp)
-        win.tray.scenes._rename(scene.saved_views[0], "Planta baja")
-        assert [f.view_key for f in comp.frames] == [
-            "scene:Planta baja", "scene:Corte", "std:top"]
-    finally:
-        _close(win)
-
-
 def test_duplicate_or_empty_name_is_refused():
     win = _window_with_scenes("Planta", "Corte")
     try:

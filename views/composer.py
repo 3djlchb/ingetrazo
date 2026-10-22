@@ -5494,6 +5494,8 @@ class ComposerWindow(QMainWindow):
         super().__init__(main_window)
         self.setWindowFlag(Qt.Window, True)
         self._window = main_window
+        from views.floating_toolbar import watch_toolbars
+        watch_toolbars(self)        # a torn-off bar gets a title and a ×
         import sys as _sys
         if _sys.platform == "darwin":
             # macOS has ONE menu bar, and a window without its own shows its
@@ -8860,8 +8862,8 @@ class ComposerWindow(QMainWindow):
 
     def _on_templates_menu(self) -> None:
         from PySide6.QtWidgets import QInputDialog, QMenu
-        from PySide6.QtGui import QCursor, QDesktopServices
-        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QCursor
+        from core.desktop_open import open_url
         menu = QMenu(self)
         save = menu.addAction(tr("Save this sheet as a template…"))
         names = self.template_names()
@@ -8899,8 +8901,7 @@ class ComposerWindow(QMainWindow):
         elif chosen in def_acts:
             self.set_default_template(def_acts[chosen])
         elif chosen is folder:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(
-                str(self.templates_dir())))
+            open_url(self.templates_dir())
 
     # ---- Arrange: align / distribute / duplicate (QGIS's Align toolbar) -----
     def _sync_item_caches(self) -> None:
@@ -10905,8 +10906,8 @@ class ComposerWindow(QMainWindow):
 
     def _on_cajetin_templates_menu(self) -> None:
         from PySide6.QtWidgets import QInputDialog, QMenu
-        from PySide6.QtGui import QCursor, QDesktopServices
-        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QCursor
+        from core.desktop_open import open_url
         item = self._selected_item()
         have = isinstance(item, CajetinItem)
         menu = QMenu(self)
@@ -10964,8 +10965,7 @@ class ComposerWindow(QMainWindow):
             if have:
                 self._sync_cajetin_design_combo(item.model)
         elif chosen is folder:
-            QDesktopServices.openUrl(
-                QUrl.fromLocalFile(str(self.cajetin_templates_dir())))
+            open_url(self.cajetin_templates_dir())
 
     def _on_cajetin_add_row(self) -> None:
         item = self._selected_item()

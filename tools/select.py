@@ -280,7 +280,10 @@ class SelectTool(Tool):
             return guide
         face = viewport.pick_face(screen_x, screen_y)
         if face is not None:
-            return face
+            # Unless a picture lies in front of it (#426).
+            in_front = getattr(viewport, "image_in_front_of", None)
+            image = in_front(face, screen_x, screen_y) if in_front else None
+            return image if image is not None else face
         # A reference image is the last candidate: it is an underlay, so
         # anything drawn on top of it must win the click. Only bare picture
         # selects the picture — which is how you then move or resize it.
@@ -348,9 +351,9 @@ class SelectTool(Tool):
             return
         if isinstance(entity, TextLabel):
             # As usual, double-clicking a leader text edits its text.
-            from PySide6.QtWidgets import QInputDialog
             from core.i18n import tr
-            text, ok = QInputDialog.getMultiLineText(
+            from views.prompts import get_multiline_text
+            text, ok = get_multiline_text(
                 viewport.window(), tr("Text"), tr("Label text:"),
                 entity.text)
             if ok and text.strip() and text.strip() != entity.text:

@@ -13,10 +13,11 @@ _app = QApplication.instance() or QApplication([])
 
 
 def _activate(win, name):
-    lst = win.tray.scenes.list
+    tree = win.tray.scenes.tree
     win.tray.scenes.refresh()
-    item = next(lst.item(i) for i in range(lst.count())
-                if lst.item(i).text() == name)
+    item = next(tree.topLevelItem(i)
+                for i in range(tree.topLevelItemCount())
+                if tree.topLevelItem(i).text(1) == name)
     win.tray.scenes._on_activate(item)
 
 

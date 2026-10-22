@@ -25,8 +25,8 @@ from pathlib import Path
 
 from PySide6.QtCore import (QObject, QPointF, QProcess, QProcessEnvironment,
                             QTimer, Signal,
-                            QSettings, Qt, QUrl)
-from PySide6.QtGui import (QColor, QDesktopServices, QFont, QPainter, QPen,
+                            QSettings, Qt)
+from PySide6.QtGui import (QColor, QFont, QPainter, QPen,
                            QPixmap, QVector3D)
 from PySide6.QtWidgets import (
     QApplication,
@@ -58,6 +58,7 @@ from PySide6.QtWidgets import (
 )
 
 from core import render_blender as rb
+from core.desktop_open import open_url
 from core.i18n import tr
 from views.fold_section import FoldSection, narrow, wrapping_form
 
@@ -828,8 +829,7 @@ class RenderPanel(QWidget):
             h = QHBoxLayout(row)
             h.setContentsMargins(0, 0, 0, 0)
             web = QPushButton(tr("Open blender.org"))
-            web.clicked.connect(lambda: QDesktopServices.openUrl(
-                QUrl(rb.DOWNLOAD_URL)))
+            web.clicked.connect(lambda: open_url(rb.DOWNLOAD_URL))
             again = QPushButton(tr("Search again"))
             again.clicked.connect(self._search_again)
             h.addWidget(web)
@@ -1309,7 +1309,7 @@ class RenderPanel(QWidget):
 
     def _open_folder(self) -> None:
         if self._work is not None:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._work)))
+            open_url(self._work)
 
 
 # ---- The lights over the viewport ------------------------------------------------

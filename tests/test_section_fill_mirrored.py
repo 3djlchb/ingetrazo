@@ -57,6 +57,9 @@ def _viewport_double(batches):
         _ensure_proto_draw=lambda mesh, paint: entries[mesh],
         _update_inst_matrices=lambda entry, groups: len(groups))
     fake._front_face = types.MethodType(Viewport._front_face, fake)
+    # The mirror view (its own matrix buffer and VAOs) is GL plumbing;
+    # the winding is what is checked here.
+    fake._proto_view = lambda entry, mirrored: entry
     return fake, spy
 
 

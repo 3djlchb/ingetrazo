@@ -419,7 +419,7 @@ def run_transactional(viewport, code: str, scope: dict) -> dict:
         unchanged = (cmd.before == cmd.after
                      and not cmd.added_groups and not cmd.added_layers
                      and not cmd.added_views and not cmd.added_dims
-                     and not cmd.added_texts)
+                     and not cmd.added_texts and not cmd.added_sheets)
         if (unchanged and history.undo_stack
                 and history.undo_stack[-1] is cmd):
             history.undo_stack.pop()
@@ -583,7 +583,7 @@ def build_request(provider: str, model: str, api_key: str,
                  "anthropic-version": "2023-06-01"},
                 json.dumps(payload).encode())
 
-    base = (ollama_url.rstrip("/") + "/v1" if provider == "ollama"
+    base = (_local_base(ollama_url) if provider == "ollama"
             else _OPENAI_BASES[provider])
     oai_msgs = [{"role": "system", "content": system}]
     for m in messages:
@@ -708,7 +708,7 @@ def list_models(provider: str, api_key: str,
         headers = {"User-Agent": USER_AGENT, "x-api-key": api_key,
                    "anthropic-version": "2023-06-01"}
     else:
-        base = (ollama_url.rstrip("/") + "/v1" if provider == "ollama"
+        base = (_local_base(ollama_url) if provider == "ollama"
                 else _OPENAI_BASES[provider])
         url = f"{base}/models"
         headers = {"User-Agent": USER_AGENT}
@@ -737,8 +737,20 @@ PROVIDER_INFO = {
                "https://aistudio.google.com/app/apikey"),
     "openrouter": ("OpenRouter", "https://openrouter.ai/keys"),
     "deepseek": ("DeepSeek", "https://platform.deepseek.com/api_keys"),
-    "ollama": ("Local: Ollama / LM Studio", "https://ollama.com/download"),
+    "ollama": ("Local / OpenAI-compatible (Ollama, LM Studio…)",
+               "https://ollama.com/download"),
 }
+
+
+def _local_base(url: str) -> str:
+    """The API root of the «Local / OpenAI-compatible» provider.
+
+    Ollama and LM Studio are given as ``http://host:port`` and serve under
+    ``/v1``; a hosted OpenAI-compatible service (OpenCode, vLLM, LiteLLM...)
+    is usually given with its version already, ``https://.../v1`` -- that
+    one is taken as it is, not turned into ``/v1/v1`` (#650)."""
+    base = (url or "").strip().rstrip("/")
+    return base if re.search(r"/v\d+[a-z]*$", base) else base + "/v1"
 
 
 def probar_conexion(provider: str, model: str, api_key: str,

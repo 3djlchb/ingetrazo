@@ -88,8 +88,11 @@ def _file_hierarchy(scene, only=None):
     from PySide6.QtGui import QVector3D
     from core.group import transformed_mesh
     from core.i18n import tr
-    from .meshexport import (_add_face, _facing_quad, _feet,
-                             _resolve_finishes, _turned_toward)
+    from core.materials import material_sig
+    from .meshexport import (SmoothNormals, _add_face, _facing_quad, _feet,
+                             _piece_paint, _resolve_finishes, _shown,
+                             _turned_toward)
+    smoother = SmoothNormals()
     materials: dict = {}
     meshes: dict = {}
     roots: list = []
@@ -104,14 +107,17 @@ def _file_hierarchy(scene, only=None):
     if loose:
         prims: dict = {}
         for f in loose:
-            _add_face(f, materials, prims)
+            _add_face(f, materials, prims, smoother=smoother)
         meshes["loose"] = prims
         roots.append({"name": tr("Loose geometry"), "matrix": None,
                       "mesh": "loose", "children": []})
 
-    def part(g, base):
+    def part(g, base, top):
         m = getattr(g, "xform", None)
         world = m if base is None else (base if m is None else base * m)
+        # What the piece's unpainted faces show: its own paint, else the
+        # top-level object's — as the viewport draws it.
+        paint = _piece_paint(g, top)
         kind = getattr(g, "billboard", False)
         if kind:
             mesh = g.mesh if world is None else transformed_mesh(g.mesh, world)
@@ -122,7 +128,7 @@ def _file_hierarchy(scene, only=None):
                       else _facing_quad(mesh, toward))
             prims = {}
             for f in turned.faces:
-                _add_face(f, materials, prims)
+                _add_face(f, materials, prims, _shown(f, paint), smoother)
             if prims:
                 key = ("figure", len(figures))
                 meshes[key] = prims
@@ -133,17 +139,19 @@ def _file_hierarchy(scene, only=None):
                         feet.x(), feet.y(), feet.z(),
                         math.atan2(facing.y(), facing.x())]}})
             return None
-        key = id(g.mesh)
+        # Copies of a component share ONE mesh in the file — unless they
+        # wear different paint, which makes them different meshes.
+        key = (id(g.mesh), material_sig(paint))
         if key not in meshes:
             prims = {}
             for f in g.mesh.faces:
-                _add_face(f, materials, prims)
+                _add_face(f, materials, prims, _shown(f, paint), smoother)
             meshes[key] = prims
         node = {"name": getattr(g, "name", "") or tr("Group"),
                 "matrix": m, "mesh": key if meshes[key] else None,
                 "children": []}
         for child in getattr(g, "children", None) or ():
-            sub = part(child, world)
+            sub = part(child, world, top)
             if sub is not None:
                 node["children"].append(sub)
         return node
@@ -153,7 +161,7 @@ def _file_hierarchy(scene, only=None):
             continue
         if only is not None and g not in only:
             continue
-        node = part(g, None)
+        node = part(g, None, g)
         if node is not None:
             roots.append(node)
     roots.extend(figures)
@@ -329,13 +337,15 @@ def save_glb(scene, path, face_me=None, split_parts: bool = False,
             # rounded tuples and a struct.pack per vertex were most of the
             # export of a big model. Same key, same first-occurrence order.
             pos = np.array([(p.x(), p.z(), -p.y())
-                            for _n, verts in tris for p, _uv in verts],
+                            for _n, verts in tris for p, _uv, _nn in verts],
                            dtype=np.float64)
-            nrm = np.repeat(np.array([(n.x(), n.z(), -n.y())
-                                      for n, _verts in tris],
-                                     dtype=np.float64), 3, axis=0)
+            # Each corner's own normal: smooth across soft edges (#131).
+            nrm = np.array([(nn.x(), nn.z(), -nn.y())
+                            for _n, verts in tris for _p, _uv, nn in verts],
+                           dtype=np.float64)
             if textured:
-                uv = np.array([uv for _n, verts in tris for _p, uv in verts],
+                uv = np.array([uv for _n, verts in tris
+                               for _p, uv, _nn in verts],
                               dtype=np.float64)
             else:
                 uv = np.zeros((len(pos), 2), dtype=np.float64)
