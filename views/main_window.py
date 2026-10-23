@@ -3650,6 +3650,60 @@ class MainWindow(QMainWindow):
             return False
         return True
 
+    def _room_to_nest(self, groups=()) -> bool:
+        """Whether a group made here — holding ``groups``, which go one
+        level down with everything inside them — stays within the levels
+        a document keeps (``core.group.MAX_NESTING``). Deeper levels were
+        lost on reopening without a word, so it refuses and says why."""
+        from core.group import MAX_NESTING, nesting_depth, subtree_height
+        scene = self.viewport.scene
+        ctx = scene.edit_group
+        level = 0
+        if ctx is not None:
+            d = nesting_depth(scene.groups, ctx)
+            level = (d if d is not None else 0) + 1
+        deepest = level + max((1 + subtree_height(g) for g in groups),
+                              default=0)
+        if deepest <= MAX_NESTING:
+            return True
+        self.viewport.flash_status(tr(
+            "That would be level {n} of groups; a document keeps {max}. "
+            "Make it at a higher level.", n=deepest + 1,
+            max=MAX_NESTING + 1), 5000)
+        return False
+
+    def deep_trees(self) -> list:
+        """``[(name, levels)]`` of the top-level objects whose tree goes
+        deeper than a document keeps."""
+        from core.group import MAX_NESTING, subtree_height
+        out = []
+        for g in self.viewport.scene.groups:
+            h = subtree_height(g)
+            if h > MAX_NESTING:
+                out.append((getattr(g, "name", "") or tr("Group"), h + 1))
+        return out
+
+    def confirm_deep_save(self, deep) -> bool:
+        """Warn before saving a tree deeper than a document keeps (one
+        imported, or made before the limit): what lies past the last level
+        is lost when the file is opened again. Tests replace this."""
+        from core.group import MAX_NESTING
+        names = ", ".join(f"«{n}» ({lv})" for n, lv in deep[:5])
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle(tr("Too many levels of groups"))
+        box.setText(tr(
+            "A document keeps {max} levels of groups; deeper levels are "
+            "lost when it is opened again.", max=MAX_NESTING + 1))
+        box.setInformativeText(tr(
+            "Deeper than that: {names}. Explode or regroup some levels "
+            "before saving to keep everything.", names=names))
+        save = box.addButton(tr("Save anyway"), QMessageBox.AcceptRole)
+        box.addButton(QMessageBox.Cancel)
+        box.setDefaultButton(QMessageBox.Cancel)
+        box.exec()
+        return box.clickedButton() is save
+
     def _execute_make(self, cmd) -> None:
         """Run a Make Group / Make Component / Explode command where the
         user is: at the model, or into the open group."""
@@ -3673,6 +3727,8 @@ class MainWindow(QMainWindow):
         faces = [f for f in sel if isinstance(f, Face)]
         edges = [e for e in sel if isinstance(e, Edge)]
         groups = [g for g in sel if isinstance(g, Group)]
+        if (faces or edges or groups) and not self._room_to_nest(groups):
+            return
         if len(groups) == 1 and not (faces or edges):
             # One group (or component) alone: wrapping it in a container of
             # itself is a Russian doll with nothing inside (@pacaeiro,
@@ -3716,6 +3772,8 @@ class MainWindow(QMainWindow):
         edges = [e for e in sel if isinstance(e, Edge)]
         groups = [g for g in sel if isinstance(g, Group)
                   and not getattr(g, "billboard", False)]
+        if (faces or edges or groups) and not self._room_to_nest(groups):
+            return
         # The first «Component #n» no object wears yet: counting the copies
         # at the top skipped numbers and could hand out a name in use
         # (#620, @ibsgroupdubai-netizen).
@@ -6353,6 +6411,9 @@ class MainWindow(QMainWindow):
             except OSError:
                 self.statusBar().showMessage(
                     tr("Could not write the backup copy."), 4000)
+        deep = self.deep_trees()
+        if deep and not self.confirm_deep_save(deep):
+            return
         try:
             self.viewport.scene.camera_home = self._camera_dict()
             stats = igz_format.save_scene(self.viewport.scene, path) or {}

@@ -441,6 +441,40 @@ def _merged_placements(group) -> Mesh:
     return new
 
 
+#: How many levels of groups a document keeps below a top-level one. The
+#: .igz reader stops there — a corrupt document must not send it spinning —
+#: as the .skp and .dae importers do; what lay deeper was silently lost on
+#: reopening. So Make Group / Make Component refuse a level past it, and a
+#: save warns about a tree that already goes deeper (an import).
+MAX_NESTING = 32
+
+
+def subtree_height(group) -> int:
+    """How many levels of groups hang below ``group`` (0: none)."""
+    best = 0
+    stack = [(group, 0)]
+    while stack:                         # no recursion: any depth is fine
+        g, d = stack.pop()
+        if d > best:
+            best = d
+        for c in getattr(g, "children", None) or ():
+            stack.append((c, d + 1))
+    return best
+
+
+def nesting_depth(groups, target) -> int | None:
+    """The level ``target`` sits at among the top-level ``groups`` (0 for
+    a top-level one), or None when it is not in the model."""
+    stack = [(g, 0) for g in groups or ()]
+    while stack:
+        g, d = stack.pop()
+        if g is target:
+            return d
+        for c in getattr(g, "children", None) or ():
+            stack.append((c, d + 1))
+    return None
+
+
 def iter_placements(group, base=None):
     """Yield ``(group, world_matrix)`` for ``group`` and every nested
     placement below it, depth first, each matrix already composed from the

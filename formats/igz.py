@@ -57,7 +57,7 @@ from core.version import __version__
 from PySide6.QtGui import QVector3D
 
 from core.dimension import Dimension
-from core.group import Group
+from core.group import MAX_NESTING, Group
 from core.mesh import Mesh
 from georef.datum import SceneDatum
 from georef.geopath import GeoPath
@@ -1092,7 +1092,7 @@ def _normalize_text_curve_ids(payload: dict, geom: dict) -> None:
             # A placement uses its prototype, not any local geometry block.
             if raw.get("xform") is None or "proto" not in raw:
                 yield raw
-            if depth < 32:             # the same limit as _group_from
+            if depth < MAX_NESTING:    # the same limit as _group_from
                 yield from group_meshes(raw.get("children", []) or [],
                                         depth + 1)
 
@@ -1298,7 +1298,7 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
         off = raw.get("explode_offset")
         if isinstance(off, list) and len(off) == 3:
             group.explode_offset = tuple(float(v) for v in off)
-        if depth < 32:              # a corrupt document must not spin
+        if depth < MAX_NESTING:     # a corrupt document must not spin
             group.adopt(_group_from(c, depth + 1)
                         for c in raw.get("children", []) or [])
         if "component" in raw:
