@@ -650,8 +650,15 @@ def save_scene(scene, path: Path) -> dict:
                 entry["billboard"] = g.billboard
             if getattr(g, "material", None):
                 # The container's own paint (issue #47); older readers
-                # ignore the key and show the faces in the default.
-                entry["material"] = dict(g.material)
+                # ignore the key and show the faces in the default. The
+                # nested texture is copied too, as a face's back is:
+                # _pack_textures rewrites the entries it finds (path →
+                # embed), and through a shallow copy it rewrote the live
+                # group's — a group or component painted with a texture
+                # lost its image on saving, and a second save wrote it
+                # with no picture at all.
+                entry["material"] = {k: dict(v) if isinstance(v, dict) else v
+                                     for k, v in g.material.items()}
             if getattr(g, "text3d", None):
                 # A 3D text keeps what it was made from, so it reopens
                 # editable. Older readers ignore the key.
