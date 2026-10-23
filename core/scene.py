@@ -505,7 +505,8 @@ class Scene:
             kids0 = nivel.get("kids0")
             kids_out = self.edit_kids_out(group)
             if (group.mesh.capture_state() == state0
-                    and not self.kids_changed(kids0, kids_out, xform)):
+                    and not self.kids_changed(kids0, kids_out, xform)
+                    and not self.copies_differ(group, proto, xform)):
                 self.restore_sharing(group, proto, xform, kids0)
             else:
                 self.share_back(group, proto, xform, group.mesh,
@@ -582,6 +583,40 @@ class Scene:
             for c, m in kids0:
                 c.xform = m
 
+    @staticmethod
+    def tree_shape(children, to_local=None) -> tuple:
+        """What a component holds, comparable between its copies: per
+        child (at any depth) its definition mesh, its matrix and what it
+        holds in turn. ``to_local`` brings the top level back to the
+        component's own frame (they sit in world coordinates while it is
+        open). Copies made from a definition share their meshes, so equal
+        shapes mean the same groups in the same places."""
+        from PySide6.QtGui import QMatrix4x4
+        out = []
+        for c in children or ():
+            m = c.xform
+            if to_local is not None:
+                m = to_local * (m if m is not None else QMatrix4x4())
+            data = (tuple(round(v, 6) for v in m.data())
+                    if m is not None else None)
+            out.append((id(c.mesh), data,
+                        Scene.tree_shape(getattr(c, "children", None))))
+        return tuple(out)
+
+    def copies_differ(self, group, proto, xform) -> bool:
+        """Whether the groups inside ``group`` (an open component, its
+        children in world coordinates) are no longer what its copies hold:
+        a group made, removed or moved inside it — at any depth, where
+        :meth:`kids_changed` sees only the first level."""
+        siblings = self.definition_siblings(group, proto)
+        if not siblings:
+            return False
+        inverse, ok = xform.inverted()
+        mine = self.tree_shape(getattr(group, "children", None),
+                               inverse if ok else None)
+        return any(self.tree_shape(getattr(s, "children", None)) != mine
+                   for s in siblings)
+
     def definition_siblings(self, group, proto) -> list:
         """Every other placement -- top level or nested at any depth -- that
         draws the definition ``proto``: the other copies of a component."""
@@ -613,7 +648,8 @@ class Scene:
         group.xform = xform
         if kids_out is None:
             return
-        changed = self.kids_changed(kids0, kids_out, xform)
+        changed = (self.kids_changed(kids0, kids_out, xform)
+                   or self.copies_differ(group, proto, xform))
         group.children = [c for c, _m in kids_out]
         for c, wm in kids_out:
             c.xform = (inverse * wm) if ok else wm

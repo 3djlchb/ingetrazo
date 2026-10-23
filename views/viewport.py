@@ -14152,7 +14152,8 @@ class Viewport(QOpenGLWidget):
                         if kids0 is not None else None)
             if (edited.capture_state() == state0
                     and not self.scene.kids_changed(kids0, kids_out or [],
-                                                    xform)):
+                                                    xform)
+                    and not self.scene.copies_differ(group, proto, xform)):
                 self.scene.restore_sharing(group, proto, xform, kids0)
                 self.flash_status(tr("Left the group"), 2000)
             else:

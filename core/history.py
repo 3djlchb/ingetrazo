@@ -3933,6 +3933,16 @@ class MakeNestedGroupCommand(Command):
         scene.version += 1
 
 
+def _open_as_component(scene, group) -> bool:
+    """Whether ``group`` is open as a component (its matrix parked on a
+    world copy until it is left)."""
+    for level in getattr(scene, "_edit_stack", None) or ():
+        if isinstance(level, dict) and level.get("group") is group:
+            return (level.get("share") is not None
+                    or level.get("kids0") is not None)
+    return False
+
+
 class GroupInContextCommand(Command):
     """Make Group, Make Component or Explode while a group is open: what
     it makes goes INTO the open group, as whatever you create while editing
@@ -3979,7 +3989,12 @@ class GroupInContextCommand(Command):
         ctx = self.context
         self._state = (ctx.xform, ctx.component)
         self._run(scene, self.inner.do)
-        if ctx.children and ctx.xform is None:
+        # A group that gains its first child becomes an instance (identity
+        # matrix, still a GROUP). Not an open COMPONENT: its matrix is only
+        # parked for the session and comes back on leaving, and what is
+        # made in it goes to every copy (core.scene.share_back).
+        if (ctx.children and ctx.xform is None
+                and not _open_as_component(scene, ctx)):
             ctx.xform = QMatrix4x4()
             ctx.component = False
         scene.version += 1

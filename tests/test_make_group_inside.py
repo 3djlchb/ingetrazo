@@ -159,7 +159,10 @@ def test_make_component_inside_an_open_group():
         _close(win)
 
 
-def test_inside_a_component_it_still_refuses():
+def test_inside_a_component_it_makes_into_the_definition():
+    """This fork: Make Group inside an open component makes the group in
+    its definition — it stays a component, and on leaving every copy holds
+    the same group, sharing its geometry."""
     win = _window()
     try:
         scene = win.viewport.scene
@@ -172,7 +175,11 @@ def test_inside_a_component_it_still_refuses():
         scene.selection.clear()
         scene.selection.update(list(scene.mesh.faces))
         win._on_make_group()
-        assert comp.children == [] and len(scene.groups) == 2
+        assert len(comp.children) == 1 and len(scene.groups) == 2
+        win.viewport.end_group_edit()
+        assert comp.is_component() and otra.is_component()
+        assert len(otra.children) == 1
+        assert otra.children[0].mesh is comp.children[0].mesh
     finally:
         _close(win)
 

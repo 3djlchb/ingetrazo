@@ -3635,12 +3635,15 @@ class MainWindow(QMainWindow):
         self._refresh_vcb()
         self._update_status_hint()
 
-    def _can_make_here(self) -> bool:
+    def _can_make_here(self, explode: bool = False) -> bool:
         """Make Group, Make Component and Explode work inside an open
-        group — what they make goes into it (#490, #561) — but not inside
-        a component, whose parts are its shared definition."""
+        group — what they make goes into it (#490, #561). Inside a
+        component, Make Group and Make Component work too (this fork): what
+        is made goes into its definition and, on leaving, into every copy —
+        a tree of groups and components built from the inside. Explode
+        still refuses there: it would take the definition apart."""
         from core.outliner import editing_inside_component
-        if editing_inside_component(self.viewport.scene):
+        if explode and editing_inside_component(self.viewport.scene):
             self.viewport.flash_status(tr(
                 "Components keep their parts: Make Unique first to "
                 "change what is inside one"), 4000)
@@ -4108,7 +4111,7 @@ class MainWindow(QMainWindow):
     def _on_explode_group(self) -> None:
         # Inside an open group what comes out stays in it, one level up
         # from where it was — not out at the model (as Make Group).
-        if not self._can_make_here():
+        if not self._can_make_here(explode=True):
             return
         groups = [g for g in self.viewport.scene.selection if isinstance(g, Group)]
         for g in groups:
