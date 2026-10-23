@@ -15,7 +15,9 @@ Snap kinds (priority high → low):
 10. ``"aligned"``       — level with / in line with an encouraged point across
                           the face under the cursor (the axis plane through it).
 11. ``"axis_inference"`` — soft auto-detected axis alignment (visual cue only).
-12. ``"on_face"``       — the free point on the face under the cursor.
+12. ``"on_face"``       — the free point on the face under the cursor
+                          (or, just above it, ``"intersection"`` where that
+                          face meets another with no edge between them).
 13. ``"none"``          — no snap.
 
 Some kinds name a POINT of the model and some name the FACE the cursor is
@@ -1395,6 +1397,7 @@ def compute_snap(
     radial_arm: bool = False,
     depth_of: Optional[Callable[[QVector3D], float]] = None,
     axis_in_plane: bool = False,
+    face_crossing: Optional[Callable[[], Optional[tuple]]] = None,
 ) -> SnapResult:
     # Linear-inference toggle (Alt): "all" = every inference, "off" =
     # point snaps only, "parallel_perp" = keep only parallel/perpendicular. The
@@ -1962,6 +1965,16 @@ def compute_snap(
             return SnapResult(on_pt, "on_line", COLOR_ON_EDGE)   # a guide line
         return SnapResult(on_pt, "on_edge", COLOR_ON_EDGE,
                           context=getattr(edge, "context", None))
+
+    # 7c. Where the face under the cursor meets another face with no edge
+    #     between them — a box sunk into the floor, a beam through a wall
+    #     (#819, SketchUp's «Intersection»). Asked only here, once nothing
+    #     with a name is nearer: the caller's search casts a few rays.
+    if face_crossing is not None and face_under_cursor and axis_engaged is None:
+        crossing = face_crossing()
+        if crossing is not None:
+            return SnapResult(crossing[0], "intersection", COLOR_ENDPOINT,
+                              context=crossing[1])
 
     # 8b. Acquired-edge parallel inference. An edge the cursor hovered while
     #     drawing is held as a reference; when the draw runs parallel to it the

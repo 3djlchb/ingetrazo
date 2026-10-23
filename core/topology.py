@@ -1640,6 +1640,48 @@ def fold_nonplanar_faces(mesh, tolerance: float = _PLANAR_TOLERANCE) -> list:
     return folded
 
 
+def _box_grid(lo, hi):
+    """``meeting(i)``: the indices, ascending, of the boxes (rows of ``lo`` /
+    ``hi``) that meet box ``i`` — the same answer as testing all of them.
+
+    One NumPy sweep over every box per query was 4 s of each Line click on an
+    exploded DWG plan of 19 800 edges, 11 700 of them faceless (#491). Boxes
+    go in the cells they cover; the cell grows until they cover a few each."""
+    import numpy as np
+    n = len(lo)
+    size = max(float(np.median((hi - lo).max(axis=1))) if n else 1.0, 1e-6)
+    while (np.prod(np.floor(hi / size) - np.floor(lo / size) + 1, axis=1)
+           .sum() > 8 * max(n, 1)):
+        size *= 2.0
+    c_lo = np.floor(lo / size).astype(np.int64).tolist()
+    c_hi = np.floor(hi / size).astype(np.int64).tolist()
+    lo_l, hi_l = lo.tolist(), hi.tolist()
+    grid: dict = {}
+    for k in range(n):
+        (x0, y0, z0), (x1, y1, z1) = c_lo[k], c_hi[k]
+        for cx in range(x0, x1 + 1):
+            for cy in range(y0, y1 + 1):
+                for cz in range(z0, z1 + 1):
+                    grid.setdefault((cx, cy, cz), []).append(k)
+
+    def meeting(i):
+        (x0, y0, z0), (x1, y1, z1) = c_lo[i], c_hi[i]
+        cand: set = set()
+        for cx in range(x0, x1 + 1):
+            for cy in range(y0, y1 + 1):
+                for cz in range(z0, z1 + 1):
+                    cand.update(grid.get((cx, cy, cz), ()))
+        (ax, ay, az), (bx, by, bz) = lo_l[i], hi_l[i]
+        out = []
+        for j in sorted(cand):
+            (px, py, pz), (qx, qy, qz) = lo_l[j], hi_l[j]
+            if (qx >= ax and qy >= ay and qz >= az
+                    and px <= bx and py <= by and pz <= bz):
+                out.append(j)
+        return out
+    return meeting
+
+
 def prune_collinear_orphan_edges(mesh) -> list:
     """Remove edges that bound no face and lie collinearly over another edge — the
     unwelded collinear overlaps that leave a duplicate 'division line'. Returns
@@ -1658,14 +1700,13 @@ def prune_collinear_orphan_edges(mesh) -> list:
     lo = np.minimum(P[:, :3], P[:, 3:]) - _PLANAR_TOLERANCE
     hi = np.maximum(P[:, :3], P[:, 3:]) + _PLANAR_TOLERANCE
     slot = {id(e): i for i, e in enumerate(edges)}
+    meeting = _box_grid(lo, hi)
     # An orphan already pruned must not prune the one it lay on: the bare
     # loop read the LIVE edge list, so the partner had to still be there.
     gone: set = set()
     for e in orphans:
         i = slot[id(e)]
-        near = np.flatnonzero((hi >= lo[i]).all(axis=1)
-                              & (lo <= hi[i]).all(axis=1))
-        for j in near:
+        for j in meeting(i):
             other = edges[j]
             if other is e or id(other) in gone:
                 continue
@@ -1697,6 +1738,25 @@ def _mesh_is_flat(mesh) -> bool:
 #: Above this many faces the overlap heal is skipped entirely — see the
 #: guard at the top of :func:`heal_overlapping_faces`.
 _HEAL_FACE_CAP = 3000
+
+
+#: Slack on the face boxes the heal filters pairs with: far past the
+#: planar tolerance a "coplanar" point may sit off the plane by.
+_BOX_PAD = 1e-2
+
+
+def _outer_boxes(faces):
+    """``(lo, hi)``: per face, the bounding box of its outer loop."""
+    import numpy as np
+    if not faces:
+        return np.empty((0, 3)), np.empty((0, 3))
+    lo = np.empty((len(faces), 3))
+    hi = np.empty((len(faces), 3))
+    for i, f in enumerate(faces):
+        pts = np.array([(v.x(), v.y(), v.z()) for v in f.vertices])
+        lo[i] = pts.min(axis=0)
+        hi[i] = pts.max(axis=0)
+    return lo, hi
 
 
 def heal_overlapping_faces(mesh, coverage: float = 0.5, partial=None,
@@ -1777,6 +1837,7 @@ def heal_overlapping_faces(mesh, coverage: float = 0.5, partial=None,
     N = np.array([[(n := f.normal()).x(), n.y(), n.z()] for f in snap],
                  dtype=np.float64) if snap else np.empty((0, 3))
     A = np.array([f.area() for f in snap], dtype=np.float64)
+    LO, HI = _outer_boxes(snap)
     gone: set = set()
     for i, face in enumerate(snap):
         a_face = A[i]
@@ -1785,8 +1846,13 @@ def heal_overlapping_faces(mesh, coverage: float = 0.5, partial=None,
         # The coplanar partner test for the WHOLE mesh in one dot product.
         # Same tolerance, same pairs — but the scalar form ran 4.2M times in
         # Python (66 s of the 82 s a Delete cost inside the imported
-        # barbecue, plus 5 s once its normals were cached).
-        cand = np.flatnonzero((np.abs(N @ N[i]) > 0.999) & (A < a_face))
+        # barbecue, plus 5 s once its normals were cached). A loop strictly
+        # inside the face sits inside its box too: on a flat plan every face
+        # is coplanar with every other, and the box test is what keeps an
+        # exploded DWG of 700 faces from testing them all (#491).
+        cand = np.flatnonzero((np.abs(N @ N[i]) > 0.999) & (A < a_face)
+                              & (LO >= LO[i] - _BOX_PAD).all(axis=1)
+                              & (HI <= HI[i] + _BOX_PAD).all(axis=1))
         covered = 0.0
         for j in cand:
             g = snap[j]
@@ -1814,6 +1880,7 @@ def heal_overlapping_faces(mesh, coverage: float = 0.5, partial=None,
         N3 = np.array([[(n := f.normal()).x(), n.y(), n.z()] for f in snap3],
                       dtype=np.float64) if snap3 else np.empty((0, 3))
         A3 = np.array([f.area() for f in snap3], dtype=np.float64)
+        LO3, HI3 = _outer_boxes(snap3)
         punch: dict = defaultdict(list)
         for i3, face in enumerate(snap3):
             if id(face) in gone:
@@ -1828,8 +1895,13 @@ def heal_overlapping_faces(mesh, coverage: float = 0.5, partial=None,
                 continue
             probes = [(t0 + t1 + t2) / 3.0 for t0, t1, t2 in tris]
             a_face = A3[i3]
+            # Probes are in this face's box and count only inside g's outer
+            # loop, so g's box must meet ours — 2.4 M probe tests, 135 s,
+            # on an exploded DWG plan without it (#491).
             for j3 in np.flatnonzero((np.abs(N3 @ N3[i3]) > 0.999)
-                                     & (A3 > a_face)):
+                                     & (A3 > a_face)
+                                     & (LO3 <= HI3[i3] + _BOX_PAD).all(axis=1)
+                                     & (HI3 >= LO3[i3] - _BOX_PAD).all(axis=1)):
                 g = snap3[j3]
                 if g is face or id(g) in gone:
                     continue

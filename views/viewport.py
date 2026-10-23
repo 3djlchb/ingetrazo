@@ -9433,6 +9433,145 @@ class Viewport(QOpenGLWidget):
                     return fp
         return base
 
+    def _front_face_at(self, x: float, y: float):
+        """``(face, placement)`` of the front-most selectable face on the ray
+        through pixel ``(x, y)``, or ``None``. A bare pass with no memo:
+        the face-crossing search asks it at pixels around the cursor, and
+        :meth:`pick_face_any`'s memo holds the cursor's own answer."""
+        o, d = self._pixel_to_ray(x, y)
+        if o is None or d is None:
+            return None
+        import numpy as np
+        idx = self._pick_index(near=("px", x, y))
+        if not idx.entities:
+            return None
+        t = self._ray_hits(idx, o, d, idx.ent_sel)
+        if t is None or len(t) == 0:
+            return None
+        i = int(np.argmin(t))
+        if not np.isfinite(t[i]):
+            return None
+        face, owner = idx.entities[i]
+        pidx = getattr(idx, "ent_place_idx", None)
+        if pidx is not None and i < len(pidx) and pidx[i] >= 0:
+            return face, idx.ent_placements[int(pidx[i])]
+        return face, owner
+
+    #: How far from the cursor (px) a face crossing snaps, and how far
+    #: either side of the crossing the search checks that each face shows.
+    _CROSSING_RING_PX = 8.0
+    _CROSSING_SIDE_PX = 3.0
+
+    def _face_crossing_point(self, px: float, py: float):
+        """Where the face under the cursor meets another face that crosses
+        it with no edge between them — a box sunk into the floor, a beam
+        through a wall: ``(world point, context)`` or ``None`` (#819,
+        SketchUp's «Intersection»). A face that goes THROUGH the one in
+        front is met by the cursor's own ray a little behind it, so the
+        candidates come free from that ray's hits (already cast for this
+        hover); a crossing counts only if, either side of it on screen,
+        one face shows and then the other — the two really meet there, in
+        view, and neither is merely in front of the other. ``context`` is
+        "group" / "component" when one of them is inside one, for the
+        «in group» tip."""
+        if _active_cut(self.scene) is not None:
+            return None
+        f_face, f_place = self.pick_face_placement(px, py)   # memoised
+        if f_face is None:
+            return None
+        o, d = self._pixel_to_ray(px, py)
+        if o is None or d is None:
+            return None
+        import numpy as np
+        idx = self._pick_index(near=("px", px, py))
+        face_t = self._hover_face_t(idx, o, d)                # memoised
+        if face_t is None or not np.isfinite(face_t).any():
+            return None
+        t_f = float(face_t.min())
+        r = self._CROSSING_RING_PX
+        o2, d2 = self._pixel_to_ray(px + r, py)
+        if o2 is None or d2 is None:
+            return None
+        reach = ((o2 + d2 * t_f) - (o + d * t_f)).length() * 50.0
+        # ``>=``: with the cursor right on the crossing both faces are hit
+        # at the same depth (the face itself is skipped below).
+        cand = np.where((face_t >= t_f) & (face_t <= t_f + reach))[0]
+        if len(cand) == 0:
+            return None
+        cand = cand[np.argsort(face_t[cand], kind="stable")][:7]
+        from core.snap import face_plane_world
+        p_f, n_f = face_plane_world(f_face, getattr(f_place, "xform", None))
+        pidx = getattr(idx, "ent_place_idx", None)
+        for i in cand:
+            i = int(i)
+            g_face, g_owner = idx.entities[i]
+            g_place = g_owner
+            if pidx is not None and i < len(pidx) and pidx[i] >= 0:
+                g_place = idx.ent_placements[int(pidx[i])]
+            if g_face is f_face and g_place is f_place:
+                continue
+            p_g, n_g = face_plane_world(g_face, getattr(g_place, "xform", None))
+            u = QVector3D.crossProduct(n_f, n_g)
+            if u.length() < 0.02:               # (near) coplanar: no crossing
+                continue
+            found = self._crossing_on_screen(
+                px, py, o, d, (f_face, f_place, p_f, n_f),
+                (g_face, g_place, p_g, n_g, u))
+            if found is not None:
+                return found
+        return None
+
+    def _crossing_on_screen(self, px, py, o, d, f, g):
+        """The crossing of plane ``f`` with plane ``g`` nearest the cursor
+        ray, if it is within reach on screen and shows face ``f`` on one
+        side and face ``g`` on the other (see :meth:`_face_crossing_point`)."""
+        f_face, f_place, p_f, n_f = f
+        g_face, g_place, p_g, n_g, u = g
+        r = self._CROSSING_RING_PX
+        # The crossing line: the point of both planes nearest the origin…
+        d_f = QVector3D.dotProduct(n_f, p_f)
+        d_g = QVector3D.dotProduct(n_g, p_g)
+        uu = QVector3D.dotProduct(u, u)
+        l0 = (QVector3D.crossProduct(n_g, u) * d_f
+              + QVector3D.crossProduct(u, n_f) * d_g) / uu
+        # …then its point nearest the cursor ray.
+        un = u / math.sqrt(uu)
+        w0 = l0 - o
+        b = QVector3D.dotProduct(un, d)
+        den = 1.0 - b * b
+        if den < 1e-9:                          # the line runs along the ray
+            return None
+        s = (b * QVector3D.dotProduct(w0, d) - QVector3D.dotProduct(w0, un)) / den
+        x = l0 + un * s
+        pix = self._world_to_pixel(x)
+        if pix is None or math.hypot(pix[0] - px, pix[1] - py) > max(
+                self.edge_snap_threshold_px, r):
+            return None
+        # Either side of the crossing on screen: one face, then the other.
+        q = self._world_to_pixel(x + un * max(1e-3, (x - o).length() * 1e-2))
+        if q is None:
+            return None
+        sx, sy = q[0] - pix[0], q[1] - pix[1]
+        ln = math.hypot(sx, sy)
+        if ln < 1e-9:
+            return None
+        nx, ny = -sy / ln * self._CROSSING_SIDE_PX, sx / ln * self._CROSSING_SIDE_PX
+        sides = [self._front_face_at(pix[0] + nx, pix[1] + ny),
+                 self._front_face_at(pix[0] - nx, pix[1] - ny)]
+        ids = {(id(h[0]), id(h[1])) for h in sides if h is not None}
+        if ids != {(id(f_face), id(f_place)), (id(g_face), id(g_place))}:
+            return None
+        context = None
+        for place in (f_place, g_place):
+            if place is None:
+                continue
+            owner = self._owner_of(place)
+            is_comp = getattr(owner, "is_instance", None)
+            context = ("component" if is_comp is not None and is_comp()
+                       else "group")
+            break
+        return x, context
+
     def _still_face_under(self, px: float, py: float) -> bool:
         """Whether a face the drag is NOT bending is under the cursor —
         the «On face» cue never names the face being moved."""
@@ -15708,16 +15847,25 @@ class Viewport(QOpenGLWidget):
             # typed length must drop the lock exactly like the second click.
             history = getattr(self, "history", None)
             _before = len(history.undo_stack) if history is not None else 0
+            _top = history.undo_stack[-1] if _before else None
             typed = self._value_buffer
             self.active_tool.on_value(self, value)
             _drew = history is not None and len(history.undo_stack) > _before
+            # A hot retype (Push/Pull, Move, Rotate… typed right after a
+            # commit) undoes the last command and commits it again: the
+            # stack keeps its length but its top is a new command. That
+            # also changed the model, and the box went on showing the
+            # value from before the retype (tutorial video, #859).
+            _redrew = (not _drew and _before > 0
+                       and len(history.undo_stack) == _before
+                       and history.undo_stack[-1] is not _top)
             self._set_value_buffer("")
             # The box falls back to the live reading, which only refreshes on
             # a mouse move: it went on showing the preview from BEFORE the
             # Enter, as if the typed size had been ignored (#607). What was
             # drawn is what was typed, read as the canvas showed it. Nothing
             # drawn: the preview the box shows is still the live one.
-            if _drew:
+            if _drew or _redrew:
                 unitless = getattr(self.active_tool, "value_is_unitless", None)
                 self.measurementChanged.emit(
                     typed if callable(unitless) and unitless()

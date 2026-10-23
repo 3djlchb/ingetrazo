@@ -392,6 +392,21 @@ class DeleteEdgesCommand(Command):
         scene.version += 1
 
 
+def _single_coplanar_pair(faces) -> Optional[tuple]:
+    """The one pair of ``faces`` that face the same way (they share an edge,
+    so that makes them coplanar), or ``None`` when there is no such pair,
+    more than one, or another face lies in their plane too."""
+    pairs = [(a, b) for i, a in enumerate(faces) for b in faces[i + 1:]
+             if QVector3D.dotProduct(a.normal(), b.normal()) > 0.999]
+    if len(pairs) != 1:
+        return None
+    n = pairs[0][0].normal()
+    if any(abs(QVector3D.dotProduct(n, f.normal())) > 0.999
+           for f in faces if f not in pairs[0]):
+        return None
+    return pairs[0]
+
+
 class EraseSelectionCommand(Command):
     """Erase selected edges and faces, the usual way.
 
@@ -437,6 +452,7 @@ class EraseSelectionCommand(Command):
             _index_face(f)
         dead_faces: set = set()
         slit_planes: list = []
+        across: list = []
         for a, b in self._edge_endpoints:
             v0 = m.vertex_at(a)
             v1 = m.vertex_at(b)
@@ -465,6 +481,22 @@ class EraseSelectionCommand(Command):
                 if merged is not None:
                     dead_faces.update(id(f) for f in faces)
                     _index_face(merged)
+            elif len(faces) > 2:
+                # A wall raised against a taller neighbour leaves its inner
+                # side faces on the line too, so the front's split line had
+                # four faces and the cascade took the whole front (#356).
+                # Reunite the one coplanar pair as above; the faces across
+                # the line are re-derived on their plane below, so what
+                # still closes (the jamb above the sill) stays and the
+                # inner partitions, open now, go.
+                pair = _single_coplanar_pair(faces)
+                if pair is not None:
+                    merged = m.dissolve_coplanar_region(pair)
+                if merged is not None:
+                    dead_faces.update(id(f) for f in pair)
+                    _index_face(merged)
+                    across.extend(f for f in faces if f not in pair)
+                    m.remove_edge(edge)
             if merged is None:
                 # Cascade: the edge and every face bounding it (a face can't
                 # outlive a bounding edge) go away.
@@ -489,6 +521,17 @@ class EraseSelectionCommand(Command):
                 continue
             done_planes.append((origin, nn))
             RebuildPlaneFacesCommand(origin, nn).do(scene)
+        # The faces across a reunited line, each plane from its own faces'
+        # remaining edges: the line's other faces may span past it (the
+        # jamb above the sill) and only what still closes comes back.
+        while across:
+            f = across[0]
+            o, n = QVector3D(f.vertices[0]), f.normal()
+            same = [g for g in across if abs(QVector3D.dotProduct(
+                n, g.normal())) > 0.999 and abs(QVector3D.dotProduct(
+                QVector3D(g.vertices[0]) - o, n)) < 1e-4]
+            across = [g for g in across if g not in same]
+            RebuildPlaneFacesCommand(o, n, faces=same).do(scene)
         # Deleting a curved surface takes its hidden seams with it: a soft edge
         # left bordering no face is a dangling curve segment (a cylinder side's
         # vertical seam) — prune it so no stray vertical lines remain. Hard
@@ -4633,6 +4676,65 @@ def _point_in_tri(p: QVector3D, t0: QVector3D, t1: QVector3D,
     return True
 
 
+def _segment_grid(segments):
+    """A lookup ``near(p)`` giving, in ascending order, the indices of the
+    ``segments`` (``(QVector3D, QVector3D)`` pairs) that ``p`` can lie on
+    under ``_point_on_seg_incl``.
+
+    The rebuild re-stamped curve flags by testing every new edge against
+    every flagged one: 167 M tests, 218 s, on an exploded DWG plan (#491).
+    Each segment goes in the cells of its box padded past the test's reach
+    (its ``t`` slack scales with length); the cell size grows until the boxes
+    cover at most a few cells each, so a long wall cannot flood the grid."""
+    import math
+    if not segments:
+        return lambda p: ()
+    boxes = []
+    for a, b in segments:
+        pad = 4e-4 * (1.0 + (b - a).length()) + 4e-4
+        boxes.append((min(a.x(), b.x()) - pad, min(a.y(), b.y()) - pad,
+                      min(a.z(), b.z()) - pad, max(a.x(), b.x()) + pad,
+                      max(a.y(), b.y()) + pad, max(a.z(), b.z()) + pad))
+    ext = sorted(max(bx[3] - bx[0], bx[4] - bx[1], bx[5] - bx[2])
+                 for bx in boxes)
+    size = ext[len(ext) // 2]
+
+    def span(lo, hi):
+        return math.floor(hi / size) - math.floor(lo / size) + 1
+
+    while sum(span(bx[0], bx[3]) * span(bx[1], bx[4]) * span(bx[2], bx[5])
+              for bx in boxes) > 8 * len(boxes):
+        size *= 2.0
+    cells: dict = {}
+    for i, (x0, y0, z0, x1, y1, z1) in enumerate(boxes):
+        for cx in range(math.floor(x0 / size), math.floor(x1 / size) + 1):
+            for cy in range(math.floor(y0 / size), math.floor(y1 / size) + 1):
+                for cz in range(math.floor(z0 / size),
+                                math.floor(z1 / size) + 1):
+                    cells.setdefault((cx, cy, cz), []).append(i)
+
+    def near(p):
+        return cells.get((math.floor(p.x() / size), math.floor(p.y() / size),
+                          math.floor(p.z() / size)), ())
+    return near
+
+
+def _welded_loop(mesh, loop):
+    """``loop`` with the corners the mesh welds into one merged, or ``None``
+    if fewer than three are left -- see the weld note in
+    :meth:`RebuildPlanarFacesCommand.do`."""
+    out = []
+    for p in loop:
+        v = mesh.vertex(p)
+        if not out or v is not out[-1]:
+            out.append(v)
+    if len(out) > 1 and out[0] is out[-1]:
+        out.pop()
+    if len(out) < 3:
+        return None
+    return [v.position for v in out]
+
+
 class RebuildPlanarFacesCommand(Command):
     """Rebuild the minimal faces of a flat drawing from its edge graph (a planar
     arrangement) — the deterministic, from-scratch replacement for the heuristic
@@ -4675,15 +4777,28 @@ class RebuildPlanarFacesCommand(Command):
                      for f in mesh.faces if f.attrs]
         edges, faces = planar_rebuild(segments, origin, normal)
 
+        near_flagged = _segment_grid([(fa, fb) for fa, fb, _ in flagged])
+
         scene.selection.clear()
         mesh.clear()
         for a, b in edges:
+            if mesh.vertex(a) is mesh.vertex(b):
+                # Shorter than the weld: the arrangement keys points on a
+                # 0.1 mm grid, so two ends a hair apart across a cell line
+                # stay two -- the mesh welds them into one. Raising here
+                # rolled the whole draw back on an exploded DWG plan (#491).
+                continue
             e = mesh.add_edge(a, b)
-            for (fa, fb, flags) in flagged:
+            for i in near_flagged(e.a):
+                fa, fb, flags = flagged[i]
                 if _point_on_seg_incl(e.a, fa, fb) and _point_on_seg_incl(e.b, fa, fb):
                     stamp_edge_flags(e, flags)
                     break
         for outer, holes in faces:
+            outer = _welded_loop(mesh, outer)
+            if outer is None:
+                continue
+            holes = [h for h in (_welded_loop(mesh, h) for h in holes) if h]
             f = mesh.add_face(outer, holes or None)
             if f is None or not old_attrs:
                 continue
@@ -4730,7 +4845,8 @@ class RebuildPlaneFacesCommand(Command):
 
     _TOL = 1e-4
 
-    def __init__(self, origin: QVector3D, normal: QVector3D) -> None:
+    def __init__(self, origin: QVector3D, normal: QVector3D,
+                 faces: Optional[Iterable] = None) -> None:
         self.origin = QVector3D(origin)
         # Normalised by hand: QVector3D.normalized() nulls anything shorter
         # than 1e-5, and a zero normal here means "rebuild the plane of
@@ -4738,6 +4854,9 @@ class RebuildPlaneFacesCommand(Command):
         n = QVector3D(normal)
         length = n.length()
         self.normal = n / length if length > 1e-9 else QVector3D()
+        # Given faces: rebuild only them, from their own remaining edges --
+        # the rest of the plane is not this edit's business (#356).
+        self.faces = None if faces is None else list(faces)
         self.snapshot: Optional[dict] = None
         self.rebuilt = 0
 
@@ -4755,15 +4874,31 @@ class RebuildPlaneFacesCommand(Command):
             # whole mesh — which is how a 3 mm² sliver erased 447 faces.
             return
         mesh = scene.mesh
-        plane_edges = [e for e in mesh.edges
-                       if self._on_plane(e.a) and self._on_plane(e.b)]
+        if self.faces is not None:
+            live = set(map(id, mesh.faces))
+            plane_faces = [f for f in self.faces if id(f) in live]
+            plane_edges = []
+            for f in plane_faces:
+                for loop in (f.loop, *f.hole_loops):
+                    for a, b in zip(loop, loop[1:] + loop[:1]):
+                        e = mesh.find_edge(a, b)
+                        if e is not None and e not in plane_edges:
+                            plane_edges.append(e)
+        else:
+            plane_edges = [e for e in mesh.edges
+                           if self._on_plane(e.a) and self._on_plane(e.b)]
         if not plane_edges:
+            if self.faces is not None:
+                for f in plane_faces:
+                    mesh.remove_face(f)
             return
-        plane_faces = [
-            f for f in mesh.faces
-            if all(self._on_plane(v.position) for v in f.loop)
-            and all(self._on_plane(v.position) for h in f.hole_loops for v in h)
-        ]
+        if self.faces is None:
+            plane_faces = [
+                f for f in mesh.faces
+                if all(self._on_plane(v.position) for v in f.loop)
+                and all(self._on_plane(v.position)
+                        for h in f.hole_loops for v in h)
+            ]
         old = [([tuple(t) for t in f.triangulate()], f.normal(), dict(f.attrs))
                for f in plane_faces]
         segments = [(QVector3D(e.a), QVector3D(e.b)) for e in plane_edges]
@@ -4891,6 +5026,8 @@ class ChangeAxesCommand(Command):
         self._old_axes = None
         self._d = None
         self._instances: list = []
+        self._inst_axes: list = []
+        self._inst_xforms: list = []
 
     def _siblings(self, scene) -> list:
         from core.group import iter_placements
@@ -4934,8 +5071,14 @@ class ChangeAxesCommand(Command):
             return
         self._instances = self._siblings(scene)
         self._reexpress(g, self._d)
+        # An instance's frame is ``xform · axes``: axes it carried from its
+        # classic-group days would turn the new frame again (#484), so the
+        # re-expressed definition's own axes are the instances' now.
+        self._inst_axes = [inst.axes for inst in self._instances]
+        self._inst_xforms = [self._copy(inst.xform) for inst in self._instances]
         for inst in self._instances:
             inst.xform = inst.xform * d_inv
+            inst.axes = None
         scene.version += 1
 
     def undo(self, scene) -> None:
@@ -4948,8 +5091,12 @@ class ChangeAxesCommand(Command):
             return
         d_inv, _ok = self._d.inverted()
         self._reexpress(g, d_inv)
-        for inst in self._instances:
-            inst.xform = inst.xform * self._d
+        # The placements as they were, not ``xform · d`` again: that product
+        # came back 6e-8 off, and undo should leave exactly what was there.
+        for inst, axes, xform in zip(self._instances, self._inst_axes,
+                                     self._inst_xforms):
+            inst.xform = self._copy(xform)
+            inst.axes = axes
         scene.version += 1
 
     @staticmethod
