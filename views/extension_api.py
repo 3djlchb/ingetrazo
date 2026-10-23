@@ -35,6 +35,10 @@ opening an extension's own file type, and workspaces.
   extension already claimed, is refused (logged, not raised).
 - A **workspace** shows the extension's own document instead of the model,
   which waits untouched ("parked") until the workspace is left.
+- **Services** (an addition to version 2: check ``hasattr(app, "use")``)
+  let one extension offer an object to the others by name —
+  :meth:`ExtensionApp.provide` / :meth:`ExtensionApp.use` — whatever order
+  they load in. A consumer must keep working when the service never comes.
 """
 from __future__ import annotations
 
@@ -406,3 +410,51 @@ class ExtensionApp:
     def workspace(self):
         """The workspace shown instead of the model, or None."""
         return self._window.workspace()
+
+    # ---- Services between extensions ---------------------------------------
+    def provide(self, name: str, service) -> None:
+        """Offer ``service`` to the other extensions under ``name`` (the
+        Timeline offers its clock as ``"timeline"``). Every :meth:`use` of
+        that name — made before or after — gets it. A name already provided
+        is kept: the second offer is refused (logged, not raised)."""
+        services, waiting = _service_tables(self._window)
+        if name in services:
+            log.warning("extension %r's service %r ignored: already "
+                        "provided", self.key, name)
+            return
+        services[name] = service
+        for user, fn in waiting.pop(name, []):
+            _hand_over(user, name, fn, service)
+
+    def use(self, name: str, fn) -> None:
+        """Call ``fn(service)`` with the service provided as ``name`` — now
+        if it is there, else as soon as an extension provides it, so the
+        load order does not matter. If it never comes, ``fn`` is never
+        called: the extension must work without it. ``fn`` raising is
+        logged, never passed on."""
+        services, waiting = _service_tables(self._window)
+        if name in services:
+            _hand_over(self.key, name, fn, services[name])
+        else:
+            waiting.setdefault(name, []).append((self.key, fn))
+
+    def service(self, name: str):
+        """The service provided as ``name``, or None — for a quick look;
+        :meth:`use` is the way to wait for it."""
+        return _service_tables(self._window)[0].get(name)
+
+
+def _service_tables(window):
+    """``(services, waiting)`` of a window: what is provided, by name, and
+    the ``(extension, fn)`` callbacks still waiting for a name."""
+    tables = getattr(window, "_extension_services", None)
+    if tables is None:
+        tables = window._extension_services = ({}, {})
+    return tables
+
+
+def _hand_over(user: str, name: str, fn, service) -> None:
+    try:
+        fn(service)
+    except Exception:  # noqa: BLE001 — one extension cannot break another
+        log.exception("extension %r failed using service %r", user, name)

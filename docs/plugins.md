@@ -355,6 +355,48 @@ closing the wall again; all in a submenu (`add_menu`) and the right-click
 menu (`add_context_menu`), each command one undo step. A port of Rick
 Wilson's Windowizer 3 by Bane Andreev, an architect, written with AI help.
 
+### Services between extensions, and the Timeline
+
+One extension can offer an object to the others by name, whatever order
+they load in — an addition to API 2, so check `hasattr(app, "use")`:
+
+```python
+app.provide("timeline", clock)            # the offering extension
+app.use("timeline", attach)               # attach(clock): now, or when it comes
+app.service("timeline")                   # a quick look: the object or None
+```
+
+A consumer must keep working when the service never comes (`attach` is
+then simply never called). A second offer of a name is refused and logged;
+a callback that raises is logged, never passed on.
+
+The bundled **Timeline** (`plugins/igz_timeline`) offers its clock as
+`"timeline"`: one frame, duration and frame rate for every extension that
+animates, with playback and loop. An extension hangs a **track** on it — a
+row of the ruler — and the clock puts every track at each frame it shows:
+
+```python
+def attach(clock):
+    clock.add_track(
+        "my_ext.sun", "Sun",                   # id, title (English, via tr)
+        keys=lambda: [(1, "9:00"), (clock.total_frames, "17:00")],
+        apply=lambda frame, total: set_sun(frame / total),
+        owner="my_ext")
+    clock.set_timing(duration=10, fps=24)     # seconds, frames per second
+    clock.timingChanged.connect(on_timing)    # (duration, fps)
+    clock.refresh()                           # when the keys change
+
+app.use("timeline", attach)
+```
+
+`clock.seek(frame)`, `step(n)`, `play_pause()`, `stop()`, `prev_key()` /
+`next_key()` (over every track's keys), `frame`, `total_frames`, `loop`,
+and `show_editor(on)`. A track that raises is logged and the others still
+run. In the classic layout the Timeline is a panel along the bottom
+(Window ▸ Timeline, like Terrain profile); with areas it is the «Timeline»
+editor of an area, and the Window entry is locked. Animation's ticked
+scenes are its «Scenes» track.
+
 ## Bundled reference plugins
 
 - `plugins/model_info.py` — Model Info dialog (geometry / materials /
@@ -366,6 +408,9 @@ Wilson's Windowizer 3 by Bane Andreev, an architect, written with AI help.
   one-undo-step repair (`RepairSolidsCommand`, snapshot undo over several
   meshes). A side-tray tab (`setup(app)` + `add_panel`) with a viewport
   overlay that paints each problem in its colour.
+- `plugins/igz_timeline/` — the Timeline: a package plugin that offers a
+  service (`app.provide`), a bottom panel that is an area editor with
+  areas, and tracks other extensions hang on its clock.
 - `plugins/ai_assistant.py` — the in-app AI assistant (Ctrl+Shift+A): a
   multi-provider chat agent that models through `core.ai`, in the «AI»
   tray tab. The reference for worker threads, per-provider settings and a

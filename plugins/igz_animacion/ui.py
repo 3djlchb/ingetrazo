@@ -10,7 +10,9 @@ the tab holds is saved in the .igz.
 
 The frames appear in the animation's own frame buffer (``framebuffer``),
 which also pauses and cancels the render; what the render does is written
-to the tab's Console. The timeline stays in the 3D viewport.
+to the tab's Console. The preview plays on the Timeline extension's clock,
+where the ticked scenes are the «Scenes» track; without it the tab works
+the same, with no preview timeline.
 """
 from __future__ import annotations
 
@@ -58,8 +60,6 @@ RENDER_VIEWPORT, RENDER_BLENDER = 0, 1
 #: Output kinds, by the index the document stores (``settings.file_type``).
 OUT_IMAGES, OUT_VIDEO, OUT_BOTH = 0, 1, 2
 FPS_PRESETS = (6, 8, 12, 23.98, 24, 25, 29.97, 30, 50, 59.94, 60, 120, 240)
-#: QSettings key of «Show timeline».
-SHOW_TIMELINE_KEY = "igz_animacion/show_timeline"
 #: QSettings prefix of the sections' open / folded state.
 _SECTION_KEY = "igz_animacion/open_"
 QUALITY_NAMES = ("Draft", "Medium", "High")
@@ -196,6 +196,11 @@ def breakable(text: str) -> str:
     return str(text).replace("\\", "\\" + _ZWSP).replace("/", "/" + _ZWSP)
 
 
+#: A widget property: ``fit_to_tray`` leaves its width alone — for buttons in
+#: a row that wraps to the next line instead of squeezing them.
+KEEP_WIDTH = "igz_keep_width"
+
+
 def fit_to_tray(root: QWidget) -> None:
     """Let every control under ``root`` shrink with the side tray, as the
     Render tab does: the widest of them set the tab's minimum width, and
@@ -207,6 +212,8 @@ def fit_to_tray(root: QWidget) -> None:
     for w in root.findChildren(QWidget):
         if isinstance(w, kinds):
             if w.maximumWidth() < 100:          # a fixed little «…» button
+                continue
+            if w.property(KEEP_WIDTH):          # it wraps instead (a flow row)
                 continue
             narrow(w)
         elif isinstance(w, QToolButton) and isinstance(w.parent(), FoldSection):
@@ -245,8 +252,9 @@ class AnimacionPanel(QWidget):
     def __init__(self, app):
         super().__init__()
         self.app = app
+        #: The Timeline extension's clock (``attach_timeline``), or None.
         self.timeline = None
-        self.timeline_dock = None
+        self._timing_echo = False
         self.dock = None
         self._animation_data = default_plugin_data()
         self._interpolate_section = True
@@ -316,6 +324,10 @@ class AnimacionPanel(QWidget):
         # stand-alone plugin reloaded its whole state on every edit, which
         # froze big models and reset whatever was being typed in the tab).
         self.app.on_document_changed(self._poll)
+        vp = getattr(self.app, "viewport", None)
+        if vp is not None:
+            vp.installEventFilter(self)       # Native follows its size
+        self._sync_resolution_widgets()
 
     # ---- Building the tab ----------------------------------------------------
     def _build_renderer(self, layout):
@@ -436,9 +448,9 @@ class AnimacionPanel(QWidget):
         sec = _section(tr("Timeline"), "timeline")
         self.show_timeline = QCheckBox(tr("Show the timeline"))
         self.show_timeline.setToolTip(tr(
-            "Show the animation timeline in its own window."))
-        self.show_timeline.setChecked(
-            QSettings().value(SHOW_TIMELINE_KEY, False, bool))
+            "The Timeline extension is not loaded: the animation works, "
+            "without a preview timeline."))
+        self.show_timeline.setEnabled(False)       # until a Timeline comes
         self.show_timeline.toggled.connect(self.toggle_timeline)
         sec.body_layout.addWidget(self.show_timeline)
         layout.addWidget(sec)
@@ -557,6 +569,15 @@ class AnimacionPanel(QWidget):
         sec = _section(tr("Settings"), "settings")
         form = QFormLayout()
         form.setContentsMargins(0, 0, 0, 0)
+        # «Resolution:» — the 3D viewport's own size (Width and Height then
+        # only show it) or Custom: the fields, and «Presets…» to pick, keep
+        # and lock sizes. A padlock in front of each field tells whether
+        # the size in use is locked by its preset.
+        from .resolution import RES_CUSTOM, RES_NATIVE
+        self.resolution_mode = QComboBox()
+        self.resolution_mode.addItem(tr("3D viewport (native)"), RES_NATIVE)
+        self.resolution_mode.addItem(tr("Custom"), RES_CUSTOM)
+        form.addRow(tr("Resolution:"), self.resolution_mode)
         self.resolution_x = QSpinBox()
         self.resolution_x.setRange(16, 16384)
         self.resolution_x.setValue(1920)
@@ -565,9 +586,35 @@ class AnimacionPanel(QWidget):
         self.resolution_y.setRange(16, 16384)
         self.resolution_y.setValue(1080)
         self.resolution_y.setSuffix(" px")
-        # One per line: side by side they did not fit the narrow tray.
-        form.addRow(tr("Width:"), self.resolution_x)
-        form.addRow(tr("Height:"), self.resolution_y)
+        #: The preset applied (its name), or None; the custom size kept
+        #: while the native one shows in the fields.
+        self.resolution_preset = None
+        self._custom_size = (1920, 1080)
+        self._showing_native = False
+        self.lock_x, self.lock_y = QLabel(), QLabel()
+        self.presets_button = QPushButton(tr("Presets…"))
+        self.presets_button.setToolTip(tr(
+            "Pick, keep and lock resolutions of your own."))
+        self.presets_button.clicked.connect(self.open_resolution_presets)
+        from views.tray import FlowLayout
+        res_row = QWidget()
+        flow = FlowLayout(res_row, spacing=8)
+        flow.setContentsMargins(0, 0, 0, 0)
+        for lock, text, box in ((self.lock_x, tr("Width:"), self.resolution_x),
+                                (self.lock_y, tr("Height:"), self.resolution_y)):
+            pair = QWidget()
+            h = QHBoxLayout(pair)
+            h.setContentsMargins(0, 0, 0, 0)
+            h.setSpacing(3)
+            h.addWidget(lock)
+            h.addWidget(QLabel(text))
+            box.setMinimumWidth(92)
+            box.setProperty(KEEP_WIDTH, True)
+            h.addWidget(box)
+            flow.addWidget(pair)
+        self.presets_button.setProperty(KEEP_WIDTH, True)
+        flow.addWidget(self.presets_button)
+        form.addRow(res_row)
 
         self.fps_combo = QComboBox()
         for value in FPS_PRESETS:
@@ -582,7 +629,17 @@ class AnimacionPanel(QWidget):
         self.fps_custom.setValue(24.0)
         self.fps_custom.setSuffix(" fps")
         self.fps_custom.setVisible(False)
-        form.addRow(tr("Frame rate:"), _row(self.fps_combo, self.fps_custom))
+        # With the Timeline the frame rate is ITS: shown here, edited there
+        # (its «Edit FPS…»). The combo and field above are the tab's own,
+        # for a window without the Timeline — and what the document keeps.
+        self.fps_info = QLabel()
+        self.fps_info.setVisible(False)
+        form.addRow(tr("Frame rate:"), _row(self.fps_combo, self.fps_custom,
+                                            self.fps_info))
+        self.fps_hint = QLabel(tr("Edit FPS in the Timeline"))
+        self.fps_hint.setStyleSheet("color: gray; font-size: 11px;")
+        self.fps_hint.setVisible(False)
+        form.addRow("", self.fps_hint)
 
         self.duration = QSpinBox()
         self.duration.setRange(1, 36000)
@@ -605,6 +662,10 @@ class AnimacionPanel(QWidget):
 
         for w in (self.resolution_x, self.resolution_y, self.duration):
             w.valueChanged.connect(self._timeline_settings_changed)
+        for w in (self.resolution_x, self.resolution_y):
+            w.valueChanged.connect(self._resolution_typed)
+        self.resolution_mode.currentIndexChanged.connect(
+            self._resolution_mode_changed)
         self.fps_combo.currentIndexChanged.connect(self._fps_mode_changed)
         self.fps_custom.valueChanged.connect(self._timeline_settings_changed)
         self.crf.valueChanged.connect(self._changed)
@@ -695,17 +756,22 @@ class AnimacionPanel(QWidget):
     def _build_console(self, layout):
         sec = _section(tr("Console"), "console", default_open=False)
         self.console_section = sec
-        bar = QHBoxLayout()
+        # A flow row: in a narrow tray «Clear» goes under «Copy». Squeezed
+        # to the tray's width (fit_to_tray) the two ran over each other.
+        from views.tray import FlowLayout
+        holder = QWidget()
+        bar = FlowLayout(holder, spacing=4)
         bar.setContentsMargins(0, 0, 0, 0)
         copy = QPushButton(tr("Copy"))
         copy.setToolTip(tr("Copy the selected text, or all of it."))
         copy.clicked.connect(self._console_copy)
         clear = QPushButton(tr("Clear"))
         clear.clicked.connect(lambda: self.console_output.clear())
-        bar.addWidget(copy)
-        bar.addWidget(clear)
-        bar.addStretch(1)
-        sec.body_layout.addLayout(bar)
+        for button in (copy, clear):
+            button.setProperty(KEEP_WIDTH, True)
+            bar.addWidget(button)
+        self.console_buttons = (copy, clear)
+        sec.body_layout.addWidget(holder)
         self.console_output = QPlainTextEdit()
         self.console_output.setReadOnly(True)
         self.console_output.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
@@ -764,44 +830,98 @@ class AnimacionPanel(QWidget):
         self._update_native_render_info()
 
     # ---- Timeline ------------------------------------------------------------
-    def eventFilter(self, watched, event):
-        if event.type() == QEvent.Resize and hasattr(self, "_fit_timeline_width"):
-            self._fit_timeline_width()
-        return super().eventFilter(watched, event)
-
     def set_dock(self, dock):
         self.dock = dock
 
-    def set_timeline(self, timeline, dock):
-        self.timeline = timeline
-        self.timeline_dock = dock
-        if getattr(self, "_timeline_signal_source", None) is not timeline:
-            timeline.frameChanged.connect(self.preview_frame)
-            self._timeline_signal_source = timeline
-        self.timeline_dock.setVisible(self.show_timeline.isChecked())
+    def attach_timeline(self, clock):
+        """The Timeline extension's clock (``app.use("timeline", ...)``):
+        the ticked scenes become its «Scenes» track, and the duration and
+        frame rate are the clock's — this tab's fields follow it and set
+        it, both ways. The document keeps them here, as before, so a file
+        opens the same with or without the Timeline."""
+        self.timeline = clock
+        clock.add_track("igz_animacion.scenes", "Scenes", self._timeline_keys,
+                        self.preview_frame, owner="igz_animacion")
+        clock.timingChanged.connect(self._timing_from_timeline)
+        clock.editorShownChanged.connect(self._timeline_shown)
+        self.show_timeline.setEnabled(True)
+        self.show_timeline.setToolTip(tr(
+            "Show the Timeline, where the ticked scenes are the «Scenes» "
+            "track."))
+        self._timeline_shown(clock.editor_shown())
         self._update_timeline()
 
     def toggle_timeline(self, visible):
-        QSettings().setValue(SHOW_TIMELINE_KEY, bool(visible))
-        if self.timeline_dock is not None:
-            self.timeline_dock.setVisible(bool(visible))
+        if self.timeline is not None \
+                and self.timeline.editor_shown() != bool(visible):
+            self.timeline.show_editor(bool(visible))
+            self._timeline_shown(self.timeline.editor_shown())
+
+    def _timeline_shown(self, shown):
+        if self.show_timeline.isChecked() != bool(shown):
+            self.show_timeline.blockSignals(True)
+            self.show_timeline.setChecked(bool(shown))
+            self.show_timeline.blockSignals(False)
+
+    def _timing_from_timeline(self, duration, fps):
+        """The Timeline's duration or frame rate changed there: these
+        fields follow (and the document stores them, as any edit here)."""
+        self._timing_echo = True
+        try:
+            d = max(1, int(round(duration)))
+            if self.duration.value() != d:
+                self.duration.setValue(d)
+            if abs(self._fps_value() - float(fps)) > 1e-6:
+                idx = next((i for i, v in enumerate(FPS_PRESETS)
+                            if abs(float(v) - float(fps)) < 1e-6), None)
+                if idx is not None:
+                    self.fps_combo.setCurrentIndex(idx)
+                else:
+                    self.fps_custom.setValue(float(fps))
+                    self.fps_combo.setCurrentIndex(self.fps_combo.count() - 1)
+        finally:
+            self._timing_echo = False
+        self._update_timeline()
 
     def _update_timeline(self):
         frames = max(1, int(round(self.duration.value() * self._fps_value())))
         self.total_frames_label.setText(tr("{n} frames", n=frames))
+        self._sync_fps_widgets()
         if self.timeline is not None:
-            self.timeline.set_keys(self.selected_views(), self.duration.value(),
-                                   self._fps_value())
+            if not self._timing_echo:
+                self.timeline.set_timing(self.duration.value(),
+                                         self._fps_value())
+            self.timeline.refresh()
 
-    def preview_frame(self, frame):
+    def _timeline_keys(self):
+        """The «Scenes» track: the ticked scenes spread over the clock,
+        the first on frame 1 and the last on the last frame."""
+        views = self.selected_views()
+        total = self.timeline.total_frames if self.timeline is not None else 1
+        count = len(views)
+        keys = []
+        for i, view in enumerate(views):
+            frame = 1 if i == 0 else (total if i == count - 1 else
+                                      int(round(1 + (total - 1) * i / (count - 1))))
+            keys.append((frame, getattr(view, "name", "")
+                         or tr("Scene {n}", n=i + 1)))
+        return keys
+
+    def preview_frame(self, frame, total=None):
+        """Put the camera (and section) as the animation has it at
+        ``frame`` — the «Scenes» track's ``apply``."""
         if self._frame_preview_busy:
             return
         views = self.selected_views()
-        if not views or self.timeline is None:
+        if not views:
             return
+        if total is None:
+            total = (self.timeline.total_frames if self.timeline is not None
+                     else max(1, int(round(self.duration.value()
+                                           * self._fps_value()))))
         self._frame_preview_busy = True
         try:
-            apply_frame(self.app.viewport, views, frame, self.timeline.total_frames)
+            apply_frame(self.app.viewport, views, frame, total)
         except Exception as exc:  # noqa: BLE001 — a preview never breaks the tab
             self.status.setText(tr("Preview: {error}", error=exc))
         finally:
@@ -866,8 +986,22 @@ class AnimacionPanel(QWidget):
                 self.tile_size.setCurrentIndex(tile)
             job = str(s.get("render_job", JOB_ANIMATION))
             self.job_buttons[job if job in JOBS else JOB_ANIMATION].setChecked(True)
-            self.resolution_x.setValue(int(s.get("resolution_x", 1920)))
-            self.resolution_y.setValue(int(s.get("resolution_y", 1080)))
+            self._custom_size = (int(s.get("resolution_x", 1920)),
+                                 int(s.get("resolution_y", 1080)))
+            # A document saved before «Resolution:» rendered its custom
+            # size: it stays Custom. A new one starts as the renderer says.
+            from .resolution import RES_CUSTOM, RES_NATIVE
+            res_mode = s.get("resolution_mode")
+            if res_mode not in (RES_NATIVE, RES_CUSTOM):
+                res_mode = (RES_CUSTOM if s or self.image_type.currentData() == RENDER_BLENDER
+                            else RES_NATIVE)
+            self.resolution_mode.setCurrentIndex(
+                self.resolution_mode.findData(res_mode))
+            self.resolution_preset = s.get("resolution_preset") or None
+            self._showing_native = False
+            self.resolution_x.setValue(self._custom_size[0])
+            self.resolution_y.setValue(self._custom_size[1])
+            self._sync_resolution_widgets()
             self.duration.setValue(int(s.get("duration", 10)))
             self.crf.setValue(int(s.get("crf", 20)))
             codec = str(s.get("codec", "H.264"))
@@ -880,7 +1014,7 @@ class AnimacionPanel(QWidget):
                 idx = next((i for i, v in enumerate(FPS_PRESETS)
                             if abs(float(v) - fps) < 1e-9), FPS_PRESETS.index(24))
                 self.fps_combo.setCurrentIndex(idx)
-            self.fps_custom.setVisible(self.fps_combo.currentData() == "custom")
+            self._sync_fps_widgets()
             self.file_type.setCurrentIndex(max(0, min(2, int(s.get("file_type", 0)))))
             self.image_prefix.setText(str(s.get("image_prefix", "img_")))
             self.output_folder_name.setText(
@@ -933,8 +1067,10 @@ class AnimacionPanel(QWidget):
             "render_job": self._render_job(),
             "preview_mode": str(self.preview_mode.currentData() or "tiles"),
             "tile_size": int(self.tile_size.currentData() or 512),
-            "resolution_x": int(self.resolution_x.value()),
-            "resolution_y": int(self.resolution_y.value()),
+            "resolution_mode": self._resolution_mode(),
+            "resolution_preset": self.resolution_preset,
+            "resolution_x": int(self._custom_size[0]),
+            "resolution_y": int(self._custom_size[1]),
             "fps": float(self._fps_value()),
             "fps_custom_mode": self.fps_combo.currentData() == "custom",
             "fps_custom": float(self.fps_custom.value()),
@@ -1088,6 +1224,12 @@ class AnimacionPanel(QWidget):
         self._changed()
 
     def _renderer_picked(self, *_args):
+        # The resolution that goes with the renderer picked: the viewport
+        # renders at its own size; Blender at a custom one.
+        from .resolution import RES_CUSTOM, RES_NATIVE
+        want = (RES_CUSTOM if self.image_type.currentData() == RENDER_BLENDER
+                else RES_NATIVE)
+        self.resolution_mode.setCurrentIndex(self.resolution_mode.findData(want))
         if (self.image_type.currentData() == RENDER_BLENDER
                 and self._blender_is_available() is None):
             self._prompt_blender_install()
@@ -1756,8 +1898,152 @@ class AnimacionPanel(QWidget):
 
     # ---- Settings ------------------------------------------------------------
     def _fps_mode_changed(self, *_args):
-        self.fps_custom.setVisible(self.fps_combo.currentData() == "custom")
+        self._sync_fps_widgets()
         self._timeline_settings_changed()
+
+    # ---- Resolution ------------------------------------------------------------
+    def _resolution_mode(self) -> str:
+        from .resolution import RES_NATIVE
+        return self.resolution_mode.currentData() or RES_NATIVE
+
+    def native_size(self) -> tuple:
+        """The 3D viewport's size on screen in device pixels — what the
+        native renderer captures — rounded down to even numbers, which a
+        video needs."""
+        vp = getattr(self.app, "viewport", None)
+        if vp is None:
+            return self._custom_size
+        ratio = vp.devicePixelRatioF() if hasattr(vp, "devicePixelRatioF") else 1.0
+        w = max(16, int(vp.width() * ratio))
+        h = max(16, int(vp.height() * ratio))
+        return (w - w % 2, h - h % 2)
+
+    def render_size(self) -> tuple:
+        """The size the render uses: the viewport's own, or the custom one."""
+        from .resolution import RES_NATIVE
+        if self._resolution_mode() == RES_NATIVE:
+            return self.native_size()
+        return (int(self.resolution_x.value()), int(self.resolution_y.value()))
+
+    def resolution_locked(self) -> bool:
+        """Custom, with a locked preset applied."""
+        from .resolution import RES_CUSTOM, find_preset, load_presets
+        if self._resolution_mode() != RES_CUSTOM or not self.resolution_preset:
+            return False
+        p = find_preset(load_presets(), self.resolution_preset)
+        return bool(p and p["locked"])
+
+    def _set_fields(self, w: int, h: int) -> None:
+        for box, v in ((self.resolution_x, w), (self.resolution_y, h)):
+            if box.value() != v:
+                box.blockSignals(True)
+                box.setValue(int(v))
+                box.blockSignals(False)
+        self.resolution_x.update()
+        self.resolution_y.update()
+
+    def _sync_resolution_widgets(self) -> None:
+        """Native: the fields show the viewport's size, read-only, with no
+        padlocks and no Presets. Custom: the custom size, editable unless a
+        locked preset holds it — the padlocks say which."""
+        from .resolution import RES_NATIVE, lock_pixmap, lock_tip
+        native = self._resolution_mode() == RES_NATIVE
+        if native:
+            self._set_fields(*self.native_size())
+            self._showing_native = True
+        elif self._showing_native:
+            self._showing_native = False
+            self._set_fields(*self._custom_size)
+        locked = (not native) and self.resolution_locked()
+        for box in (self.resolution_x, self.resolution_y):
+            box.setReadOnly(native or locked)
+            box.setButtonSymbols(QAbstractSpinBox.NoButtons if native or locked
+                                 else QAbstractSpinBox.UpDownArrows)
+            box.setToolTip(tr("The size of the 3D viewport on screen, in "
+                              "pixels.") if native else lock_tip(
+                                  locked, self.resolution_preset))
+        color = self.palette().windowText().color()
+        ratio = self.devicePixelRatioF()
+        for lock in (self.lock_x, self.lock_y):
+            lock.setVisible(not native)
+            lock.setPixmap(lock_pixmap(locked, color, 14, ratio))
+            lock.setToolTip(lock_tip(locked, self.resolution_preset))
+            lock.setProperty("locked", locked)
+        self.presets_button.setVisible(not native)
+
+    def _resolution_mode_changed(self, *_args) -> None:
+        self._sync_resolution_widgets()
+        self._changed()
+
+    def _resolution_typed(self, *_args) -> None:
+        """A size typed in Custom: kept, and no longer the preset's."""
+        from .resolution import RES_CUSTOM, find_preset, load_presets
+        if self._loading or self._resolution_mode() != RES_CUSTOM:
+            return
+        self._custom_size = (int(self.resolution_x.value()),
+                             int(self.resolution_y.value()))
+        if self.resolution_preset:
+            p = find_preset(load_presets(), self.resolution_preset)
+            if p is None or (p["width"], p["height"]) != self._custom_size:
+                self.resolution_preset = None
+                self._sync_resolution_widgets()
+
+    def apply_resolution_preset(self, preset: dict) -> None:
+        """Put ``preset`` in Width and Height (Custom) — held there if it
+        is locked."""
+        from .resolution import RES_CUSTOM
+        self.resolution_mode.blockSignals(True)
+        self.resolution_mode.setCurrentIndex(
+            self.resolution_mode.findData(RES_CUSTOM))
+        self.resolution_mode.blockSignals(False)
+        self._showing_native = False
+        self.resolution_preset = preset["name"]
+        self._custom_size = (int(preset["width"]), int(preset["height"]))
+        self._set_fields(*self._custom_size)
+        self._sync_resolution_widgets()
+        self._update_timeline()
+        self._changed()
+
+    def open_resolution_presets(self) -> None:
+        """«Presets…»: the user's presets, to apply, keep, lock, rename or
+        delete."""
+        from .resolution import (ResolutionPresetsDialog, find_preset,
+                                 load_presets)
+        dlg = ResolutionPresetsDialog(self.resolution_x.value(),
+                                      self.resolution_y.value(),
+                                      self.resolution_preset, self)
+        dlg.exec()
+        if dlg.chosen is not None:
+            self.apply_resolution_preset(dlg.chosen)
+            return
+        # Closed: the preset in use may have been renamed, deleted, locked.
+        name = dlg.applied
+        self.resolution_preset = (name if name and find_preset(
+            load_presets(), name) is not None else None)
+        self._sync_resolution_widgets()
+        self._changed()
+
+    def eventFilter(self, watched, event):
+        if (event.type() == QEvent.Resize
+                and watched is getattr(self.app, "viewport", None)
+                and hasattr(self, "resolution_mode")):
+            from .resolution import RES_NATIVE
+            if self._resolution_mode() == RES_NATIVE:
+                self._set_fields(*self.native_size())
+        return super().eventFilter(watched, event)
+
+    def _sync_fps_widgets(self) -> None:
+        """With the Timeline: the frame rate as information, and where to
+        edit it. Without it: the tab's own combo (and Custom field)."""
+        timeline = self.timeline is not None
+        self.fps_combo.setVisible(not timeline)
+        self.fps_custom.setVisible(not timeline
+                                   and self.fps_combo.currentData() == "custom")
+        self.fps_info.setVisible(timeline)
+        self.fps_hint.setVisible(timeline)
+        if timeline:
+            fps = ("%.3f" % self._fps_value()).rstrip("0").rstrip(".")
+            self.fps_info.setText(tr("{fps} fps", fps=fps))
 
     def _fps_value(self) -> float:
         value = self.fps_combo.currentData()
@@ -1875,7 +2161,7 @@ class AnimacionPanel(QWidget):
                 self.status.setText(tr("Blender is not available."))
                 return
         self._save_now()
-        size = (self.resolution_x.value(), self.resolution_y.value())
+        size = self.render_size()
         fps = self._fps_value()
         renderer_text = self.image_type.currentText()
         if blender:

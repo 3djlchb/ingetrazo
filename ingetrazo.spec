@@ -62,6 +62,7 @@ datas = [
     # its assets included - ``plugins/*.py`` alone left it out of every
     # PyInstaller build.
     ('plugins/igz_animacion',      'plugins/igz_animacion'),
+    ('plugins/igz_timeline',       'plugins/igz_timeline'),
     # Example extensions: shipped but NOT loaded — Extensions ▸ Example
     # extensions copies one into the user's plugins folder on request.
     # Whole folder: an example extension can be a package (CAM, PR #132).
