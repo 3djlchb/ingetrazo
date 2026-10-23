@@ -10,7 +10,9 @@ the tab holds is saved in the .igz.
 
 The frames appear in the animation's own frame buffer (``framebuffer``),
 which also pauses and cancels the render; what the render does is written
-to the tab's Console. The timeline stays in the 3D viewport.
+to the tab's Console. The preview plays on the Timeline extension's clock,
+where the ticked scenes are the «Scenes» track; without it the tab works
+the same, with no preview timeline.
 """
 from __future__ import annotations
 
@@ -58,8 +60,6 @@ RENDER_VIEWPORT, RENDER_BLENDER = 0, 1
 #: Output kinds, by the index the document stores (``settings.file_type``).
 OUT_IMAGES, OUT_VIDEO, OUT_BOTH = 0, 1, 2
 FPS_PRESETS = (6, 8, 12, 23.98, 24, 25, 29.97, 30, 50, 59.94, 60, 120, 240)
-#: QSettings key of «Show timeline».
-SHOW_TIMELINE_KEY = "igz_animacion/show_timeline"
 #: QSettings prefix of the sections' open / folded state.
 _SECTION_KEY = "igz_animacion/open_"
 QUALITY_NAMES = ("Draft", "Medium", "High")
@@ -245,8 +245,9 @@ class AnimacionPanel(QWidget):
     def __init__(self, app):
         super().__init__()
         self.app = app
+        #: The Timeline extension's clock (``attach_timeline``), or None.
         self.timeline = None
-        self.timeline_dock = None
+        self._timing_echo = False
         self.dock = None
         self._animation_data = default_plugin_data()
         self._interpolate_section = True
@@ -436,9 +437,9 @@ class AnimacionPanel(QWidget):
         sec = _section(tr("Timeline"), "timeline")
         self.show_timeline = QCheckBox(tr("Show the timeline"))
         self.show_timeline.setToolTip(tr(
-            "Show the animation timeline in its own window."))
-        self.show_timeline.setChecked(
-            QSettings().value(SHOW_TIMELINE_KEY, False, bool))
+            "The Timeline extension is not loaded: the animation works, "
+            "without a preview timeline."))
+        self.show_timeline.setEnabled(False)       # until a Timeline comes
         self.show_timeline.toggled.connect(self.toggle_timeline)
         sec.body_layout.addWidget(self.show_timeline)
         layout.addWidget(sec)
@@ -582,7 +583,17 @@ class AnimacionPanel(QWidget):
         self.fps_custom.setValue(24.0)
         self.fps_custom.setSuffix(" fps")
         self.fps_custom.setVisible(False)
-        form.addRow(tr("Frame rate:"), _row(self.fps_combo, self.fps_custom))
+        # With the Timeline the frame rate is ITS: shown here, edited there
+        # (its «Edit FPS…»). The combo and field above are the tab's own,
+        # for a window without the Timeline — and what the document keeps.
+        self.fps_info = QLabel()
+        self.fps_info.setVisible(False)
+        form.addRow(tr("Frame rate:"), _row(self.fps_combo, self.fps_custom,
+                                            self.fps_info))
+        self.fps_hint = QLabel(tr("Edit FPS in the Timeline"))
+        self.fps_hint.setStyleSheet("color: gray; font-size: 11px;")
+        self.fps_hint.setVisible(False)
+        form.addRow("", self.fps_hint)
 
         self.duration = QSpinBox()
         self.duration.setRange(1, 36000)
@@ -764,44 +775,98 @@ class AnimacionPanel(QWidget):
         self._update_native_render_info()
 
     # ---- Timeline ------------------------------------------------------------
-    def eventFilter(self, watched, event):
-        if event.type() == QEvent.Resize and hasattr(self, "_fit_timeline_width"):
-            self._fit_timeline_width()
-        return super().eventFilter(watched, event)
-
     def set_dock(self, dock):
         self.dock = dock
 
-    def set_timeline(self, timeline, dock):
-        self.timeline = timeline
-        self.timeline_dock = dock
-        if getattr(self, "_timeline_signal_source", None) is not timeline:
-            timeline.frameChanged.connect(self.preview_frame)
-            self._timeline_signal_source = timeline
-        self.timeline_dock.setVisible(self.show_timeline.isChecked())
+    def attach_timeline(self, clock):
+        """The Timeline extension's clock (``app.use("timeline", ...)``):
+        the ticked scenes become its «Scenes» track, and the duration and
+        frame rate are the clock's — this tab's fields follow it and set
+        it, both ways. The document keeps them here, as before, so a file
+        opens the same with or without the Timeline."""
+        self.timeline = clock
+        clock.add_track("igz_animacion.scenes", "Scenes", self._timeline_keys,
+                        self.preview_frame, owner="igz_animacion")
+        clock.timingChanged.connect(self._timing_from_timeline)
+        clock.editorShownChanged.connect(self._timeline_shown)
+        self.show_timeline.setEnabled(True)
+        self.show_timeline.setToolTip(tr(
+            "Show the Timeline, where the ticked scenes are the «Scenes» "
+            "track."))
+        self._timeline_shown(clock.editor_shown())
         self._update_timeline()
 
     def toggle_timeline(self, visible):
-        QSettings().setValue(SHOW_TIMELINE_KEY, bool(visible))
-        if self.timeline_dock is not None:
-            self.timeline_dock.setVisible(bool(visible))
+        if self.timeline is not None \
+                and self.timeline.editor_shown() != bool(visible):
+            self.timeline.show_editor(bool(visible))
+            self._timeline_shown(self.timeline.editor_shown())
+
+    def _timeline_shown(self, shown):
+        if self.show_timeline.isChecked() != bool(shown):
+            self.show_timeline.blockSignals(True)
+            self.show_timeline.setChecked(bool(shown))
+            self.show_timeline.blockSignals(False)
+
+    def _timing_from_timeline(self, duration, fps):
+        """The Timeline's duration or frame rate changed there: these
+        fields follow (and the document stores them, as any edit here)."""
+        self._timing_echo = True
+        try:
+            d = max(1, int(round(duration)))
+            if self.duration.value() != d:
+                self.duration.setValue(d)
+            if abs(self._fps_value() - float(fps)) > 1e-6:
+                idx = next((i for i, v in enumerate(FPS_PRESETS)
+                            if abs(float(v) - float(fps)) < 1e-6), None)
+                if idx is not None:
+                    self.fps_combo.setCurrentIndex(idx)
+                else:
+                    self.fps_custom.setValue(float(fps))
+                    self.fps_combo.setCurrentIndex(self.fps_combo.count() - 1)
+        finally:
+            self._timing_echo = False
+        self._update_timeline()
 
     def _update_timeline(self):
         frames = max(1, int(round(self.duration.value() * self._fps_value())))
         self.total_frames_label.setText(tr("{n} frames", n=frames))
+        self._sync_fps_widgets()
         if self.timeline is not None:
-            self.timeline.set_keys(self.selected_views(), self.duration.value(),
-                                   self._fps_value())
+            if not self._timing_echo:
+                self.timeline.set_timing(self.duration.value(),
+                                         self._fps_value())
+            self.timeline.refresh()
 
-    def preview_frame(self, frame):
+    def _timeline_keys(self):
+        """The «Scenes» track: the ticked scenes spread over the clock,
+        the first on frame 1 and the last on the last frame."""
+        views = self.selected_views()
+        total = self.timeline.total_frames if self.timeline is not None else 1
+        count = len(views)
+        keys = []
+        for i, view in enumerate(views):
+            frame = 1 if i == 0 else (total if i == count - 1 else
+                                      int(round(1 + (total - 1) * i / (count - 1))))
+            keys.append((frame, getattr(view, "name", "")
+                         or tr("Scene {n}", n=i + 1)))
+        return keys
+
+    def preview_frame(self, frame, total=None):
+        """Put the camera (and section) as the animation has it at
+        ``frame`` — the «Scenes» track's ``apply``."""
         if self._frame_preview_busy:
             return
         views = self.selected_views()
-        if not views or self.timeline is None:
+        if not views:
             return
+        if total is None:
+            total = (self.timeline.total_frames if self.timeline is not None
+                     else max(1, int(round(self.duration.value()
+                                           * self._fps_value()))))
         self._frame_preview_busy = True
         try:
-            apply_frame(self.app.viewport, views, frame, self.timeline.total_frames)
+            apply_frame(self.app.viewport, views, frame, total)
         except Exception as exc:  # noqa: BLE001 — a preview never breaks the tab
             self.status.setText(tr("Preview: {error}", error=exc))
         finally:
@@ -880,7 +945,7 @@ class AnimacionPanel(QWidget):
                 idx = next((i for i, v in enumerate(FPS_PRESETS)
                             if abs(float(v) - fps) < 1e-9), FPS_PRESETS.index(24))
                 self.fps_combo.setCurrentIndex(idx)
-            self.fps_custom.setVisible(self.fps_combo.currentData() == "custom")
+            self._sync_fps_widgets()
             self.file_type.setCurrentIndex(max(0, min(2, int(s.get("file_type", 0)))))
             self.image_prefix.setText(str(s.get("image_prefix", "img_")))
             self.output_folder_name.setText(
@@ -1756,8 +1821,21 @@ class AnimacionPanel(QWidget):
 
     # ---- Settings ------------------------------------------------------------
     def _fps_mode_changed(self, *_args):
-        self.fps_custom.setVisible(self.fps_combo.currentData() == "custom")
+        self._sync_fps_widgets()
         self._timeline_settings_changed()
+
+    def _sync_fps_widgets(self) -> None:
+        """With the Timeline: the frame rate as information, and where to
+        edit it. Without it: the tab's own combo (and Custom field)."""
+        timeline = self.timeline is not None
+        self.fps_combo.setVisible(not timeline)
+        self.fps_custom.setVisible(not timeline
+                                   and self.fps_combo.currentData() == "custom")
+        self.fps_info.setVisible(timeline)
+        self.fps_hint.setVisible(timeline)
+        if timeline:
+            fps = ("%.3f" % self._fps_value()).rstrip("0").rstrip(".")
+            self.fps_info.setText(tr("{fps} fps", fps=fps))
 
     def _fps_value(self) -> float:
         value = self.fps_combo.currentData()

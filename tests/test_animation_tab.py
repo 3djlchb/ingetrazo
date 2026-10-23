@@ -372,8 +372,10 @@ def test_scrubbing_the_timeline_moves_the_camera_between_the_scenes():
         tl.seek((tl.total_frames + 1) // 2)
         mid = math.degrees(vp.camera.yaw)
         assert -60 < mid < 40, "in between, interpolated"
-        # the keyframes on the ruler are the ticked scenes
-        assert [k["name"] for k in tl.keys] == ["Inicio", "Final"]
+        # the keyframes on the Timeline's «Scenes» track are the ticked scenes
+        scenes = next(t for t in tl.tracks()
+                      if t.track_id == "igz_animacion.scenes")
+        assert [k.label for k in tl.keys_of(scenes)] == ["Inicio", "Final"]
     finally:
         _close(win)
 
