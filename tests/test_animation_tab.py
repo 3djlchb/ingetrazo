@@ -260,6 +260,8 @@ def test_the_settings_travel_in_the_igz(tmp_path):
         _two_scenes(vp)
         panel._poll()
         panel.duration.setValue(17)
+        panel.resolution_mode.setCurrentIndex(
+            panel.resolution_mode.findData("custom"))
         panel.resolution_y.setValue(720)
         panel._save_now()
         path = tmp_path / "anim.igz"
@@ -270,6 +272,7 @@ def test_the_settings_travel_in_the_igz(tmp_path):
         assert "igz_animacion" not in data, "stored directly, as v0.22.66 does"
         assert data["settings"]["duration"] == 17
         assert data["settings"]["resolution_y"] == 720
+        assert data["settings"]["resolution_mode"] == "custom"
     finally:
         _close(win)
 
@@ -1042,5 +1045,33 @@ def test_the_view_mode_and_tile_size_are_saved_and_shown_when_they_apply():
         panel._save_now()
         st = vp.scene.plugin_data["igz_animacion"]["settings"]
         assert st["preview_mode"] == "progressive" and st["tile_size"] == 128
+    finally:
+        _close(win)
+
+
+def test_the_consoles_copy_and_clear_never_overlap_in_a_narrow_tray():
+    """Squeezed with the rest of the tab (fit_to_tray) the two buttons ran
+    over each other; they keep their width and wrap instead."""
+    from PySide6.QtWidgets import QApplication, QSizePolicy
+    win, vp, panel = _window()
+    try:
+        copy, clear = panel.console_buttons
+        for b in (copy, clear):
+            assert b.sizePolicy().horizontalPolicy() != QSizePolicy.Ignored,                 "fit_to_tray left it alone"
+        row = copy.parentWidget()
+        assert row is clear.parentWidget()
+        row.setParent(None)                          # the row on its own
+        for width in (520, 200, 120):
+            row.resize(width, row.heightForWidth(width))
+            row.show()
+            for _ in range(3):
+                QApplication.processEvents()
+            a, b = copy.geometry(), clear.geometry()
+            assert not a.intersects(b), f"overlap at {width}px"
+            assert copy.width() >= copy.sizeHint().width()
+            assert clear.width() >= clear.sizeHint().width()
+        assert clear.geometry().top() > copy.geometry().top(),             "too narrow for both: Clear wraps under Copy"
+        row.hide()
+        row.setParent(panel)
     finally:
         _close(win)

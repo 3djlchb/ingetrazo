@@ -196,6 +196,11 @@ def breakable(text: str) -> str:
     return str(text).replace("\\", "\\" + _ZWSP).replace("/", "/" + _ZWSP)
 
 
+#: A widget property: ``fit_to_tray`` leaves its width alone — for buttons in
+#: a row that wraps to the next line instead of squeezing them.
+KEEP_WIDTH = "igz_keep_width"
+
+
 def fit_to_tray(root: QWidget) -> None:
     """Let every control under ``root`` shrink with the side tray, as the
     Render tab does: the widest of them set the tab's minimum width, and
@@ -207,6 +212,8 @@ def fit_to_tray(root: QWidget) -> None:
     for w in root.findChildren(QWidget):
         if isinstance(w, kinds):
             if w.maximumWidth() < 100:          # a fixed little «…» button
+                continue
+            if w.property(KEEP_WIDTH):          # it wraps instead (a flow row)
                 continue
             narrow(w)
         elif isinstance(w, QToolButton) and isinstance(w.parent(), FoldSection):
@@ -317,6 +324,10 @@ class AnimacionPanel(QWidget):
         # stand-alone plugin reloaded its whole state on every edit, which
         # froze big models and reset whatever was being typed in the tab).
         self.app.on_document_changed(self._poll)
+        vp = getattr(self.app, "viewport", None)
+        if vp is not None:
+            vp.installEventFilter(self)       # Native follows its size
+        self._sync_resolution_widgets()
 
     # ---- Building the tab ----------------------------------------------------
     def _build_renderer(self, layout):
@@ -558,6 +569,15 @@ class AnimacionPanel(QWidget):
         sec = _section(tr("Settings"), "settings")
         form = QFormLayout()
         form.setContentsMargins(0, 0, 0, 0)
+        # «Resolution:» — the 3D viewport's own size (Width and Height then
+        # only show it) or Custom: the fields, and «Presets…» to pick, keep
+        # and lock sizes. A padlock in front of each field tells whether
+        # the size in use is locked by its preset.
+        from .resolution import RES_CUSTOM, RES_NATIVE
+        self.resolution_mode = QComboBox()
+        self.resolution_mode.addItem(tr("3D viewport (native)"), RES_NATIVE)
+        self.resolution_mode.addItem(tr("Custom"), RES_CUSTOM)
+        form.addRow(tr("Resolution:"), self.resolution_mode)
         self.resolution_x = QSpinBox()
         self.resolution_x.setRange(16, 16384)
         self.resolution_x.setValue(1920)
@@ -566,9 +586,35 @@ class AnimacionPanel(QWidget):
         self.resolution_y.setRange(16, 16384)
         self.resolution_y.setValue(1080)
         self.resolution_y.setSuffix(" px")
-        # One per line: side by side they did not fit the narrow tray.
-        form.addRow(tr("Width:"), self.resolution_x)
-        form.addRow(tr("Height:"), self.resolution_y)
+        #: The preset applied (its name), or None; the custom size kept
+        #: while the native one shows in the fields.
+        self.resolution_preset = None
+        self._custom_size = (1920, 1080)
+        self._showing_native = False
+        self.lock_x, self.lock_y = QLabel(), QLabel()
+        self.presets_button = QPushButton(tr("Presets…"))
+        self.presets_button.setToolTip(tr(
+            "Pick, keep and lock resolutions of your own."))
+        self.presets_button.clicked.connect(self.open_resolution_presets)
+        from views.tray import FlowLayout
+        res_row = QWidget()
+        flow = FlowLayout(res_row, spacing=8)
+        flow.setContentsMargins(0, 0, 0, 0)
+        for lock, text, box in ((self.lock_x, tr("Width:"), self.resolution_x),
+                                (self.lock_y, tr("Height:"), self.resolution_y)):
+            pair = QWidget()
+            h = QHBoxLayout(pair)
+            h.setContentsMargins(0, 0, 0, 0)
+            h.setSpacing(3)
+            h.addWidget(lock)
+            h.addWidget(QLabel(text))
+            box.setMinimumWidth(92)
+            box.setProperty(KEEP_WIDTH, True)
+            h.addWidget(box)
+            flow.addWidget(pair)
+        self.presets_button.setProperty(KEEP_WIDTH, True)
+        flow.addWidget(self.presets_button)
+        form.addRow(res_row)
 
         self.fps_combo = QComboBox()
         for value in FPS_PRESETS:
@@ -616,6 +662,10 @@ class AnimacionPanel(QWidget):
 
         for w in (self.resolution_x, self.resolution_y, self.duration):
             w.valueChanged.connect(self._timeline_settings_changed)
+        for w in (self.resolution_x, self.resolution_y):
+            w.valueChanged.connect(self._resolution_typed)
+        self.resolution_mode.currentIndexChanged.connect(
+            self._resolution_mode_changed)
         self.fps_combo.currentIndexChanged.connect(self._fps_mode_changed)
         self.fps_custom.valueChanged.connect(self._timeline_settings_changed)
         self.crf.valueChanged.connect(self._changed)
@@ -706,17 +756,22 @@ class AnimacionPanel(QWidget):
     def _build_console(self, layout):
         sec = _section(tr("Console"), "console", default_open=False)
         self.console_section = sec
-        bar = QHBoxLayout()
+        # A flow row: in a narrow tray «Clear» goes under «Copy». Squeezed
+        # to the tray's width (fit_to_tray) the two ran over each other.
+        from views.tray import FlowLayout
+        holder = QWidget()
+        bar = FlowLayout(holder, spacing=4)
         bar.setContentsMargins(0, 0, 0, 0)
         copy = QPushButton(tr("Copy"))
         copy.setToolTip(tr("Copy the selected text, or all of it."))
         copy.clicked.connect(self._console_copy)
         clear = QPushButton(tr("Clear"))
         clear.clicked.connect(lambda: self.console_output.clear())
-        bar.addWidget(copy)
-        bar.addWidget(clear)
-        bar.addStretch(1)
-        sec.body_layout.addLayout(bar)
+        for button in (copy, clear):
+            button.setProperty(KEEP_WIDTH, True)
+            bar.addWidget(button)
+        self.console_buttons = (copy, clear)
+        sec.body_layout.addWidget(holder)
         self.console_output = QPlainTextEdit()
         self.console_output.setReadOnly(True)
         self.console_output.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
@@ -931,8 +986,22 @@ class AnimacionPanel(QWidget):
                 self.tile_size.setCurrentIndex(tile)
             job = str(s.get("render_job", JOB_ANIMATION))
             self.job_buttons[job if job in JOBS else JOB_ANIMATION].setChecked(True)
-            self.resolution_x.setValue(int(s.get("resolution_x", 1920)))
-            self.resolution_y.setValue(int(s.get("resolution_y", 1080)))
+            self._custom_size = (int(s.get("resolution_x", 1920)),
+                                 int(s.get("resolution_y", 1080)))
+            # A document saved before «Resolution:» rendered its custom
+            # size: it stays Custom. A new one starts as the renderer says.
+            from .resolution import RES_CUSTOM, RES_NATIVE
+            res_mode = s.get("resolution_mode")
+            if res_mode not in (RES_NATIVE, RES_CUSTOM):
+                res_mode = (RES_CUSTOM if s or self.image_type.currentData() == RENDER_BLENDER
+                            else RES_NATIVE)
+            self.resolution_mode.setCurrentIndex(
+                self.resolution_mode.findData(res_mode))
+            self.resolution_preset = s.get("resolution_preset") or None
+            self._showing_native = False
+            self.resolution_x.setValue(self._custom_size[0])
+            self.resolution_y.setValue(self._custom_size[1])
+            self._sync_resolution_widgets()
             self.duration.setValue(int(s.get("duration", 10)))
             self.crf.setValue(int(s.get("crf", 20)))
             codec = str(s.get("codec", "H.264"))
@@ -998,8 +1067,10 @@ class AnimacionPanel(QWidget):
             "render_job": self._render_job(),
             "preview_mode": str(self.preview_mode.currentData() or "tiles"),
             "tile_size": int(self.tile_size.currentData() or 512),
-            "resolution_x": int(self.resolution_x.value()),
-            "resolution_y": int(self.resolution_y.value()),
+            "resolution_mode": self._resolution_mode(),
+            "resolution_preset": self.resolution_preset,
+            "resolution_x": int(self._custom_size[0]),
+            "resolution_y": int(self._custom_size[1]),
             "fps": float(self._fps_value()),
             "fps_custom_mode": self.fps_combo.currentData() == "custom",
             "fps_custom": float(self.fps_custom.value()),
@@ -1153,6 +1224,12 @@ class AnimacionPanel(QWidget):
         self._changed()
 
     def _renderer_picked(self, *_args):
+        # The resolution that goes with the renderer picked: the viewport
+        # renders at its own size; Blender at a custom one.
+        from .resolution import RES_CUSTOM, RES_NATIVE
+        want = (RES_CUSTOM if self.image_type.currentData() == RENDER_BLENDER
+                else RES_NATIVE)
+        self.resolution_mode.setCurrentIndex(self.resolution_mode.findData(want))
         if (self.image_type.currentData() == RENDER_BLENDER
                 and self._blender_is_available() is None):
             self._prompt_blender_install()
@@ -1824,6 +1901,137 @@ class AnimacionPanel(QWidget):
         self._sync_fps_widgets()
         self._timeline_settings_changed()
 
+    # ---- Resolution ------------------------------------------------------------
+    def _resolution_mode(self) -> str:
+        from .resolution import RES_NATIVE
+        return self.resolution_mode.currentData() or RES_NATIVE
+
+    def native_size(self) -> tuple:
+        """The 3D viewport's size on screen in device pixels — what the
+        native renderer captures — rounded down to even numbers, which a
+        video needs."""
+        vp = getattr(self.app, "viewport", None)
+        if vp is None:
+            return self._custom_size
+        ratio = vp.devicePixelRatioF() if hasattr(vp, "devicePixelRatioF") else 1.0
+        w = max(16, int(vp.width() * ratio))
+        h = max(16, int(vp.height() * ratio))
+        return (w - w % 2, h - h % 2)
+
+    def render_size(self) -> tuple:
+        """The size the render uses: the viewport's own, or the custom one."""
+        from .resolution import RES_NATIVE
+        if self._resolution_mode() == RES_NATIVE:
+            return self.native_size()
+        return (int(self.resolution_x.value()), int(self.resolution_y.value()))
+
+    def resolution_locked(self) -> bool:
+        """Custom, with a locked preset applied."""
+        from .resolution import RES_CUSTOM, find_preset, load_presets
+        if self._resolution_mode() != RES_CUSTOM or not self.resolution_preset:
+            return False
+        p = find_preset(load_presets(), self.resolution_preset)
+        return bool(p and p["locked"])
+
+    def _set_fields(self, w: int, h: int) -> None:
+        for box, v in ((self.resolution_x, w), (self.resolution_y, h)):
+            if box.value() != v:
+                box.blockSignals(True)
+                box.setValue(int(v))
+                box.blockSignals(False)
+        self.resolution_x.update()
+        self.resolution_y.update()
+
+    def _sync_resolution_widgets(self) -> None:
+        """Native: the fields show the viewport's size, read-only, with no
+        padlocks and no Presets. Custom: the custom size, editable unless a
+        locked preset holds it — the padlocks say which."""
+        from .resolution import RES_NATIVE, lock_pixmap, lock_tip
+        native = self._resolution_mode() == RES_NATIVE
+        if native:
+            self._set_fields(*self.native_size())
+            self._showing_native = True
+        elif self._showing_native:
+            self._showing_native = False
+            self._set_fields(*self._custom_size)
+        locked = (not native) and self.resolution_locked()
+        for box in (self.resolution_x, self.resolution_y):
+            box.setReadOnly(native or locked)
+            box.setButtonSymbols(QAbstractSpinBox.NoButtons if native or locked
+                                 else QAbstractSpinBox.UpDownArrows)
+            box.setToolTip(tr("The size of the 3D viewport on screen, in "
+                              "pixels.") if native else lock_tip(
+                                  locked, self.resolution_preset))
+        color = self.palette().windowText().color()
+        ratio = self.devicePixelRatioF()
+        for lock in (self.lock_x, self.lock_y):
+            lock.setVisible(not native)
+            lock.setPixmap(lock_pixmap(locked, color, 14, ratio))
+            lock.setToolTip(lock_tip(locked, self.resolution_preset))
+            lock.setProperty("locked", locked)
+        self.presets_button.setVisible(not native)
+
+    def _resolution_mode_changed(self, *_args) -> None:
+        self._sync_resolution_widgets()
+        self._changed()
+
+    def _resolution_typed(self, *_args) -> None:
+        """A size typed in Custom: kept, and no longer the preset's."""
+        from .resolution import RES_CUSTOM, find_preset, load_presets
+        if self._loading or self._resolution_mode() != RES_CUSTOM:
+            return
+        self._custom_size = (int(self.resolution_x.value()),
+                             int(self.resolution_y.value()))
+        if self.resolution_preset:
+            p = find_preset(load_presets(), self.resolution_preset)
+            if p is None or (p["width"], p["height"]) != self._custom_size:
+                self.resolution_preset = None
+                self._sync_resolution_widgets()
+
+    def apply_resolution_preset(self, preset: dict) -> None:
+        """Put ``preset`` in Width and Height (Custom) — held there if it
+        is locked."""
+        from .resolution import RES_CUSTOM
+        self.resolution_mode.blockSignals(True)
+        self.resolution_mode.setCurrentIndex(
+            self.resolution_mode.findData(RES_CUSTOM))
+        self.resolution_mode.blockSignals(False)
+        self._showing_native = False
+        self.resolution_preset = preset["name"]
+        self._custom_size = (int(preset["width"]), int(preset["height"]))
+        self._set_fields(*self._custom_size)
+        self._sync_resolution_widgets()
+        self._update_timeline()
+        self._changed()
+
+    def open_resolution_presets(self) -> None:
+        """«Presets…»: the user's presets, to apply, keep, lock, rename or
+        delete."""
+        from .resolution import (ResolutionPresetsDialog, find_preset,
+                                 load_presets)
+        dlg = ResolutionPresetsDialog(self.resolution_x.value(),
+                                      self.resolution_y.value(),
+                                      self.resolution_preset, self)
+        dlg.exec()
+        if dlg.chosen is not None:
+            self.apply_resolution_preset(dlg.chosen)
+            return
+        # Closed: the preset in use may have been renamed, deleted, locked.
+        name = dlg.applied
+        self.resolution_preset = (name if name and find_preset(
+            load_presets(), name) is not None else None)
+        self._sync_resolution_widgets()
+        self._changed()
+
+    def eventFilter(self, watched, event):
+        if (event.type() == QEvent.Resize
+                and watched is getattr(self.app, "viewport", None)
+                and hasattr(self, "resolution_mode")):
+            from .resolution import RES_NATIVE
+            if self._resolution_mode() == RES_NATIVE:
+                self._set_fields(*self.native_size())
+        return super().eventFilter(watched, event)
+
     def _sync_fps_widgets(self) -> None:
         """With the Timeline: the frame rate as information, and where to
         edit it. Without it: the tab's own combo (and Custom field)."""
@@ -1953,7 +2161,7 @@ class AnimacionPanel(QWidget):
                 self.status.setText(tr("Blender is not available."))
                 return
         self._save_now()
-        size = (self.resolution_x.value(), self.resolution_y.value())
+        size = self.render_size()
         fps = self._fps_value()
         renderer_text = self.image_type.currentText()
         if blender:
