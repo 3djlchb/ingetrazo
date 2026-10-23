@@ -5931,6 +5931,7 @@ class ComposerWindow(QMainWindow):
                     frame.uid = uuid.uuid4().hex
                 item.anchor_uid = frame.uid
                 item.a_world = list(hit_a[2])
+                self._follow_anchor(item, "a_world")
         elif mode == "nivel":
             style = dict(getattr(self, "_last_nivel_style", None) or {})
             # Born in the document's units. A remembered look may carry a
@@ -5954,6 +5955,7 @@ class ComposerWindow(QMainWindow):
                     frame.uid = uuid.uuid4().hex
                 item.anchor_uid = frame.uid
                 item.a_world = [float(v) for v in hit_a[2]]
+                self._follow_anchor(item, "a_world")
                 item.x_mm, item.y_mm = float(hit_a[0]), float(hit_a[1])
                 # a plan (looking down) wants the plan symbol
                 if frame.view_key == "std:top":
@@ -6068,6 +6070,9 @@ class ComposerWindow(QMainWindow):
             item.a_world = list(a_world)
             item.b_world = list(b_world)
             item.scale_n = frame.scale_n
+            # Take the hold now, while both points sit on their vertices.
+            self._follow_anchor(item, "a_world")
+            self._follow_anchor(item, "b_world")
         return item
 
     def place_chain_cota(self, a, b, sep_mm: float, anchors=None,
@@ -12129,6 +12134,44 @@ class ComposerWindow(QMainWindow):
 
         return self._with_frame_camera(frame, run)
 
+    def _follow_anchor(self, item, attr: str) -> bool:
+        """Carry ``item.<attr>`` (a world point) along with the model vertex
+        it was placed on, however far that vertex moved — the re-snap below
+        only reaches 2.5 paper mm (#854, @cescmari: a face pushed further
+        left the cota behind). The hold is the model dimensions' own
+        :class:`VertexAnchor`, taken while the point still sits on the
+        vertex and kept for the session; vertex identity survives move,
+        scale and undo. True when the hold answered (moved or not), so the
+        nearest-point re-snap is not needed; False leaves it to that."""
+        from PySide6.QtGui import QVector3D
+        from core.dimension import resolve_vertex_anchor
+        try:
+            scene = self._scene()
+        except Exception:  # noqa: BLE001 — no model behind the composer
+            return False
+        holds = self.__dict__.setdefault("_anchor_holds", {})
+        cur = getattr(item, attr, None)
+        if not cur:
+            return False
+        key = (id(item), attr)
+        held = holds.get(key)
+        if held is None or held[0] is not item or held[1] != list(cur):
+            hold = resolve_vertex_anchor(scene, QVector3D(*cur))
+            holds[key] = (item, list(cur), hold)
+            return hold is not None
+        hold = held[2]
+        if hold is None:
+            return False
+        p = hold.position(scene)
+        if p is None:                     # erased or welded away: let go
+            holds[key] = (item, list(cur), None)
+            return False
+        now = [float(p.x()), float(p.y()), float(p.z())]
+        if now != list(cur):
+            setattr(item, attr, now)
+            holds[key] = (item, now, hold)
+        return True
+
     def _reproject_anchored_cotas(self) -> None:
         """Anchored cotas follow the model: re-attach each 3D anchor to the
         nearest CURRENT snap point within a small paper tolerance (the
@@ -12138,6 +12181,8 @@ class ComposerWindow(QMainWindow):
         sync, like the render caches — never an undo step."""
         import numpy as np
         frames = {f.uid: f for f in self.comp.frames if f.uid}
+        # The fake reprojector of the tests has no model to follow.
+        follow = getattr(self, "_follow_anchor", None) or (lambda *_: False)
         for ct in self.comp.cotas:
             if not ct.anchored:
                 continue
@@ -12154,6 +12199,8 @@ class ComposerWindow(QMainWindow):
                     frame, [ct.a_world, ct.b_world])
                 for attr, (px, py) in zip(("a_world", "b_world"),
                                           old_pages):
+                    if follow(ct, attr):
+                        continue
                     # An anchor whose point projects OUTSIDE the frame is
                     # clipped from the snap set, not moved — re-snapping it
                     # would capture whatever visible point is nearest.
@@ -12190,6 +12237,8 @@ class ComposerWindow(QMainWindow):
                 inside = (frame.x_mm - 0.5 <= px <= frame.x_mm + frame.w_mm + 0.5
                           and frame.y_mm - 0.5 <= py
                           <= frame.y_mm + frame.h_mm + 0.5)
+                if follow(et, "a_world"):
+                    inside = False
                 if inside and len(wpts):
                     w = np.asarray(et.a_world, dtype=np.float64)
                     d2 = ((wpts - w) ** 2).sum(axis=1)
@@ -12226,6 +12275,8 @@ class ComposerWindow(QMainWindow):
                 inside = (frame.x_mm - 0.5 <= px <= frame.x_mm + frame.w_mm + 0.5
                           and frame.y_mm - 0.5 <= py
                           <= frame.y_mm + frame.h_mm + 0.5)
+                if follow(nv, "a_world"):
+                    inside = False
                 if inside and len(wpts):
                     w = np.asarray(nv.a_world, dtype=np.float64)
                     d2 = ((wpts - w) ** 2).sum(axis=1)

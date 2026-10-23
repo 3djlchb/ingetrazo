@@ -1710,7 +1710,14 @@ class PushPullTool(Tool):
         if edge is not None and project is not None and edge not in self._stage_new:
             a, b = QVector3D(edge.a), QVector3D(edge.b)
             ab = b - a
-            if (_key(a) not in exclude or _key(b) not in exclude) and ab.length() > 1e-9:
+            # An edge along the push axis says nothing about how far to push
+            # (the guide-line rule): its nearest point clamps to an end, and
+            # a box's own vertical edge snapped an inward push back to the
+            # top (#839).
+            along = (ab.length() > 1e-9 and abs(QVector3D.dotProduct(
+                ab.normalized(), self._normal)) > 0.999)
+            if (_key(a) not in exclude or _key(b) not in exclude) \
+                    and ab.length() > 1e-9 and not along:
                 on = project(a, ab, sx, sy)
                 t = QVector3D.dotProduct(on - a, ab) / QVector3D.dotProduct(ab, ab)
                 on = a + ab * max(0.0, min(1.0, t))
@@ -1729,7 +1736,8 @@ class PushPullTool(Tool):
         pick = getattr(vp, "pick_face_placement", None) or vp.pick_face_any
         face, _grp = pick(sx, sy)
         if (face is not None and face is not self.base_face
-                and face not in self._stage_new):
+                and face not in self._stage_new
+                and not (_grp is None and self._borders_base(face, exclude))):
             origin, direction = vp._pixel_to_ray(sx, sy)
             if origin is not None and direction is not None:
                 # In world space — a placed component's face lives in its
@@ -1751,6 +1759,22 @@ class PushPullTool(Tool):
         self._inference_point = None
         self._inference_kind = None
         return None
+
+    @staticmethod
+    def _borders_base(face, base_keys) -> bool:
+        """Whether *face* shares an edge with the face being pushed: its
+        walls stretch or shrink with the push, so they are part of the
+        operation, not a level to push to (#839, @hamzah1985: pushing a
+        box's top inward, the cursor crossing the front wall snapped the
+        cap back up to where the wall was). Other faces, however far,
+        still engage — the classic "push until level with that face"."""
+        for lp in (face.loop, *face.hole_loops):
+            n = len(lp)
+            for i in range(n):
+                if (_key(lp[i].position) in base_keys
+                        and _key(lp[(i + 1) % n].position) in base_keys):
+                    return True
+        return False
 
     def _infer_guide_line(self, vp, guides, sx, sy, thr):
         """The guide LINE under the cursor, as (point on it, push distance):

@@ -4512,16 +4512,29 @@ class BimPanel(QWidget):
             self.active_check.blockSignals(True)
             self.active_check.setChecked(False)
             self.active_check.blockSignals(False)
-        self._objects = collect_objects(self._scene())
+        # The takeoff reads geometry and tags, never the selection: a
+        # view-only change (a click, a box selection) keeps the last one.
+        # Re-measuring 238 rebar bars on every selection took 25 s (#857).
+        scene = self._scene()
+        key = (id(scene), scene.content_version)
+        if key == getattr(self, "_takeoff_key", None):
+            return
+        self._takeoff_key = key
+        # A memo per panel: an edit re-measures only the objects it touched.
+        memo = self.__dict__.setdefault("_takeoff_memo", {})
+        self._objects = collect_objects(scene, memo)
         self.tree.clear()
         for obj in self._objects:
-            faces = obj.get("faces")
-            if faces is None:
-                faces = list(obj["group"].mesh.faces)
-            # The takeoff column shows the class's budget measure (wall face
-            # m², column m³, pile m, door und) — the number the IFC/CSV
-            # export carries to IngePresupuestos, not the shell area.
-            _, _, (metrado, unit) = class_quantities(obj["class"], faces)
+            if "metrado" not in obj:
+                faces = obj.get("faces")
+                if faces is None:
+                    faces = list(obj["group"].mesh.faces)
+                # The takeoff column shows the class's budget measure (wall
+                # face m², column m³, pile m, door und) — the number the
+                # IFC/CSV export carries to IngePresupuestos, not the shell
+                # area. Kept on the object, so a memoised one reuses it.
+                obj["metrado"] = class_quantities(obj["class"], faces)[2]
+            metrado, unit = obj["metrado"]
             pretty = {"m2": "m²", "m3": "m³"}.get(unit, unit)
             if metrado is None:
                 met = "—"

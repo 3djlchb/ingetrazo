@@ -3003,17 +3003,28 @@ class MainWindow(QMainWindow):
         _shortcuts.apply_user_shortcuts(self)
 
         if self._defer_extensions and set(self.findChildren(QToolBar)) - bars_before:
-            st = QSettings()
-            state = st.value("ui/window_state")
-            if state:
-                self.restoreState(state)
-                self._show_default_trays(st)
-                self._place_new_toolbars(st)
-                self._pack_toolbars()
-            else:
+            if not self.restore_late_toolbars():
                 self._wrap_toolbar_rows()
         from PySide6.QtCore import QTimer
         QTimer.singleShot(0, self, self._fit_docks_to_screen)
+
+    def restore_late_toolbars(self) -> bool:
+        """Put toolbars that arrived after the window was laid out where the
+        saved layout had them: the saved state again, the trays that start
+        shown, new bars placed, then every bar re-seated to its own length
+        (a raw restoreState brings back the stored lengths and the gaps
+        they leave). False, and nothing touched, without a saved layout.
+        The extensions' setup takes this path, and so does an extension
+        whose worker adds its bars later (ExtensionApp.restore_toolbar_layout)."""
+        st = QSettings()
+        state = st.value("ui/window_state")
+        if not state:
+            return False
+        restored = bool(self.restoreState(state))
+        self._show_default_trays(st)
+        self._place_new_toolbars(st)
+        self._pack_toolbars()
+        return restored
 
     def _fit_docks_to_screen(self) -> None:
         """Give the tallest side panels a scroll bar while the window
