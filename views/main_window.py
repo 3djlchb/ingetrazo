@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt, QSettings, QEvent, QCoreApplication, QTimer
+from PySide6.QtCore import Qt, QSettings, QEvent, QCoreApplication, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QVector3D
 from PySide6.QtWidgets import (
     QApplication,
@@ -231,6 +231,10 @@ class _DockDropZone(QWidget):
 
 class MainWindow(QMainWindow):
     """Top-level IngeTrazo window."""
+
+    #: Window ▸ Layout changed: ``"classic"`` or ``"areas"`` — for what an
+    #: extension shows differently in each (the Timeline's bottom panel).
+    layoutModeChanged = Signal(str)
 
     def __init__(self, defer_extensions: bool = False) -> None:
         super().__init__()
@@ -2379,6 +2383,7 @@ class MainWindow(QMainWindow):
                 trays, tray_widths, Qt.Horizontal))
         self._place_sidebar_handle()
         QTimer.singleShot(0, self._place_sidebar_handle)
+        self.layoutModeChanged.emit(mode)
 
     def _build_workspace_ui(self) -> None:
         """Window ▸ Workspace (after Layout) and the list or tabs on the
