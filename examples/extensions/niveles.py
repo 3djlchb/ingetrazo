@@ -287,6 +287,7 @@ def setup(app) -> None:
     panel = LevelsPanel(app)
     app.add_panel(_t("Levels"), panel)
     app.on_document_changed(panel.refresh)
-    app.add_overlay(lambda vp, painter: draw_guides(app, vp, painter))
+    app.add_overlay(lambda vp, painter: draw_guides(app, vp, painter),
+                    name="levels", title="Level lines")
     app.add_snap_provider(
         lambda vp, snap, px, py: snap_to_levels(app, vp, snap, px, py))

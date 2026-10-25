@@ -18,6 +18,9 @@ and the Blender side in ``resources/blender/render_scene.py``.
 """
 from __future__ import annotations
 
+#: What Preferences ▸ Interface ▸ Overlays lists its overlay under.
+PLUGIN_NAME = "Render with Blender"
+
 import json
 import math
 import time
@@ -1386,7 +1389,8 @@ def setup(app) -> None:
                             "Render the model in Blender, from the Render "
                             "tab of the side tray."))
     app.on_document_changed(panel.refresh_lights)
-    app.add_overlay(lambda vp, painter: draw_lights(app, panel, vp, painter))
+    app.add_overlay(lambda vp, painter: draw_lights(app, panel, vp, painter),
+                    name="lights", title="Render lights")
     # A bulb is clicked with the Select tool and Supr deletes it (#205).
     app.add_pickable(panel.pick_light, on_select=panel.on_light_picked,
                      delete=panel.delete_light_at)

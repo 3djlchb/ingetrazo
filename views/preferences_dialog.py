@@ -29,6 +29,8 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QDialogButtonBox,
     QFormLayout,
+    QFrame,
+    QGroupBox,
     QHBoxLayout,
     QLineEdit,
     QListWidget,
@@ -252,7 +254,11 @@ class PreferencesDialog(QDialog):
         tabs.addTab(general, tr("General"))
 
         # ---- Interface: category list and the selected page ----------------
-        from core import overlay_settings
+        # Overlays come in two groups, each with a switch of its own: the
+        # viewport's NATIVE ones (IngeTrazo's own) and the COMMUNITY ones —
+        # this fork's and every extension's, listed under their extension
+        # (core.overlay_settings). A master switch above hides them all.
+        from core import overlay_settings as ovs
         interface = QWidget()
         interface_layout = QHBoxLayout(interface)
         categories = QListWidget()
@@ -263,37 +269,89 @@ class PreferencesDialog(QDialog):
         interface_layout.addWidget(pages, 1)
         overlay_page = QWidget()
         overlay_layout = QVBoxLayout(overlay_page)
-        enabled, items = overlay_settings.load(st)
+        state = ovs.load(st)
         self._overlays_enabled = QCheckBox(tr("Enable overlays in the 3D Viewport"))
-        self._overlays_enabled.setChecked(enabled)
+        self._overlays_enabled.setChecked(state.enabled)
         overlay_layout.addWidget(self._overlays_enabled)
-        expand = QToolButton()
-        expand.setText(tr("Individual overlays"))
-        expand.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        expand.setCheckable(True)
-        expand.setChecked(False)
-        expand.setArrowType(Qt.RightArrow)
-        overlay_layout.addWidget(expand)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        body = QWidget()
-        body_layout = QVBoxLayout(body)
+        scroll.setFrameShape(QFrame.NoFrame)
+        groups_body = QWidget()
+        groups_layout = QVBoxLayout(groups_body)
+        groups_layout.setContentsMargins(0, 0, 0, 0)
         self._overlay_checks = {}
-        for key, label, _default in overlay_settings.OVERLAYS:
+        self._ext_overlay_checks = {}
+
+        def group(title, key, tip):
+            box = QGroupBox(tr(title))
+            box.setCheckable(True)
+            box.setChecked(state.groups.get(key, True))
+            box.setToolTip(tr(tip))
+            lay = QVBoxLayout(box)
+            fold = QToolButton()
+            fold.setText(tr("Individual overlays"))
+            fold.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+            fold.setCheckable(True)
+            fold.setArrowType(Qt.RightArrow)
+            fold.setAutoRaise(True)
+            lay.addWidget(fold)
+            body = QWidget()
+            body_lay = QVBoxLayout(body)
+            body_lay.setContentsMargins(18, 0, 0, 0)
+            body.setVisible(False)
+            fold.toggled.connect(body.setVisible)
+            fold.toggled.connect(lambda on, f=fold: f.setArrowType(
+                Qt.DownArrow if on else Qt.RightArrow))
+            lay.addWidget(body)
+            groups_layout.addWidget(box)
+            return box, body_lay, fold
+
+        def heading(text):
+            label = QLabel(text)
+            font = label.font()
+            font.setBold(True)
+            label.setFont(font)
+            return label
+
+        self._group_native, native_lay, self._fold_native = group(
+            "Native overlays", ovs.NATIVE,
+            "What the 3D Viewport itself draws over the model.")
+        for key, label, _default in ovs.NATIVE_OVERLAYS:
             check = QCheckBox(tr(label))
-            check.setChecked(items[key])
-            body_layout.addWidget(check)
+            check.setChecked(state.items[key])
+            native_lay.addWidget(check)
             self._overlay_checks[key] = check
-        body_layout.addStretch()
-        scroll.setWidget(body)
-        scroll.setVisible(False)
+
+        self._group_community, comm_lay, self._fold_community = group(
+            "Community and extension overlays", ovs.COMMUNITY,
+            "Overlays this fork and the extensions add, under their origin.")
+        comm_lay.addWidget(heading(tr("IngeTrazo (this fork)")))
+        for key, label, _default in ovs.FORK_OVERLAYS:
+            check = QCheckBox(tr(label))
+            check.setChecked(state.items[key])
+            comm_lay.addWidget(check)
+            self._overlay_checks[key] = check
+        catalog = list(getattr(getattr(self._window, "viewport", None),
+                               "ext_overlay_catalog", None) or [])
+        if not catalog:
+            none = QLabel(tr("No extension draws overlays yet."))
+            none.setStyleSheet("color: gray;")
+            comm_lay.addWidget(none)
+        shown_ext = None
+        for ext, ext_title, name, title in catalog:
+            if ext != shown_ext:
+                comm_lay.addWidget(heading(tr(ext_title)))
+                shown_ext = ext
+            check = QCheckBox(tr(title))
+            check.setChecked(state.ext.get((ext, name), True))
+            comm_lay.addWidget(check)
+            self._ext_overlay_checks[(ext, name)] = check
+
+        groups_layout.addStretch()
+        scroll.setWidget(groups_body)
         overlay_layout.addWidget(scroll, 1)
-        body.setEnabled(enabled)
-        self._overlays_enabled.toggled.connect(body.setEnabled)
-        expand.toggled.connect(scroll.setVisible)
-        expand.toggled.connect(lambda on: expand.setArrowType(
-            Qt.DownArrow if on else Qt.RightArrow))
-        overlay_layout.addStretch()
+        groups_body.setEnabled(state.enabled)
+        self._overlays_enabled.toggled.connect(groups_body.setEnabled)
         pages.addWidget(overlay_page)
         categories.currentRowChanged.connect(pages.setCurrentIndex)
         categories.setCurrentRow(0)
@@ -749,10 +807,14 @@ class PreferencesDialog(QDialog):
         msaa = self._msaa.currentData()
         st.setValue("display/msaa", msaa)
         vp = self._window.viewport
-        from core import overlay_settings
-        overlay_settings.save(self._overlays_enabled.isChecked(), {
-            key: check.isChecked() for key, check in self._overlay_checks.items()
-        }, st)
+        from core import overlay_settings as ovs
+        ovs.save(ovs.OverlayState(
+            self._overlays_enabled.isChecked(),
+            {ovs.NATIVE: self._group_native.isChecked(),
+             ovs.COMMUNITY: self._group_community.isChecked()},
+            {key: check.isChecked() for key, check in self._overlay_checks.items()},
+            {k: check.isChecked() for k, check in self._ext_overlay_checks.items()},
+        ), st)
         reload_overlays = getattr(vp, "reload_overlay_settings", None)
         if callable(reload_overlays):
             reload_overlays(st)

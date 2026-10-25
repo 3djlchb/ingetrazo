@@ -313,12 +313,36 @@ class ExtensionApp:
         win.__dict__.setdefault("_ext_context_owner", {})[fn] = self.key
 
     # ---- Viewport ------------------------------------------------------------
-    def add_overlay(self, fn) -> None:
+    def add_overlay(self, fn, name: str | None = None,
+                    title: str | None = None) -> None:
         """``fn(viewport, painter)`` draws over every frame, in the widget's
         logical pixels (project world points with :meth:`world_to_pixels`).
-        The painter state is saved and restored around each call."""
-        self.viewport._ext_overlays.append(fn)
-        self.viewport.update()
+        The painter state is saved and restored around each call.
+
+        ``name`` (stable, e.g. ``"lights"``) and ``title`` (English, shown
+        through ``tr``) list it in Preferences ▸ Interface ▸ Overlays,
+        under this extension in the community group, with a switch of its
+        own; without them it is listed as «Overlay 1», «Overlay 2»…"""
+        vp = self.viewport
+        mine = [n for (ext, _t, n, _ti) in getattr(vp, "ext_overlay_catalog", [])
+                if ext == self.key]
+        name = str(name or f"overlay{len(mine) + 1}")
+        title = str(title or f"Overlay {len(mine) + 1}")
+        vp._ext_overlays.append(fn)
+        meta = getattr(vp, "_ext_overlay_meta", None)
+        if meta is not None:
+            meta[id(fn)] = (self.key, name)
+        catalog = getattr(vp, "ext_overlay_catalog", None)
+        if catalog is not None and name not in mine:
+            catalog.append((self.key, self.title, name, title))
+        vp.update()
+
+    @property
+    def title(self) -> str:
+        """The extension's name as people read it: its ``PLUGIN_NAME``,
+        else its key."""
+        return (getattr(self, "_title", None)
+                or self.key.replace("_", " ").strip().capitalize() or self.key)
 
     def world_to_pixels(self, points):
         """World points (metres; anything shaped ``(N, 3)``) → ``(px, py,

@@ -2946,7 +2946,11 @@ class MainWindow(QMainWindow):
             if plug.setup is None:
                 continue
             try:
-                plug.setup(ExtensionApp(self, plug.stem))
+                app = ExtensionApp(self, plug.stem)
+                import sys as _sys
+                module = _sys.modules.get(getattr(plug.setup, "__module__", ""))
+                app._title = getattr(module, "PLUGIN_NAME", None)
+                plug.setup(app)
             except Exception as exc:  # noqa: BLE001 — never break startup
                 log.exception("plugin %r setup failed", plug.stem)
                 from core.extensions import PluginError

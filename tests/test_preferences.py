@@ -111,15 +111,31 @@ def test_interface_overlays_save_and_keep_individual_choices(settings_file):
     dlg._overlay_checks["scene"].setChecked(False)
     dlg._overlays_enabled.setChecked(False)
     dlg.accept()
-    enabled, items = load(_fresh(settings_file))
-    assert not enabled and not items["scene"] and items["layer"]
+    state = load(_fresh(settings_file))
+    assert not state.enabled and not state.items["scene"] and state.items["layer"]
     reopened = PreferencesDialog(win)
     assert not reopened._overlays_enabled.isChecked()
     reopened._overlays_enabled.setChecked(True)
     assert not reopened._overlay_checks["scene"].isChecked()
     assert reopened._overlay_checks["layer"].isChecked()
     reopened.accept()
-    assert load(_fresh(settings_file))[0]
+    assert load(_fresh(settings_file)).enabled
+
+
+def test_two_groups_each_with_its_switch(settings_file):
+    """Native overlays and community ones (this fork's, extensions') are
+    two groups, each switched on its own; the fork's are not native."""
+    from core.overlay_settings import COMMUNITY, NATIVE, load
+    win = _Win()
+    dlg = PreferencesDialog(win)
+    assert dlg._group_native.isCheckable() and dlg._group_community.isCheckable()
+    assert dlg._overlay_checks["dimensions"].parent().parent() is dlg._group_native
+    assert dlg._overlay_checks["scene"].parent().parent() is dlg._group_community
+    dlg._group_community.setChecked(False)
+    dlg.accept()
+    state = load(_fresh(settings_file))
+    assert state.groups == {NATIVE: True, COMMUNITY: False}
+    assert state.visible("dimensions") and not state.visible("scene")
 
 
 def test_cancel_discards_overlay_changes(settings_file):
