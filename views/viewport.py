@@ -1331,6 +1331,14 @@ class Viewport(QOpenGLWidget):
         self.active_tool: Optional[Tool] = None
         # Extensions' overlays and snap providers (views.extension_api).
         self._ext_overlays: list = []
+        #: Who drew each extension overlay: ``{id(fn): (extension, name)}``
+        #: — set by ExtensionApp.add_overlay. An overlay with no entry is
+        #: the host's own (Join Segments' preview rides the same list).
+        self._ext_overlay_meta: dict = {}
+        #: Every named extension overlay, in the order they came:
+        #: ``[(extension, extension title, name, title)]`` — Preferences
+        #: lists them under their extension.
+        self.ext_overlay_catalog: list = []
         self._ext_snap_providers: list = []
         # Copy/paste clipboard: copied geometry (faces + edges as positions,
         # groups as snapshot copies) plus a reference corner so Paste can
@@ -1559,8 +1567,8 @@ class Viewport(QOpenGLWidget):
         # toggles Face Orientation, showing which side the camera sees.
         self._overlay_button = None
         from core.overlay_settings import load
-        self.overlays_enabled, self._overlay_items = load()
-        self.show_face_orientation = self._overlay_items["face_orientation"]
+        self.overlay_state = load()
+        self.show_face_orientation = self.overlay_state.items["face_orientation"]
         self._build_overlay_button()
 
     # ---- GL lifecycle -------------------------------------------------------
@@ -1742,17 +1750,31 @@ class Viewport(QOpenGLWidget):
         self._place_overlay_button()
         btn.setVisible(self.overlay_visible("button"))
 
+    @property
+    def overlays_enabled(self) -> bool:
+        """Preferences ▸ Interface ▸ «Enable overlays in the 3D Viewport»."""
+        state = getattr(self, "overlay_state", None)
+        return True if state is None else state.enabled
+
     def overlay_visible(self, key: str) -> bool:
-        """Exports retain their existing presentation settings."""
+        """A built-in overlay: the master switch, its group (native or
+        community) and its own. Exports keep their own presentation."""
         if getattr(self, "_export_size", None) is not None:
             return True
-        return (getattr(self, "overlays_enabled", True)
-                and getattr(self, "_overlay_items", {}).get(key, True))
+        state = getattr(self, "overlay_state", None)
+        return True if state is None else state.visible(key)
+
+    def ext_overlay_visible(self, extension: str, name: str) -> bool:
+        """An extension's overlay — always in the community group."""
+        if getattr(self, "_export_size", None) is not None:
+            return True
+        state = getattr(self, "overlay_state", None)
+        return True if state is None else state.ext_visible(extension, name)
 
     def reload_overlay_settings(self, settings=None) -> None:
         from core.overlay_settings import load
-        self.overlays_enabled, self._overlay_items = load(settings)
-        self.show_face_orientation = self._overlay_items["face_orientation"]
+        self.overlay_state = load(settings)
+        self.show_face_orientation = self.overlay_state.items["face_orientation"]
         box = self._face_orient_box
         box.blockSignals(True)
         box.setChecked(self.show_face_orientation)
@@ -1774,7 +1796,7 @@ class Viewport(QOpenGLWidget):
         if on == self.show_face_orientation:
             return
         self.show_face_orientation = on
-        self._overlay_items["face_orientation"] = on
+        self.overlay_state.items["face_orientation"] = on
         from PySide6.QtCore import QSettings
         QSettings().setValue("overlays/face_orientation", on)
         box = getattr(self, "_face_orient_box", None)
@@ -7410,7 +7432,8 @@ class Viewport(QOpenGLWidget):
 
     # ---- 2D overlay (QPainter on top of OpenGL) -----------------------------
     def _draw_overlay(self) -> None:
-        if not getattr(self, "overlays_enabled", True):
+        if (not self.overlays_enabled
+                and getattr(self, "_export_size", None) is None):
             return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
@@ -7480,9 +7503,10 @@ class Viewport(QOpenGLWidget):
         hook = getattr(self.active_tool, "draw_overlay", None)
         if callable(hook) and self.overlay_visible("tools"):
             hook(self, painter)
-        # Extensions' overlays (``ExtensionApp.add_overlay``).
-        if self.overlay_visible("extensions"):
-            self._draw_extension_overlays(painter)
+        # Extensions' overlays (``ExtensionApp.add_overlay``), each under
+        # its own switch (community group); the host's own on that list
+        # (Join Segments' preview) go with the tool previews.
+        self._draw_extension_overlays(painter)
 
         # Terrain-surface fills (draped / flat) under the georef paths — Track G.
         if self.overlay_visible("georef"):
@@ -9840,7 +9864,14 @@ class Viewport(QOpenGLWidget):
         by save/restore, and one that raises is logged ONCE and dropped: a
         paint handler failing on every frame would flood the log and leave
         the view half drawn for good."""
+        meta = getattr(self, "_ext_overlay_meta", {})
         for fn in list(getattr(self, "_ext_overlays", ())):
+            who = meta.get(id(fn))
+            if who is None:
+                if not self.overlay_visible("tools"):
+                    continue
+            elif not self.ext_overlay_visible(*who):
+                continue
             painter.save()
             try:
                 fn(self, painter)
