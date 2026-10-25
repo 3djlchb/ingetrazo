@@ -101,6 +101,37 @@ def test_cancel_touches_nothing(settings_file):
     assert win.viewport.edit_rest_mode == "fade"
 
 
+def test_interface_overlays_save_and_keep_individual_choices(settings_file):
+    from core.overlay_settings import load
+    win = _Win()
+    dlg = PreferencesDialog(win)
+    assert any(dlg._tabs.tabText(i) == prefs_mod.tr("Interface")
+               for i in range(dlg._tabs.count()))
+    assert dlg._overlays_enabled.isChecked()
+    dlg._overlay_checks["scene"].setChecked(False)
+    dlg._overlays_enabled.setChecked(False)
+    dlg.accept()
+    enabled, items = load(_fresh(settings_file))
+    assert not enabled and not items["scene"] and items["layer"]
+    reopened = PreferencesDialog(win)
+    assert not reopened._overlays_enabled.isChecked()
+    reopened._overlays_enabled.setChecked(True)
+    assert not reopened._overlay_checks["scene"].isChecked()
+    assert reopened._overlay_checks["layer"].isChecked()
+    reopened.accept()
+    assert load(_fresh(settings_file))[0]
+
+
+def test_cancel_discards_overlay_changes(settings_file):
+    win = _Win()
+    dlg = PreferencesDialog(win)
+    dlg._overlays_enabled.setChecked(False)
+    dlg._overlay_checks["dimensions"].setChecked(False)
+    dlg.reject()
+    assert _fresh(settings_file).value("overlays/enabled") is None
+    assert _fresh(settings_file).value("overlays/dimensions") is None
+
+
 def test_rest_mode_applies_through_the_viewport(settings_file):
     win = _Win()
     dlg = PreferencesDialog(win)

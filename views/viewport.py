@@ -1555,10 +1555,12 @@ class Viewport(QOpenGLWidget):
         self._photo_ranges = []
 
         # Overlays (top right): what the viewport lays over the model to
-        # inspect it — for now Face Orientation, which shows which side of
-        # every face the camera sees.
-        self.show_face_orientation = False
+        # inspect it. Preferences controls visibility; the quick menu also
+        # toggles Face Orientation, showing which side the camera sees.
         self._overlay_button = None
+        from core.overlay_settings import load
+        self.overlays_enabled, self._overlay_items = load()
+        self.show_face_orientation = self._overlay_items["face_orientation"]
         self._build_overlay_button()
 
     # ---- GL lifecycle -------------------------------------------------------
@@ -1738,7 +1740,25 @@ class Viewport(QOpenGLWidget):
         self._overlay_button = btn
         self._face_orient_box = box
         self._place_overlay_button()
-        btn.show()
+        btn.setVisible(self.overlay_visible("button"))
+
+    def overlay_visible(self, key: str) -> bool:
+        """Exports retain their existing presentation settings."""
+        if getattr(self, "_export_size", None) is not None:
+            return True
+        return (getattr(self, "overlays_enabled", True)
+                and getattr(self, "_overlay_items", {}).get(key, True))
+
+    def reload_overlay_settings(self, settings=None) -> None:
+        from core.overlay_settings import load
+        self.overlays_enabled, self._overlay_items = load(settings)
+        self.show_face_orientation = self._overlay_items["face_orientation"]
+        box = self._face_orient_box
+        box.blockSignals(True)
+        box.setChecked(self.show_face_orientation)
+        box.blockSignals(False)
+        self._overlay_button.setVisible(self.overlay_visible("button"))
+        self.update()
 
     def _place_overlay_button(self) -> None:
         btn = getattr(self, "_overlay_button", None)
@@ -1754,6 +1774,9 @@ class Viewport(QOpenGLWidget):
         if on == self.show_face_orientation:
             return
         self.show_face_orientation = on
+        self._overlay_items["face_orientation"] = on
+        from PySide6.QtCore import QSettings
+        QSettings().setValue("overlays/face_orientation", on)
         box = getattr(self, "_face_orient_box", None)
         if box is not None and box.isChecked() != on:
             box.setChecked(on)
@@ -1762,7 +1785,8 @@ class Viewport(QOpenGLWidget):
     def _face_orientation_on(self) -> bool:
         # An overlay is for looking at the model, never part of a picture
         # of it: exports and printed sheets render without it.
-        return (bool(getattr(self, "show_face_orientation", False))
+        return (self.overlay_visible("face_orientation")
+                and bool(getattr(self, "show_face_orientation", False))
                 and getattr(self, "_export_size", None) is None)
 
     def resizeGL(self, w: int, h: int) -> None:
@@ -2399,7 +2423,7 @@ class Viewport(QOpenGLWidget):
         # to the shaded looks only.
         if self.plano_style is None and mode in ("textures", "shaded", "xray"):
             self._draw_billboards()
-            if self._export_size is None:
+            if self._export_size is None and self.overlay_visible("selection"):
                 # Selection cues never reach an export: the orange box
                 # around a selected Sumari came out on the printed sheet
                 # (Marco, 2026-09-07).
@@ -2410,7 +2434,8 @@ class Viewport(QOpenGLWidget):
         # at matching depth (LEQUAL lets this later draw win); depth-write OFF
         # so the overlay tints without blocking the edges drawn afterwards.
         if (self._sel_faces_count > 0 or self._hover_entity is not None) \
-                and self._export_size is None:      # no selection cues in exports
+                and self._export_size is None \
+                and self.overlay_visible("selection"):
             self._gl.glEnable(GL_POLYGON_OFFSET_FILL)
             self._gl.glPolygonOffset(1.0, 1.0)
             self._gl.glDepthMask(GL_FALSE)
@@ -2455,9 +2480,10 @@ class Viewport(QOpenGLWidget):
         # and reads as a real solid; its wireframe goes on top via the rubber
         # band below.
         self._set_section_clip(False)
-        self._draw_preview_faces()
-        self._draw_groups_preview(mvp)
-        self._draw_hidden_ghosts(mvp)
+        if self.overlay_visible("tools"):
+            self._draw_preview_faces()
+            self._draw_groups_preview(mvp)
+            self._draw_hidden_ghosts(mvp)
 
         # Axes — long solid positive + evenly-dashed negative per axis.
         # Dash spacing scales with the camera distance so the on-screen density
@@ -2465,7 +2491,8 @@ class Viewport(QOpenGLWidget):
         # geometry sitting on z=0; drawn BEFORE user edges so an edge along an
         # axis wins the LEQUAL depth test. Rubber-band stays on top (drawn last).
         from core import axes as _axes
-        if (self.plano_style is None and self.style_override is None
+        if (self.overlay_visible("axes")
+                and self.plano_style is None and self.style_override is None
                 and (getattr(self.scene, "show_axes", True)
                      or not _axes.is_world())):
             # No axes on a plan sheet / styled composer frame, nor the
@@ -2494,7 +2521,8 @@ class Viewport(QOpenGLWidget):
         # depth-write off (scaffolding must not cull anything), and none on
         # a plan sheet or a styled composer frame — a printed lámina does
         # not carry the scaffolding, and that is also how it behaved before.
-        if (self.plano_style is None and self.style_override is None
+        if (self.overlay_visible("guides")
+                and self.plano_style is None and self.style_override is None
                 and getattr(self.scene, "guides", None)):
             dist = max(float(self.camera.distance), 1e-3)
             eye = self.camera.eye() if self.camera.perspective else None
@@ -2542,7 +2570,8 @@ class Viewport(QOpenGLWidget):
         # shader (u_stipple 4): twelve solid edges at any zoom, not a
         # per-frame tessellation whose count scaled with 1/distance.
         box = (self._edit_group_box_corners()
-               if self.plano_style is None and self.style_override is None
+               if self.overlay_visible("tools")
+               and self.plano_style is None and self.style_override is None
                else None)
         if box is not None:
             data = _box_edge_vertices(box).tobytes()
@@ -2658,7 +2687,8 @@ class Viewport(QOpenGLWidget):
         _fmark("edges")
 
         # Selected edges (drawn on top, highlighted) — never in an export
-        if self._selected_count > 0 and self._export_size is None:
+        if (self._selected_count > 0 and self._export_size is None
+                and self.overlay_visible("selection")):
             self._set_color(0.95, 0.45, 0.16, 1.0)
             self._selected_vao.bind()
             self._gl.glDrawArrays(GL_LINES, 0, self._selected_count)
@@ -2667,7 +2697,7 @@ class Viewport(QOpenGLWidget):
         # Hovered edge — light blue, on top of everything else so it reads as
         # the pick candidate even when it overlaps a selected (orange) edge.
         # A curve segment highlights its whole contour (what a click selects).
-        if isinstance(self._hover_entity, Edge):
+        if isinstance(self._hover_entity, Edge) and self.overlay_visible("selection"):
             hover_count = self._upload_hover_edge(self._hover_entity)
             self._set_color(0.30, 0.55, 0.95, 1.0)
             self._hover_edges_vao.bind()
@@ -7283,6 +7313,8 @@ class Viewport(QOpenGLWidget):
 
     def _draw_rubber_band(self) -> None:
         self._overlay_rubber = None
+        if not self.overlay_visible("tools"):
+            return
         tool = self.active_tool
         if tool is None:
             return
@@ -7378,14 +7410,18 @@ class Viewport(QOpenGLWidget):
 
     # ---- 2D overlay (QPainter on top of OpenGL) -----------------------------
     def _draw_overlay(self) -> None:
+        if not getattr(self, "overlays_enabled", True):
+            return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setRenderHint(QPainter.TextAntialiasing, True)
 
         # Rubber band for the "always on top" tools (Line/Rectangle/Move),
         # drawn here with a thick, reliable pen.
-        self._draw_rubber_band_overlay(painter)
-        self._draw_guide_preview(painter)
+        if self.overlay_visible("tools"):
+            self._draw_rubber_band_overlay(painter)
+        if self.overlay_visible("guides"):
+            self._draw_guide_preview(painter)
 
         # The acquired circle centre (Center inference): a small
         # green dot at the centre of the last circle or arc the cursor
@@ -7395,7 +7431,8 @@ class Viewport(QOpenGLWidget):
         ref = self._valid_center_ref()
         snapped_on_it = (self.last_snap is not None
                          and self.last_snap.kind == "center")
-        if ref is not None and self.active_tool is not None \
+        if self.overlay_visible("snapping") \
+                and ref is not None and self.active_tool is not None \
                 and self.active_tool.uses_snap \
                 and not snapped_on_it and self._last_mouse_pos is not None:
             pc = self._world_to_pixel(ref[0])
@@ -7412,7 +7449,8 @@ class Viewport(QOpenGLWidget):
                 painter.drawEllipse(QPointF(*pc), 4.0, 4.0)
         # Snap indicator
         if (
-            self.active_tool is not None
+            self.overlay_visible("snapping")
+            and self.active_tool is not None
             and self.last_snap is not None
             and self.last_snap.kind != "none"
         ):
@@ -7420,38 +7458,47 @@ class Viewport(QOpenGLWidget):
 
         # Push/Pull distance-inference marker (a green square on the corner/face
         # the extrusion is snapping level with).
-        self._draw_inference_marker(painter)
+        if self.overlay_visible("snapping"):
+            self._draw_inference_marker(painter)
 
         # Construction guides (Tape Measure) — fine dashed scaffolding lines.
-        self._draw_guides(painter)
+        if self.overlay_visible("guides"):
+            self._draw_guides(painter)
 
         # Borders of the reference images, so one lying flat is still findable.
-        self._draw_image_outlines(painter)
+        if self.overlay_visible("images"):
+            self._draw_image_outlines(painter)
 
         # The Scale tool's grip box (yellow box with green grips).
-        self._draw_scale_box(painter)
-        self._draw_section_planes(painter)
+        if self.overlay_visible("tools"):
+            self._draw_scale_box(painter)
+        if self.overlay_visible("sections"):
+            self._draw_section_planes(painter)
         # Tool-owned overlay (the Flip planes; the future Axes gizmo): a tool
         # exposing ``draw_overlay(viewport, painter)`` paints after the
         # document annotations, before the edit-group frame.
         hook = getattr(self.active_tool, "draw_overlay", None)
-        if callable(hook):
+        if callable(hook) and self.overlay_visible("tools"):
             hook(self, painter)
         # Extensions' overlays (``ExtensionApp.add_overlay``).
-        self._draw_extension_overlays(painter)
+        if self.overlay_visible("extensions"):
+            self._draw_extension_overlays(painter)
 
         # Terrain-surface fills (draped / flat) under the georef paths — Track G.
-        self._draw_geo_surfaces(painter)
+        if self.overlay_visible("georef"):
+            self._draw_geo_surfaces(painter)
 
         # Traced georef paths (roads / boundaries) — Track G.
-        self._draw_geo_paths(painter)
+        if self.overlay_visible("georef"):
+            self._draw_geo_paths(painter)
 
         # Imported survey points (GPS / total station) — Track G.
-        self._draw_geo_points(painter)
+        if self.overlay_visible("georef"):
+            self._draw_geo_points(painter)
 
         # Profile→plan marker: the route point at the station hovered in the
         # profile panel (Track G).
-        if self._route_marker is not None:
+        if self.overlay_visible("georef") and self._route_marker is not None:
             q = self._world_to_pixel(self.drape(self._route_marker))
             if q is not None:
                 painter.setBrush(QColor(243, 115, 41))
@@ -7460,20 +7507,25 @@ class Viewport(QOpenGLWidget):
                 painter.setBrush(Qt.NoBrush)
 
         # Persistent dimension annotations
-        self._draw_dimensions(painter)
+        if self.overlay_visible("dimensions"):
+            self._draw_dimensions(painter)
 
         # Leader-text annotations
-        self._draw_text_labels(painter)
+        if self.overlay_visible("texts"):
+            self._draw_text_labels(painter)
 
         # Length measurement near rubber band
-        self._draw_length_label(painter)
+        if self.overlay_visible("measurements"):
+            self._draw_length_label(painter)
 
         # The active scene's name, top-left; the transient labels below
         # start under it (``_top_left_y``).
         self._top_left_y = self._draw_active_scene_label(painter)
 
         # Labels in the top-left. Reference > explicit axis lock > soft inference.
-        if self.reference_mode is not None:
+        if not self.overlay_visible("inference"):
+            pass
+        elif self.reference_mode is not None:
             self._draw_reference_label(painter)
         elif self.axis_lock is not None:
             self._draw_axis_lock_label(painter)
@@ -7483,12 +7535,13 @@ class Viewport(QOpenGLWidget):
             self._draw_inference_label(painter)
 
         # Linear-inference toggle state (Alt), shown while not on the default.
-        if self.linear_inference_mode != "all":
+        if self.overlay_visible("inference") and self.linear_inference_mode != "all":
             self._draw_linear_mode_label(painter)
 
         # Rubber-band selection box.
-        self._draw_selection_box(painter)
-        self._draw_zoom_box(painter)
+        if self.overlay_visible("selection"):
+            self._draw_selection_box(painter)
+            self._draw_zoom_box(painter)
 
         painter.end()
 
@@ -7569,15 +7622,17 @@ class Viewport(QOpenGLWidget):
         x, y, spacing = 10.0, 10.0, 8.0
         bottom = 0.0
         scene_label = self.active_scene_label()
-        if scene_label is not None:
+        if self.overlay_visible("scene") and scene_label is not None:
             no_scenes = not (getattr(self.scene, "saved_views", None) or ())
             right, bottom = self._draw_label_pill(
                 painter, x, y, *scene_label,
                 color=SCENE_LABEL_MISSING if no_scenes else None)
             x = right + spacing
-        _right, b = self._draw_label_pill(painter, x, y,
-                                          *self.active_layer_label())
-        return max(bottom, b)
+        if self.overlay_visible("layer"):
+            _right, b = self._draw_label_pill(painter, x, y,
+                                            *self.active_layer_label())
+            bottom = max(bottom, b)
+        return bottom
 
     def _draw_linear_mode_label(self, painter: QPainter) -> None:
         # The mirror image of the bug above: these had the Spanish written

@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Marco Sumari Tellez and IngeTrazo contributors.
 """Window ▸ Preferences — the scattered QSettings, gathered in one dialog.
 
-Three tabs. **General**: UI language (applied on restart, same contract as
+**General**: UI language (applied on restart, same contract as
 the Window ▸ Language menu) and how the rest of the model reads while
 editing a group (applied live through ``set_edit_rest_mode``, the same path
 the Camera menu uses, so its checkmarks stay honest). **Import**: the units
@@ -10,7 +10,8 @@ suggested by the OBJ and DXF/DWG import dialogs (each dialog still asks —
 these are the preselected answers) and the coordinate-entry mode shared by
 the georef dialogs. **AI Assistant**: the same ``ia/*`` keys the assistant
 dialog reads when it opens — provider, API key, model, Ollama URL,
-screenshots.
+screenshots. **Interface**: persistent master and individual viewport overlay
+visibility, applied when accepting the dialog.
 
 Values are written on OK (with a ``sync()`` flush, the house crash-safety
 pattern); Cancel touches nothing.
@@ -30,11 +31,15 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLineEdit,
+    QListWidget,
     QMessageBox,
     QPushButton,
     QSpinBox,
     QTabWidget,
     QLabel,
+    QScrollArea,
+    QStackedWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -245,6 +250,54 @@ class PreferencesDialog(QDialog):
                 "effect at the next start."))
         form.addRow("", self._rust)
         tabs.addTab(general, tr("General"))
+
+        # ---- Interface: category list and the selected page ----------------
+        from core import overlay_settings
+        interface = QWidget()
+        interface_layout = QHBoxLayout(interface)
+        categories = QListWidget()
+        categories.addItem(tr("Overlays"))
+        categories.setMaximumWidth(160)
+        interface_layout.addWidget(categories)
+        pages = QStackedWidget()
+        interface_layout.addWidget(pages, 1)
+        overlay_page = QWidget()
+        overlay_layout = QVBoxLayout(overlay_page)
+        enabled, items = overlay_settings.load(st)
+        self._overlays_enabled = QCheckBox(tr("Enable overlays in the 3D Viewport"))
+        self._overlays_enabled.setChecked(enabled)
+        overlay_layout.addWidget(self._overlays_enabled)
+        expand = QToolButton()
+        expand.setText(tr("Individual overlays"))
+        expand.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        expand.setCheckable(True)
+        expand.setChecked(False)
+        expand.setArrowType(Qt.RightArrow)
+        overlay_layout.addWidget(expand)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        body = QWidget()
+        body_layout = QVBoxLayout(body)
+        self._overlay_checks = {}
+        for key, label, _default in overlay_settings.OVERLAYS:
+            check = QCheckBox(tr(label))
+            check.setChecked(items[key])
+            body_layout.addWidget(check)
+            self._overlay_checks[key] = check
+        body_layout.addStretch()
+        scroll.setWidget(body)
+        scroll.setVisible(False)
+        overlay_layout.addWidget(scroll, 1)
+        body.setEnabled(enabled)
+        self._overlays_enabled.toggled.connect(body.setEnabled)
+        expand.toggled.connect(scroll.setVisible)
+        expand.toggled.connect(lambda on: expand.setArrowType(
+            Qt.DownArrow if on else Qt.RightArrow))
+        overlay_layout.addStretch()
+        pages.addWidget(overlay_page)
+        categories.currentRowChanged.connect(pages.setCurrentIndex)
+        categories.setCurrentRow(0)
+        tabs.addTab(interface, tr("Interface"))
 
         # ---- 3D mouse (issue #108) -------------------------------------------
         from views.ndof_input import load_settings, shared_input
@@ -696,6 +749,13 @@ class PreferencesDialog(QDialog):
         msaa = self._msaa.currentData()
         st.setValue("display/msaa", msaa)
         vp = self._window.viewport
+        from core import overlay_settings
+        overlay_settings.save(self._overlays_enabled.isChecked(), {
+            key: check.isChecked() for key, check in self._overlay_checks.items()
+        }, st)
+        reload_overlays = getattr(vp, "reload_overlay_settings", None)
+        if callable(reload_overlays):
+            reload_overlays(st)
         if getattr(vp, "_msaa", None) != msaa:
             vp._msaa = msaa
             # Void the FBO size so the next paint rebuilds it at the new
