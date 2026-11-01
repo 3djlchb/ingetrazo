@@ -47,12 +47,6 @@ from core.topology import (
 
 Segment = tuple[QVector3D, QVector3D]
 
-#: ``layer`` default of the planners: the scene's active layer. Pass a name
-#: (or ``None`` = the default layer) when the segments are a COPY that keeps
-#: its source's layer instead of new drawing.
-ACTIVE = object()
-
-
 def _finite(p) -> bool:
     return all(math.isfinite(c) for c in (p.x(), p.y(), p.z()))
 
@@ -62,7 +56,7 @@ def plan_edge_commands(
     segments: Sequence[Segment],
     detect_faces: bool = True,
     eye=None,
-    layer=ACTIVE,
+    layer=None,
 ) -> list[Command]:
     """Build the ordered command list to add ``segments`` to ``scene``.
 
@@ -71,14 +65,15 @@ def plan_edge_commands(
     Returns a flat list (callers wrap it, possibly alongside their own
     commands such as a tool-managed face, in a single ``CompoundCommand``).
     """
-    from core.layers import active_layer_tag
     commands: list[Command] = []
     simulated: list[Edge] = list(scene.edges)
     faces_snapshot: list[Face] = list(scene.faces)
-    # The active layer: what the drawn segments (and the faces they close)
-    # are created on. The pieces of an existing edge they split keep THAT
-    # edge's layer instead — a split is not new geometry.
-    tag = active_layer_tag(scene) if layer is ACTIVE else layer
+    # ``layer``: what the segments (and the faces they close) are created
+    # on — None, the default layer: loose drawing stays there whatever layer
+    # is active (upstream's rule; History tags the new GROUPS). The pieces
+    # of an existing edge they split keep THAT edge's layer — a split is
+    # not new geometry (this fork).
+    tag = layer
     near = _Nearby(simulated, faces_snapshot)
     from core.topology import KeyMemo
     near.key = KeyMemo()            # nothing moves while a plan is made
@@ -315,8 +310,8 @@ def _plan_faces(commands, faces_snapshot, simulated, sa, sb, eye=None,
         if is_planar(cycle) and not face_exists(
                 _around(near, faces_snapshot, cycle), cycle):
             cycle = face_up_or_toward(cycle, eye)
-            # A face the drawing closes is new: it goes on the active layer
-            # (chord halves above keep their mother's, layer included).
+            # A face the drawing closes goes on ``layer`` (chord halves
+            # above keep their mother's, layer included).
             attrs = {"layer": layer} if layer else None
             commands.append(AddFaceCommand(cycle, attrs=attrs))
             faces_snapshot.append(Face(list(cycle), attrs=attrs))
@@ -427,20 +422,6 @@ def _append_face_plane_rebuild(scene, commands, points) -> None:
             return
 
 
-def _on_active_layer(scene, extra) -> list:
-    """The tool-managed ``extra`` commands, with the faces they create put
-    on the active layer (the rectangle's or circle's own face) — unless the
-    tool already said which layer."""
-    from core.layers import active_layer_tag
-    extra = list(extra)
-    tag = active_layer_tag(scene)
-    if tag:
-        for c in extra:
-            if isinstance(c, AddFaceCommand) and "layer" not in (c.attrs or {}):
-                c.attrs = dict(c.attrs or {}, layer=tag)
-    return extra
-
-
 def _append_active_tag(scene, commands) -> None:
     """Tag-as-you-draw: when the BIM active class is set, append the step that
     stamps it on the plan's own drawn faces. Inserted BEFORE the plane
@@ -521,7 +502,7 @@ def build_add_edges(
     detect_faces: bool = True,
     extra: Iterable[Command] = (),
     eye=None,
-    layer=ACTIVE,
+    layer=None,
     plane_rebuild: bool = False,
 ) -> Command:
     """Batch convenience: many drawn edges (+ optional ``extra`` commands such
@@ -534,8 +515,7 @@ def build_add_edges(
     instead of filling the hole (#538)."""
     commands = plan_edge_commands(scene, segments, detect_faces=detect_faces,
                                   eye=eye, layer=layer)
-    commands.extend(_on_active_layer(scene, extra) if layer is ACTIVE
-                    else extra)
+    commands.extend(extra)
     _append_active_tag(scene, commands)
     points = [p for seg in segments for p in seg]
     _append_flat_curve_rebuild(scene, commands, points)

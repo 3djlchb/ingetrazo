@@ -243,3 +243,19 @@ def test_the_3d_mouse_page_shows_the_device_live(settings_file, monkeypatch):
     dlg.reject()
     dev.raw.emit((0, 0, 0, 0, 0, 0))             # closed: no longer listens
     assert "Y  -340" in dlg._ndof_raw.text()
+
+
+def test_the_tool_cursor_is_chosen_in_preferences(settings_file):
+    """#858: the crosshair or the plain arrow instead of the tool's icon is a
+    choice in Preferences ▸ General, saved where ``tool_cursor`` reads it and
+    applied to the active tool at once; the tool's icon stays the default."""
+    win = _Win()
+    applied = []
+    win.viewport._apply_tool_cursor = lambda: applied.append(True)
+    dlg = PreferencesDialog(win)
+    assert dlg._cursor_style.currentData() == "tool"
+    dlg._cursor_style.setCurrentIndex(dlg._cursor_style.findData("crosshair"))
+    dlg.accept()
+    assert _fresh(settings_file).value("General/cursor_style") == "crosshair"
+    assert applied == [True]
+    assert PreferencesDialog(win)._cursor_style.currentData() == "crosshair"

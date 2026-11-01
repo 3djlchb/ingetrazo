@@ -344,7 +344,8 @@ def test_upload_vbo_sends_a_big_tail_in_batches(monkeypatch):
     vbo.calls.clear()
     parts2 = parts[:2] + [b"x" * 4, b"d" * 4, b"", b"e" * 3]
     vp._upload_vbo(vbo, "e", parts2)
-    assert [c for c in vbo.calls if c[0] == "write"] == [("write", 8, 11)]
+    # Then only the changed part goes up (upstream's per-part upload).
+    assert [c for c in vbo.calls if c[0] == "write"] == [("write", 8, 4)]
     assert bytes(vbo.data[:19]) == b"".join(parts2)
 
 

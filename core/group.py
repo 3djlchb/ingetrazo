@@ -27,19 +27,53 @@ def new_uid() -> str:
     return uuid.uuid4().hex[:16]
 
 
-def reserve_group_names(names) -> None:
-    """Move the automatic "Group N" counter past every N in ``names`` — a
-    document that comes back with its names must not hand a new group a
-    name it already uses."""
-    global _counter
+def _highest_group_number(names) -> int:
+    """The largest N among the automatic "Group N" entries in ``names``."""
     import re
     top = 0
     for n in names:
         m = re.match(r"^Group (\d+)$", n or "")
         if m:
             top = max(top, int(m.group(1)))
+    return top
+
+
+def reserve_group_names(names) -> None:
+    """Move the automatic "Group N" counter past every N in ``names`` — a
+    document that comes back with its names must not hand a new group a
+    name it already uses."""
+    global _counter
+    top = _highest_group_number(names)
     nxt = next(_counter)
     _counter = itertools.count(max(nxt, top + 1))
+
+
+import contextlib
+
+
+@contextlib.contextmanager
+def document_name_scope(names):
+    """Number auto-named groups from a document's own ``names`` while it
+    loads, not from the session's counter.
+
+    A file can carry groups with no name (everything saved before names
+    were written, some imports). Numbering those from the session counter
+    made the names a document saves back depend on whatever was opened
+    earlier in the session (issue #943). Inside the scope the counter
+    continues the document's own highest "Group N", in document order;
+    on exit the session counter moves past everything the document used,
+    so a group created by hand afterwards never reuses one of its
+    numbers either."""
+    global _counter
+    saved = _counter
+    local = itertools.count(_highest_group_number(names) + 1)
+    _counter = local
+    try:
+        yield
+    finally:
+        first_unused = next(local)
+        session_next = next(saved)
+        _counter = itertools.count(max(first_unused, session_next))
 
 
 class Group:

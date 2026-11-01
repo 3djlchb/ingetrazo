@@ -29,17 +29,27 @@ _I18N_DIR = app_root() / "i18n"
 LANGUAGE_NAMES = {"en": "English", "es": "Español",
                   "pt-BR": "Português (Brasil)", "zh-CN": "简体中文", "it": "Italiano",
                   "id": "Bahasa Indonesia", "fr": "Français", "de": "Deutsch",
-                  "pl": "Polski", "ru": "Русский"}
+                  "pl": "Polski", "ru": "Русский", "vi": "Tiếng Việt",
+                  "lo": "ລາວ", "th": "ไทย",
+                  "ja": "日本語", "ko": "한국어"}
 
 _catalog: dict[str, str] = {}
 _lang = "en"
 
 
+#: Catalogues that ship but are not offered yet. Lao (#850): on Windows the
+#: interface font has no Lao, and its vowel and tone marks were drawn apart
+#: from their consonants (Windows round 0.5.11); back once that is fixed.
+HIDDEN_LANGUAGES = frozenset({"lo"})
+
+
 def available_languages() -> list[str]:
-    """Language codes with a JSON file in ``i18n/`` (e.g. ``["en", "es"]``)."""
+    """Language codes with a JSON file in ``i18n/`` (e.g. ``["en", "es"]``),
+    less :data:`HIDDEN_LANGUAGES`."""
     if not _I18N_DIR.is_dir():
         return ["en"]
-    return sorted(p.stem for p in _I18N_DIR.glob("*.json"))
+    return sorted(p.stem for p in _I18N_DIR.glob("*.json")
+                  if p.stem not in HIDDEN_LANGUAGES)
 
 
 def set_language(lang: str) -> None:
@@ -75,7 +85,15 @@ def source_of(text: str) -> str:
     Text that is not a translation comes back as it is."""
     global _reverse, _reverse_of
     if _reverse_of is not _catalog:
-        _reverse = {v: k for k, v in _catalog.items()}
+        # Two sources may share a translation («Path» and «path» → 経路):
+        # the capitalised one — a menu label — wins over a lower-case one;
+        # otherwise the later key, as before (this fork keeps the
+        # dictionaries alphabetical, which put «path» after «Path»).
+        _reverse = {}
+        for k, v in _catalog.items():
+            old = _reverse.get(v)
+            if old is None or not (old[:1].isupper() and k[:1].islower()):
+                _reverse[v] = k
         _reverse_of = _catalog
     return _reverse.get(text, text)
 

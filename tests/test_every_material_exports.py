@@ -110,7 +110,7 @@ def _outward_count(prims) -> tuple[int, int]:
 
 
 def test_the_registry_is_what_it_says_it_is():
-    assert len(list(_textures())) == 428
+    assert len(list(_textures())) == 429           # + upstream's pool_water
     assert len(list(_colours())) == 213
 
 

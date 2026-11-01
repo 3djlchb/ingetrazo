@@ -2,10 +2,10 @@
 # Copyright (C) 2026 Marco Sumari Tellez and IngeTrazo contributors.
 """The active layer and the active scene.
 
-New lines, the faces they close, new groups and annotations go on the active
-layer; what a drawing merely SPLITS keeps its own layer, and a copy keeps its
-source's. The Layers and Scenes panels mark the active row with a blue dot
-(a click on a dot activates it), the active layer can be neither hidden nor
+New groups and annotations go on the active layer, loose lines and faces
+stay on Layer 0 (upstream's rule); what a drawing merely SPLITS keeps its own
+layer, a copy keeps its source's and a push its face's (this fork). The Scenes panel marks the active row with a blue dot (a click on
+a dot activates it; the Layers panel is upstream's), the active layer can be neither hidden nor
 locked, and the viewport names the active scene top-left. Both are saved
 with the document."""
 from __future__ import annotations
@@ -36,7 +36,7 @@ def _scene_with(*names, active=None):
     for n in names:
         scene.layers.append(Layer(n))
     if active is not None:
-        scene.active_layer_uid = scene.layer(active).uid
+        scene.active_layer = active
     return scene, History(scene)
 
 
@@ -47,22 +47,24 @@ def _rect(x0, y0, x1, y1):
 
 # ---- the model ----------------------------------------------------------------
 
-def test_active_layer_resolves_by_uid_and_falls_back_to_the_default():
+def test_active_layer_follows_a_rename_and_falls_back_to_the_default():
+    from core.layers import rename_layer
     scene, _h = _scene_with("Muros", active="Muros")
     assert active_layer(scene) == "Muros"
-    scene.layer("Muros").name = "Paredes"           # a rename keeps it
+    rename_layer(scene, "Muros", "Paredes")         # a rename keeps it
     assert active_layer(scene) == "Paredes"
     scene.layers.remove(scene.layer("Paredes"))     # gone → the default
     assert active_layer(scene) == DEFAULT_LAYER
 
 
-def test_drawn_edges_and_the_face_they_close_go_on_the_active_layer():
+def test_loose_drawing_stays_on_the_default_layer_with_a_layer_active():
+    """Upstream's rule (Layers 2.0): loose lines and faces stay on Layer 0
+    whatever layer is active — the GROUP made of them takes the layer."""
     scene, history = _scene_with("Muros", active="Muros")
     history.execute(build_add_edges(scene, _rect(0, 0, 2, 2)))
     assert scene.mesh.faces and scene.mesh.edges
-    assert all(layer_of(e) == "Muros" for e in scene.mesh.edges)
-    assert all(layer_of(f) == "Muros" for f in scene.mesh.faces)
-
+    assert all(layer_of(e) == DEFAULT_LAYER for e in scene.mesh.edges)
+    assert all(layer_of(f) == DEFAULT_LAYER for f in scene.mesh.faces)
 
 def test_with_the_default_active_nothing_is_labelled():
     scene, history = _scene_with("Muros")
@@ -71,50 +73,25 @@ def test_with_the_default_active_nothing_is_labelled():
     assert all("layer" not in f.attrs for f in scene.mesh.faces)
 
 
-def test_a_split_keeps_the_layer_of_what_it_splits():
-    """A line drawn on Muros across a Layer 0 square: its own pieces are
-    Muros; the square's split edge and the two halves of its face stay on
-    Layer 0 — splitting is not drawing."""
-    scene, history = _scene_with("Muros")
-    history.execute(build_add_edges(scene, _rect(0, 0, 2, 2)))
-    scene.active_layer_uid = scene.layer("Muros").uid
-    history.execute(build_add_edge(scene, V(1, -1), V(1, 3)))
-    drawn = [e for e in scene.mesh.edges
-             if abs(e.a.x() - 1) < 1e-6 and abs(e.b.x() - 1) < 1e-6]
-    assert drawn and all(layer_of(e) == "Muros" for e in drawn)
-    rest = [e for e in scene.mesh.edges if e not in drawn]
-    assert rest and all(layer_of(e) == DEFAULT_LAYER for e in rest)
-    assert len(scene.mesh.faces) == 2
-    assert all(layer_of(f) == DEFAULT_LAYER for f in scene.mesh.faces)
-
-
 def test_the_pieces_of_a_split_layered_edge_keep_its_layer():
-    """Before, the pieces of a split edge lost its layer altogether."""
-    scene, history = _scene_with("Muros", "Pisos", active="Pisos")
+    """Before, the pieces of a split edge lost its layer altogether; and
+    the line that splits it is loose drawing, on the default layer."""
+    from core.layers import assign_layer
+    scene, history = _scene_with("Muros", "Pisos", active="Muros")
     history.execute(build_add_edge(scene, V(0, 0), V(4, 0)))
-    scene.active_layer_uid = scene.layer("Muros").uid
+    assign_layer(scene.mesh.edges[0], "Pisos")
     history.execute(build_add_edge(scene, V(2, -1), V(2, 1)))
     along = [e for e in scene.mesh.edges
              if abs(e.a.y()) < 1e-6 and abs(e.b.y()) < 1e-6]
     assert len(along) == 2
     assert all(layer_of(e) == "Pisos" for e in along)
-
-
-def test_undo_and_redo_keep_the_layer():
-    scene, history = _scene_with("Muros", active="Muros")
-    history.execute(build_add_edges(scene, _rect(0, 0, 2, 2)))
-    history.undo()
-    assert not scene.mesh.faces
-    scene.active_layer_uid = None              # changed meanwhile
-    history.redo()
-    assert all(layer_of(f) == "Muros" for f in scene.mesh.faces)
-    assert all(layer_of(e) == "Muros" for e in scene.mesh.edges)
-
+    across = [e for e in scene.mesh.edges if e not in along]
+    assert across and all(layer_of(e) == DEFAULT_LAYER for e in across)
 
 def test_a_new_group_goes_on_the_active_layer_its_faces_keep_theirs():
     scene, history = _scene_with("Muros", "Muebles")
     history.execute(build_add_edges(scene, _rect(0, 0, 2, 2)))
-    scene.active_layer_uid = scene.layer("Muebles").uid
+    scene.active_layer = "Muebles"
     history.execute(MakeGroupCommand(list(scene.mesh.faces),
                                      list(scene.mesh.edges)))
     group = scene.groups[-1]
@@ -143,11 +120,12 @@ def test_a_move_copy_keeps_its_sources_layer():
     """Ctrl+Move copies are not new drawing: a Layer 0 edge copied while
     Muros is active stays on Layer 0, a Pisos edge stays on Pisos."""
     from tools.move import MoveTool
-    scene, history = _scene_with("Muros", "Pisos", active="Pisos")
+    from core.layers import assign_layer
+    scene, history = _scene_with("Muros", "Pisos")
     history.execute(build_add_edge(scene, V(0, 0), V(1, 0)))
-    scene.active_layer_uid = None
+    assign_layer(scene.mesh.edges[0], "Pisos")
     history.execute(build_add_edge(scene, V(0, 2), V(1, 2)))
-    scene.active_layer_uid = scene.layer("Muros").uid
+    scene.active_layer = "Muros"
     src = list(scene.mesh.edges)
     tool = MoveTool()
     tool._groups, tool._sel_faces, tool._sel_edges = [], [], src
@@ -176,7 +154,7 @@ def test_the_document_keeps_the_active_layer_and_scene(tmp_path):
     plain = Scene()
     save_scene(plain, tmp_path / "plain.igz")
     again = Scene()
-    again.active_layer_uid = "stale"
+    again.active_layer = "stale"
     load_into(again, tmp_path / "plain.igz")
     assert active_layer(again) == DEFAULT_LAYER
     assert again.active_view is None
@@ -207,55 +185,6 @@ def _dot_click(tree, item):
     QTest.mouseClick(tree.viewport(), Qt.LeftButton,
                      pos=QPoint(x, rect.center().y()))
     _app.processEvents()
-
-
-def test_the_layers_panel_marks_and_changes_the_active_layer():
-    from views.tray import ACTIVE_ROLE
-    win = _window()
-    try:
-        scene = win.viewport.scene
-        panel = win.tray.layers
-        scene.layers.append(Layer("Muros"))
-        panel.refresh()
-        tree = panel.tree
-        assert tree.headerItem().text(0) in ("Active", "Activa")
-        assert _row(tree, DEFAULT_LAYER).data(0, ACTIVE_ROLE) is True
-        assert _row(tree, "Muros").data(0, ACTIVE_ROLE) is False
-        _dot_click(tree, _row(tree, "Muros"))
-        assert active_layer(scene) == "Muros"
-        assert _row(tree, "Muros").data(0, ACTIVE_ROLE) is True
-        assert _row(tree, DEFAULT_LAYER).data(0, ACTIVE_ROLE) is False
-        # The active layer can be neither hidden nor locked.
-        _row(tree, "Muros").setCheckState(2, Qt.Unchecked)
-        assert scene.layer("Muros").visible is True
-        assert _row(tree, "Muros").checkState(2) == Qt.Checked
-        _row(tree, "Muros").setCheckState(3, Qt.Checked)
-        assert scene.layer("Muros").locked is False
-        # Another layer still hides as before.
-        _row(tree, DEFAULT_LAYER).setCheckState(2, Qt.Unchecked)
-        assert scene.layer(DEFAULT_LAYER).visible is False
-        # Activating a hidden layer shows it.
-        panel.set_active(DEFAULT_LAYER)
-        assert scene.layer(DEFAULT_LAYER).visible is True
-        assert active_layer(scene) == DEFAULT_LAYER
-        # Deleting the active layer hands the role back to the default.
-        panel.set_active("Muros")
-        tree.setCurrentItem(_row(tree, "Muros"))
-        panel._on_delete()
-        assert active_layer(scene) == DEFAULT_LAYER
-        assert scene.active_layer_uid is None
-        # «+ Layer»: the new layer becomes the active one and the
-        # highlighted row, each time.
-        for _ in range(2):
-            panel._on_add()
-            new = scene.layers[-1]
-            assert active_layer(scene) == new.name
-            assert _row(tree, new.name).data(0, ACTIVE_ROLE) is True
-            assert tree.currentItem() is _row(tree, new.name)
-        assert sum(bool(tree.topLevelItem(i).data(0, ACTIVE_ROLE))
-                   for i in range(tree.topLevelItemCount())) == 1
-    finally:
-        _close(win)
 
 
 def test_the_scenes_panel_marks_the_active_scene_and_the_viewport_names_it():
@@ -426,12 +355,15 @@ def _push(vp, face, dist):
 
 
 def test_a_push_puts_walls_cap_and_edges_on_the_faces_layer():
-    """A rectangle drawn on Muros, pushed while ANOTHER layer is active: the
-    whole box — walls, cap and every edge — is on Muros."""
-    scene, history = _scene_with("Muros", "Pisos", active="Muros")
+    """A rectangle on Muros (its face and edges), pushed while ANOTHER layer
+    is active: the whole box — walls, cap and every edge — is on Muros."""
+    from core.layers import assign_layer
+    scene, history = _scene_with("Muros", "Pisos")
     vp = _Vp(scene, history)
     history.execute(build_add_edges(scene, _rect(0, 0, 4, 0.15)))
-    scene.active_layer_uid = scene.layer("Pisos").uid
+    for x in list(scene.mesh.edges) + list(scene.mesh.faces):
+        assign_layer(x, "Muros")
+    scene.active_layer = "Pisos"
     _push(vp, scene.mesh.faces[0], 2.6)
     assert len(scene.mesh.faces) == 6
     assert all(layer_of(f) == "Muros" for f in scene.mesh.faces)
@@ -446,7 +378,7 @@ def test_a_push_of_a_default_layer_face_stays_on_the_default():
     scene, history = _scene_with("Muros")
     vp = _Vp(scene, history)
     history.execute(build_add_edges(scene, _rect(0, 0, 2, 2)))
-    scene.active_layer_uid = scene.layer("Muros").uid
+    scene.active_layer = "Muros"
     _push(vp, scene.mesh.faces[0], 1.0)
     assert all(layer_of(f) == DEFAULT_LAYER for f in scene.mesh.faces)
     assert all(layer_of(e) == DEFAULT_LAYER for e in scene.mesh.edges)
@@ -455,15 +387,17 @@ def test_a_push_of_a_default_layer_face_stays_on_the_default():
 def test_pushing_a_box_face_extends_it_on_that_faces_layer():
     """The solid path (a face of a closed box, rebuilds and all): the new
     walls take the pushed face's layer; the rest of the box keeps its own."""
-    scene, history = _scene_with("Muros", "Pisos", active="Pisos")
+    from core.layers import assign_layer
+    scene, history = _scene_with("Muros", "Pisos")
     vp = _Vp(scene, history)
     history.execute(build_add_edges(scene, _rect(0, 0, 2, 2)))
+    for x in list(scene.mesh.edges) + list(scene.mesh.faces):
+        assign_layer(x, "Pisos")
     _push(vp, scene.mesh.faces[0], 1.0)              # a box on Pisos
     top = next(f for f in scene.mesh.faces
                if abs(f.centroid().z() - 1.0) < 1e-6)
-    from core.layers import assign_layer
     assign_layer(top, "Muros")
-    scene.active_layer_uid = None
+    scene.active_layer = None
     _push(vp, top, 0.5)
     high = [f for f in scene.mesh.faces if f.centroid().z() > 1.0 + 1e-6]
     assert high and all(layer_of(f) == "Muros" for f in high)
@@ -530,8 +464,8 @@ def test_the_active_layer_label_sits_right_of_the_scene_label():
         assert prefix in ("Active layer:", "Capa activa:")
         assert name == DEFAULT_LAYER
         scene.layers.append(Layer("Muros"))
-        win.tray.layers.refresh()
-        win.tray.layers.set_active("Muros")
+        from core.layers import set_active
+        set_active(scene, "Muros")
         assert vp.active_layer_label()[1] == "Muros"
 
         def pills():

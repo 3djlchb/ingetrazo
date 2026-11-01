@@ -168,10 +168,12 @@ def test_renaming_in_the_panel_never_changes_the_uid():
     try:
         scene = win.viewport.scene
         scene.layers.append(Layer("Muros"))
-        win.tray.layers.refresh()
+        from views.layers_panel import COL_NAME
+        panel = win.layers_dock.panel             # upstream's Layers panel
+        panel.refresh()
         ly = scene.layer("Muros")
         uid = ly.uid
-        win.tray.layers._rename(ly, "Muros", "Paredes")
+        panel.item_for("Muros").setText(COL_NAME, "Paredes")  # typed in
         assert scene.layer("Paredes") is ly and ly.uid == uid
         assert scene.layer_by_uid(uid).name == "Paredes"
     finally:

@@ -96,6 +96,14 @@ class CommandRejected(Exception):
 class Command(ABC):
     """Abstract reversible operation against a :class:`Scene`."""
 
+    #: Whether doing or undoing it leaves every material where it was —
+    #: which ones the model wears (see ``History.paint_cv``).
+    keeps_paint = False
+    #: Whether doing or undoing it only puts groups in the model or takes
+    #: them out, whole, and leaves every group that stays as it was — its
+    #: Browser row, the paint of its faces (see ``History.groups_cv``).
+    keeps_groups = False
+
     @abstractmethod
     def do(self, scene) -> None:
         """Apply the operation."""
@@ -172,6 +180,54 @@ class History:
         self.last_error: Optional[str] = None
         #: Why the last command declined to happen (:class:`CommandRejected`).
         self.last_rejected: Optional[str] = None
+        #: The content version up to which nothing but commands that keep
+        #: paint changed the model since the materials panel last scanned
+        #: it (it sets this): a Move needs no new scan — 0.4 s on the plant
+        #: of #158. Anything else, history or not, leaves it behind.
+        self.paint_cv = None
+        #: The same, for the Browser's rows (views/outliner.py): a command
+        #: that keeps paint moves things, and no row shows where a thing is.
+        self.rows_cv = None
+        #: Per reader («paint» the materials panel, «rows» the Browser), the
+        #: content version up to which nothing but commands that keep paint
+        #: or keep groups changed the model since that reader last went
+        #: through it all: a Delete or a Paste only adds or takes away an
+        #: object or two, and the reader need not go through the 21 406
+        #: others again (#158). The reader sets its own entry.
+        self.groups_cv: dict = {}
+
+    def _keep_paint_cv(self, cmd, before) -> None:
+        if before is None:
+            return
+        keeps = getattr(cmd, "keeps_paint", False)
+        if not (keeps or getattr(cmd, "keeps_groups", False)):
+            return
+        cv = getattr(self.scene, "content_version", None)
+        if keeps:
+            if self.paint_cv == before:
+                self.paint_cv = cv
+            if self.rows_cv == before:
+                self.rows_cv = cv
+        for k, v in self.groups_cv.items():
+            if v == before:
+                self.groups_cv[k] = cv
+
+    def context_changed(self, before) -> None:
+        """A group opened or closed (content version ``before`` → now):
+        what the model wears is the same — the meshes that changed (an
+        instance's world copy, a container's matrix pushed down, a copy
+        shared back) are read again by their serial — so the Materials
+        panel keeps its scan: on the plant of #158 it read 2 722 meshes
+        again, ~0.35 s each way."""
+        cv = getattr(self.scene, "content_version", None)
+        if before is None:
+            return
+        # The Browser's rows too: only the open path's and the copies of a
+        # component whose count moved read differently (see
+        # OutlinerPanel.refresh).
+        for k in ("paint", "rows"):
+            if self.groups_cv.get(k) == before:
+                self.groups_cv[k] = cv
 
     def execute(self, cmd: Command) -> None:
         _t0 = _time_mod.perf_counter() if _PERF else 0.0
@@ -181,8 +237,11 @@ class History:
                   (_time_mod.perf_counter() - _t0) * 1000.0,
                   extra=type(cmd).__name__)
         self.last_rejected = None
+        before = getattr(self.scene, "content_version", None)
+        objs_before = self._objects_before()
         try:
             cmd.do(self.scene)
+            self._tag_new_objects(objs_before)
         except CommandRejected as exc:
             self.scene.mesh.restore_state(snapshot)
             self.scene.version += 1
@@ -204,6 +263,7 @@ class History:
         # edited): undo/redo re-enter that context so a snapshot restore never
         # lands on the wrong mesh after the user exits the group.
         cmd._history_mesh = self.scene.mesh
+        self._keep_paint_cv(cmd, before)
         self.undo_stack.append(cmd)
         cap = int(getattr(self, "max_steps", 0) or 0)
         if cap > 0 and len(self.undo_stack) > cap:
@@ -249,7 +309,9 @@ class History:
         if not self.undo_stack:
             return False
         cmd = self.undo_stack.pop()
+        before = getattr(self.scene, "content_version", None)
         self._in_command_mesh(cmd, lambda: cmd.undo(self.scene))
+        self._keep_paint_cv(cmd, before)
         self.redo_stack.append(cmd)
         self._rebind_dimensions()
         return True
@@ -258,10 +320,38 @@ class History:
         if not self.redo_stack:
             return False
         cmd = self.redo_stack.pop()
+        before = getattr(self.scene, "content_version", None)
+        objs_before = self._objects_before()
         self._in_command_mesh(cmd, lambda: cmd.do(self.scene))
+        self._keep_paint_cv(cmd, before)
+        self._tag_new_objects(objs_before)
         self.undo_stack.append(cmd)
         self._rebind_dimensions()
         return True
+
+    def _objects_before(self):
+        """The objects in the document before a command runs. With no
+        layer active only the guides, dimensions and texts (they go to
+        their automatic layers), so the default case never walks the
+        groups."""
+        from core.layers import (DEFAULT_LAYER, active_layer, auto_ids,
+                                 object_ids)
+        if active_layer(self.scene) == DEFAULT_LAYER:
+            return auto_ids(self.scene)
+        return object_ids(self.scene)
+
+    def _tag_new_objects(self, before) -> None:
+        """The objects a command made go onto the active layer
+        (core.layers) — groups, components, dimensions and texts; loose
+        lines and faces stay on the default layer, so hiding a layer never
+        leaves half a solid. Done here, after the command, so every tool
+        gets it without knowing about layers."""
+        if before is None:
+            return
+        from core.layers import tag_new_objects
+        if tag_new_objects(self.scene, before):
+            _dirty_group_chunks(self.scene)
+            self.scene.version += 1
 
     def _in_command_mesh(self, cmd, fn) -> None:
         """Run ``fn`` with ``scene.mesh`` pointing at the mesh the command was
@@ -300,8 +390,8 @@ class AddEdgeCommand(Command):
         # replaces a curve/soft edge with sub-edges, so the pieces inherit.
         self.soft = soft
         self.curve = curve
-        # Layer of an edge this command CREATES: the active layer for a drawn
-        # segment, the split edge's own for its pieces. Never stamped on a
+        # Layer of an edge this command CREATES: the split edge's own for
+        # its pieces, a copy's source's (this fork). Never stamped on a
         # pre-existing edge it merges into — that one keeps its layer.
         self.layer = layer
         self.edge: Optional[Edge] = None
@@ -909,6 +999,72 @@ class AssignLayerCommand(Command):
         scene.version += 1
 
 
+class DeleteLayerCommand(Command):
+    """Delete a layer: what it carried goes to the default layer, and the
+    scenes forget it. Undo puts the layer back at its place in the list,
+    with its visibility and lock, and every entity back on it.
+
+    The only Layers-panel action on the undo stack: creating and renaming
+    are easy to redo by hand and would only get between Ctrl+Z and the
+    drawing, while a deleted layer takes its assignments with it.
+
+    ``into`` merges instead: what the layer carried goes onto that layer
+    (Layers ▸ Merge into…), and the active layer, if it was this one,
+    becomes that one."""
+
+    def __init__(self, name: str, into: str | None = None) -> None:
+        self.name = name
+        self.into = into
+        self._layer = None
+        self._index = 0
+        self._carriers: list = []
+        self._views: list = []
+
+    def do(self, scene) -> None:
+        from core.layers import DEFAULT_LAYER, assign_layer, layer_of
+        from core.purge import layer_carriers
+        ly = scene.layer(self.name)
+        if ly is None or self.name == DEFAULT_LAYER:
+            raise CommandRejected("layer cannot be deleted")
+        target = self.into or DEFAULT_LAYER
+        if target == self.name or scene.layer(target) is None:
+            raise CommandRejected("no layer to merge into")
+        self._layer = ly
+        self._index = scene.layers.index(ly)
+        self._carriers = [e for e in layer_carriers(scene)
+                          if layer_of(e) == self.name]
+        self._views = []
+        for view in getattr(scene, "saved_views", None) or ():
+            hidden = getattr(view, "hidden_layers", None)
+            if hidden and self.name in hidden:
+                self._views.append((view, list(hidden)))
+                view.hidden_layers = [n for n in hidden if n != self.name]
+        for e in self._carriers:
+            assign_layer(e, target)
+        self._was_active = getattr(scene, "active_layer", None) == self.name
+        if self._was_active:
+            scene.active_layer = None if target == DEFAULT_LAYER else target
+        scene.layers.remove(ly)
+        _dirty_group_chunks(scene)
+        scene.version += 1
+
+    def undo(self, scene) -> None:
+        from core.layers import assign_layer
+        # A layer made and named the same after the delete (renaming is not
+        # on the stack) takes the entities back instead of a twin.
+        if self._layer not in scene.layers and scene.layer(self.name) is None:
+            scene.layers.insert(min(self._index, len(scene.layers)),
+                                self._layer)
+        for e in self._carriers:
+            assign_layer(e, self.name)
+        for view, hidden in self._views:
+            view.hidden_layers = list(hidden)
+        if getattr(self, "_was_active", False):
+            scene.active_layer = self.name
+        _dirty_group_chunks(scene)
+        scene.version += 1
+
+
 def _is_hidden(entity) -> bool:
     attrs = getattr(entity, "attrs", None)
     if attrs is not None:                          # Face
@@ -1128,7 +1284,12 @@ class RestampMaterialCommand(Command):
     wear it too, on the container (issue #155, @fafecm: the loose face
     changed colour, the painted box beside it stayed the old one). Undo
     restores the registry entry, each face's previous values and each
-    container's previous paint exactly."""
+    container's previous paint exactly.
+
+    A ``new_material`` with ANOTHER name renames as it restamps: the old
+    entry leaves the registry, the new one takes its place and every face
+    and container now says the new name. Only the model changes — a
+    library colour renamed here stays in the library as it was."""
 
     def __init__(self, name, new_material) -> None:
         self._name = name
@@ -1136,8 +1297,9 @@ class RestampMaterialCommand(Command):
         self._old_material = None
         self._old_faces: Optional[list] = None   # (face, {key: old value})
         self._old_groups: Optional[list] = None  # (container, old material)
+        self._old_target = None   # a renamed-onto entry, put back by undo
 
-    _KEYS = ("color", "texture", "opacity")
+    _KEYS = ("mat", "color", "texture", "opacity")
 
     def _targets(self, scene):
         # Nested placements included: walking scene.groups as a flat list
@@ -1183,7 +1345,10 @@ class RestampMaterialCommand(Command):
                 for f in self._targets(scene)]
             self._old_groups = [(g, g.material)
                                 for g in self._painted_groups(scene)]
-        scene.materials[self._name] = self._new
+            self._old_target = scene.materials.get(self._new.name)
+        if self._new.name != self._name:
+            scene.materials.pop(self._name, None)
+        scene.materials[self._new.name] = self._new
         for f, _old in self._old_faces:
             for k in self._KEYS:
                 if k in stamp:
@@ -1196,6 +1361,11 @@ class RestampMaterialCommand(Command):
         scene.version += 1
 
     def undo(self, scene) -> None:
+        if self._new.name != self._name:
+            if self._old_target is None:
+                scene.materials.pop(self._new.name, None)
+            else:
+                scene.materials[self._new.name] = self._old_target
         if self._old_material is None:
             scene.materials.pop(self._name, None)
         else:
@@ -1269,28 +1439,14 @@ class PurgeUnusedCommand(Command):
         scene.version += 1
 
 
-def _on_active_layer(annotation, scene) -> None:
-    """Put a NEW annotation (cota, leader text) on the active layer, unless
-    it already names one."""
-    if getattr(annotation, "layer", None) is None:
-        from core.layers import active_layer_tag
-        tag = active_layer_tag(scene)
-        if tag is not None:
-            annotation.layer = tag
-
-
 class AddDimensionCommand(Command):
     """Add a dimension annotation to ``scene.dimensions``, anchored to the
     vertices under its endpoints (if any) so it follows the geometry."""
 
     def __init__(self, dimension) -> None:
         self.dimension = dimension
-        self._layered = False
 
     def do(self, scene) -> None:
-        if not self._layered:          # once: a redo keeps the first layer
-            self._layered = True
-            _on_active_layer(self.dimension, scene)
         if hasattr(self.dimension, "bind"):
             self.dimension.bind(scene)
         scene.dimensions.append(self.dimension)
@@ -1329,12 +1485,8 @@ class AddTextLabelCommand(Command):
 
     def __init__(self, label) -> None:
         self.label = label
-        self._layered = False
 
     def do(self, scene) -> None:
-        if not self._layered:          # once: a redo keeps the first layer
-            self._layered = True
-            _on_active_layer(self.label, scene)
         scene.text_labels.append(self.label)
         scene.version += 1
 
@@ -1349,6 +1501,8 @@ class MoveTextLabelsCommand(Command):
     """Translate the floating label of leader texts: the label end moves,
     the anchor stays pinned and the leader stretches (the classic Move-on-
     text behaviour)."""
+
+    keeps_paint = True
 
     def __init__(self, labels, delta) -> None:
         self._labels = list(labels)
@@ -1369,6 +1523,8 @@ class MoveGuidesCommand(Command):
     """Translate construction guides (Tape Measure) with the Move tool
     (#627). A guide line slides parallel to itself; a guide point carries
     its ``origin`` along, so the dashed segment it draws keeps its shape."""
+
+    keeps_paint = True
 
     def __init__(self, guides, delta) -> None:
         self._guides = list(guides)
@@ -1447,6 +1603,8 @@ class MoveDimensionsCommand(Command):
     (Marco, 2026-09-20). A dimension with a free endpoint moves that
     endpoint rigidly instead. ``modes`` maps each dimension to ``"line"``
     or ``"rigid"``, decided by the tool at grab time."""
+
+    keeps_paint = True
 
     def __init__(self, modes: dict, delta) -> None:
         self._modes = dict(modes)
@@ -1859,6 +2017,8 @@ class DeleteScenesCommand(Command):
 class MoveSectionPlanesCommand(Command):
     """Translate section planes (the Move tool)."""
 
+    keeps_paint = True
+
     def __init__(self, planes, delta: QVector3D) -> None:
         self._planes = list(planes)
         self.delta = QVector3D(delta)
@@ -2068,6 +2228,8 @@ class MoveImagePlanesCommand(Command):
     """Translate reference images (the Move tool). Only the origin corner
     moves — the edge vectors carry size and orientation, so a move can never
     resize or turn the picture by accident."""
+
+    keeps_paint = True
 
     def __init__(self, images, delta: QVector3D) -> None:
         self._images = list(images)
@@ -2566,6 +2728,8 @@ class FlipGroupsCommand(Command):
     keeps its faces pointing OUT. A reflection is an involution: undo flips
     again."""
 
+    keeps_paint = True
+
     def __init__(self, groups, centre: QVector3D, axis: QVector3D) -> None:
         self._groups = list(groups)
         self.centre = QVector3D(centre)
@@ -2667,6 +2831,8 @@ class RotateVerticesCommand(Command):
 class RotateGroupCommand(Command):
     """Rotate a whole group's isolated mesh (rigid — nothing folds). Snapshot
     undo/redo on the group's own mesh."""
+
+    keeps_paint = True
 
     def __init__(self, group, center: QVector3D, axis: QVector3D,
                  degrees: float) -> None:
@@ -2790,6 +2956,8 @@ class ScaleVerticesCommand(Command):
 class ScaleGroupCommand(Command):
     """Uniformly scale a whole group's isolated mesh about ``center``.
     Snapshot undo/redo on the group's own mesh."""
+
+    keeps_paint = True
 
     def __init__(self, group, center: QVector3D, factor: float,
                  axes=None) -> None:
@@ -3228,22 +3396,15 @@ class SnapshotImport(Command):
             try:
                 self.mutate(scene)
             except BaseException:
-                # History.execute restores the mesh, but a loader or AI
-                # recipe that fails halfway has already appended groups
-                # (extrude/revolve land one per call), layers, views,
-                # dimensions, labels or sheets — leave none of them behind.
-                scene.groups[:] = [g for g in scene.groups
-                                   if g in groups_before]
-                scene.layers[:] = [ly for ly in scene.layers
-                                   if ly in layers_before]
-                scene.saved_views[:] = [v for v in scene.saved_views
-                                        if v in views_before]
-                scene.dimensions[:] = [d for d in scene.dimensions
-                                       if d in dims_before]
-                scene.text_labels[:] = [t for t in scene.text_labels
-                                        if t in texts_before]
-                scene.compositions[:] = [c for c in scene.compositions
-                                         if c in sheets_before]
+                # Restore membership and order, not only newly appended items:
+                # failed recipes may also remove or reorder existing objects.
+                # Slice assignment preserves references held by scripting scopes.
+                scene.groups[:] = groups_before
+                scene.layers[:] = layers_before
+                scene.saved_views[:] = views_before
+                scene.dimensions[:] = dims_before
+                scene.text_labels[:] = texts_before
+                scene.compositions[:] = sheets_before
                 raise
             self.after = m.capture_state()
             self.added_groups = [g for g in scene.groups
@@ -3504,9 +3665,6 @@ class MakeGroupCommand(Command):
             if e is not None:
                 stamp_edge_flags(e, flags)
         group = Group(gmesh, name=self._name)
-        # A new group goes on the active layer (its faces keep their own).
-        from core.layers import active_layer_tag
-        group.layer = active_layer_tag(scene)
         if self._component:
             from PySide6.QtGui import QMatrix4x4
             if rot is not None:
@@ -3539,6 +3697,13 @@ class MakeGroupCommand(Command):
                                 (_key(e.a) in grouped and _key(e.b) in grouped)):
                 m.remove_edge(e)
                 scene.selection.discard(e)
+        # The corners only the grouped geometry used are left behind by the
+        # removals above — they do not cascade on purpose — so a box handed
+        # to a component left eight invisible vertices in the loose mesh,
+        # still in the position registry, ready to catch the next thing
+        # drawn there. Sweep them in the same step: the snapshot below takes
+        # them back on undo.
+        m.purge_debris()
 
     def undo(self, scene) -> None:
         if self.group in scene.groups:
@@ -3799,6 +3964,8 @@ class InsertGroupCommand(Command):
     is expressed in the container's own space when that one carries a
     matrix (entering usually pushes it down into the children already)."""
 
+    keeps_groups = True
+
     def __init__(self, group) -> None:
         self.group = group
         self._owner: Optional[list] = None
@@ -3899,8 +4066,6 @@ class MakeNestedGroupCommand(Command):
             self.container = self._inner.group
         elif self.container is None:
             self.container = Group(Mesh(), name=self.name)
-            from core.layers import active_layer_tag
-            self.container.layer = active_layer_tag(scene)
         if self.container not in scene.groups:
             scene.groups.append(self.container)
         self._xform0 = getattr(self.container, "xform", None)
@@ -4397,6 +4562,8 @@ class MoveGroupCommand(Command):
     """Translate a whole group by ``delta`` (every vertex of its mesh). Because
     the group is isolated, this never drags the rest of the model."""
 
+    keeps_paint = True
+
     def __init__(self, group: Group, delta: QVector3D) -> None:
         self.group = group
         self.delta = QVector3D(delta)
@@ -4616,6 +4783,8 @@ class DeleteGroupCommand(Command):
     rolled back, nothing on screen, «quiero eliminar, tampoco puedo»
     (Marco, 2026-09-11, a fountain inside an imported component)."""
 
+    keeps_groups = True
+
     def __init__(self, group: Group) -> None:
         self.group = group
         self.index: Optional[int] = None
@@ -4629,6 +4798,15 @@ class DeleteGroupCommand(Command):
         self.index = owner.index(self.group)
         owner.remove(self.group)
         scene.selection.discard(self.group)
+        # Deleting a group is the moment the user expects the loose mesh to
+        # be the loose mesh again: whatever left a vertex with nothing on it
+        # — a grouping, an operation that removed geometry without sweeping —
+        # no edge draws it, no face holds it, and the position registry still
+        # hands it to whatever is drawn there next. It is not part of the
+        # group being removed (its own mesh travels with it, undo restores it
+        # whole), so sweeping it here cannot lose anything the user can see
+        # or undo back to.
+        scene.mesh.purge_debris()
         scene.version += 1
 
     def undo(self, scene) -> None:
@@ -5002,6 +5180,16 @@ class CompoundCommand(Command):
 
     def __init__(self, commands: Iterable[Command]) -> None:
         self.commands: list[Command] = list(commands)
+
+    @property
+    def keeps_paint(self) -> bool:
+        return all(getattr(c, "keeps_paint", False) for c in self.commands)
+
+    @property
+    def keeps_groups(self) -> bool:
+        return all(getattr(c, "keeps_paint", False)
+                   or getattr(c, "keeps_groups", False)
+                   for c in self.commands)
 
     def do(self, scene) -> None:
         done = []

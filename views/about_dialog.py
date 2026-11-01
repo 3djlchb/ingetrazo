@@ -43,8 +43,9 @@ CONTRIBUTORS = [
      "drafting work: much of how IngeTrazo draws today.",
      "https://github.com/pacaeiro"),
     ("Gabriel Rodríguez Arregin",
-     "Architect. The units system, the Browser, the Solid Inspector, "
-     "Fillet 3D bevels, Join Segments and many everyday editing tools.",
+     "Architect. The units system, the Browser, Layers 2.0, the Solid "
+     "Inspector, Fillet 3D bevels, Bridge, Join Segments, Camera ▸ Axes, "
+     "cleaner exports and many everyday editing tools.",
      "https://github.com/canalsecuario-blip"),
     ("Félix Riestra",
      "The macOS package: IngeTrazo for Mac. Components that come apart "
@@ -130,14 +131,47 @@ CONTRIBUTORS = [
     ("RomanErshow",
      "Russian translation of the interface.",
      "https://github.com/RomanErshow"),
+    ("vandang890615",
+     "Vietnamese translation of the interface.",
+     "https://github.com/vandang890615"),
+    ("BoneNI",
+     "Lao translation of the interface.",
+     "https://github.com/bounkirdni-2025"),
+    ("Prida Takon",
+     "Thai translation of the interface.",
+     "https://github.com/PRIDA-TAKON"),
+    ("ChangWoo Lee",
+     "Korean translation of the interface.",
+     "https://github.com/ultracat"),
+    ("nonasige-ui",
+     "Japanese translation of the interface.",
+     "https://github.com/nonasige-ui"),
     ("Francis Rebouças",
-     "Sheet dimensions and level marks in the document's units, and "
-     "sheets made from the AI bridge undone in one step.",
+     "Sheet dimensions and level marks in the document's units, "
+     "dimensions that follow their object, and Push/Pull fixes.",
      "https://github.com/francisreboucas"),
     ("pkoska",
-     "Fixes for the location map, Move's rotation grips and typed "
-     "values.",
+     "Fixes for the location map, Move's rotation grips, typed values, "
+     "the Line tool, snapping, long thin rectangles, .skp thumbnails and "
+     "the extension manager's downloads on Windows.",
      "https://github.com/pkoska"),
+    ("Kone Venkatesh",
+     "Fixes deep in the modelling core: windows cut at a box's corner, "
+     "lines over other edges, Follow Me's undo and splitting edges.",
+     "https://github.com/konevenkatesh"),
+    ("Clint Armstrong",
+     "A failed scripted import that gives back what it had removed.",
+     "https://github.com/clinta"),
+    ("nicolasmarc",
+     "DXF polyface and mesh entities imported as faces.",
+     "https://github.com/nicolasmarc"),
+    ("BastelBaus",
+     "DAE imports that keep the file's groups.",
+     "https://github.com/BastelBaus"),
+    ("David",
+     "The choice of tool cursor: the tool's icon, a crosshair or an "
+     "arrow.",
+     "https://github.com/Booshdag-io"),
     ("Matt Van Horn",
      "A fix for the AI Assistant crash in the Flatpak.",
      "https://github.com/mvanhorn"),
@@ -146,7 +180,8 @@ CONTRIBUTORS = [
      "retype.",
      "https://github.com/luisfergromo"),
     ("Victor Crespo",
-     "A confirmation before installing an extension nobody has reviewed.",
+     "A confirmation before installing an extension nobody has reviewed, "
+     "and safer archives from outside.",
      "https://github.com/vicc3d"),
     ("APBureauEtude",
      "OBJ and MTL files read and written as UTF-8 on every system.",
@@ -183,6 +218,25 @@ CONTRIBUTORS = [
      "Feature requests from modelling practice: 3D text, copies along "
      "Follow Me, points and Push/Pull on lines.",
      "https://github.com/arthurarquitetoamb"),
+    ("tony1233200",
+     "Fixes for reopened dimensions, New's materials, the extension "
+     "manager, face areas, textures on rotated groups, unnamed groups "
+     "and .skp scale, and a faster viewer.",
+     "https://github.com/tony1233200"),
+    ("Bogdan Demchenko",
+     "Extension toolbars back in place at start-up, the Rectangle's "
+     "preview, Measure from the line under the cursor, Offset's "
+     "reference and pool water.",
+     "https://github.com/hamzah1985"),
+    ("Alexis",
+     "Ctrl+Enter in the leader-text dialog.",
+     "https://github.com/bernalalexis-try"),
+    ("SPMech",
+     "Reports and requests from mechanical modelling.",
+     "https://github.com/SPMech"),
+    ("xcd-droid",
+     "Reports on snapping, the Rectangle and pasting.",
+     "https://github.com/xcd-droid"),
 ]
 
 #: Roll speed: pixels per tick, and the tick.

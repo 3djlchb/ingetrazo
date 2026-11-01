@@ -35,8 +35,9 @@ def test_new_layer_from_the_right_click_becomes_active(monkeypatch):
         assert layer_of(face) == "Muros"
         assert active_layer(scene) == "Muros"
         # the panel shows it: the highlighted row is the new layer
-        item = win.tray.layers.tree.currentItem()
-        assert item is not None and item.data(1, 0x0100) == "Muros"
+        panel = win.layers_dock.panel
+        item = panel.item_for("Muros")
+        assert item is not None and panel.tree.currentItem() is item
         # undo takes the layer away, and the active one falls back
         win.viewport.history.undo()
         assert scene.layer("Muros") is None

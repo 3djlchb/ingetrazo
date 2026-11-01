@@ -22,6 +22,7 @@ unavailable backend.
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 
@@ -120,6 +121,11 @@ def parse_skp(path, progress=None) -> dict:
         try:
             payload = backend.parse(path, progress=progress)
         except Exception:  # noqa: BLE001 — a parser that chokes → try next / fall back
+            # The user only hears "could not read"; the reader's own error
+            # goes to the error log, or a failed import is undiagnosable.
+            logging.getLogger(__name__).warning(
+                "SKP backend %s could not read %s", backend.name, path,
+                exc_info=True)
             payload = None
         # Protos count as geometry: a file whose whole content is
         # components placed once yields no plain groups at all, and

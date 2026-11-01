@@ -95,11 +95,17 @@ def _ring_raw(defn, loop):
 
 def _matrix(m) -> QMatrix4x4:
     """An OpenSKP instance ``matrix`` (row-major 3×3 + translation, in inches)
-    as a ``QMatrix4x4`` whose translation is already in metres."""
+    as a ``QMatrix4x4`` whose translation is already in metres.
+
+    Element 12 is the placement's homogeneous scalar (SketchUp's w): when
+    it is not 1, the 3×3 AND the translation are stored multiplied by it
+    and the real transform divides them back out. Ignoring it brought a
+    component scaled through w = 100 in 100x large and 100x away (#865)."""
+    w = float(m[12]) if len(m) > 12 and m[12] else 1.0
     return QMatrix4x4(
-        m[0], m[1], m[2], m[9] * _INCH,
-        m[3], m[4], m[5], m[10] * _INCH,
-        m[6], m[7], m[8], m[11] * _INCH,
+        m[0] / w, m[1] / w, m[2] / w, m[9] / w * _INCH,
+        m[3] / w, m[4] / w, m[5] / w, m[10] / w * _INCH,
+        m[6] / w, m[7] / w, m[8] / w, m[11] / w * _INCH,
         0.0, 0.0, 0.0, 1.0)
 
 

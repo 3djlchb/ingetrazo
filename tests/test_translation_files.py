@@ -51,3 +51,12 @@ def test_every_language_has_every_message(path):
     data = json.loads(path.read_text(encoding="utf-8"))
     missing = [k for k in source if k not in data]
     assert not missing, f"{len(missing)} messages missing: {missing[:3]}"
+
+
+def test_lao_ships_but_is_not_offered_yet():
+    """Lao is drawn with its marks apart on Windows (round 0.5.11): kept in
+    i18n/ for when that is fixed, left out of the Language menu and
+    Preferences until then."""
+    assert (_I18N_DIR / "lo.json").is_file()
+    assert "lo" not in available_languages()
+    assert {"th", "ja", "ko", "vi"} <= set(available_languages())

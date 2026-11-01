@@ -60,6 +60,7 @@ _DXF_UNITS = (("mm", "Millimetres"), ("cm", "Centimetres"), ("m", "Metres"),
               ("in", "Inches"), ("ft", "Feet"))
 _REST_MODES = (("normal", "Show normally"), ("fade", "Fade"),
                ("hide", "Hide (fastest)"))
+_UNITS_FOR_NEW_KEY = "units/use_for_new_documents"
 
 
 class PreferencesDialog(QDialog):
@@ -184,6 +185,16 @@ class PreferencesDialog(QDialog):
             "How fast a drag turns the head in First Person"))
         form.addRow(tr("Mouse-look sensitivity:"), self._look_sens)
 
+        # The pointer while a tool is active: its own icon (the default),
+        # or the classic crosshair or the plain arrow for who prefers them.
+        self._cursor_style = QComboBox()
+        for key, label in (("tool", "The tool's icon"),
+                           ("crosshair", "Crosshair"), ("arrow", "Arrow")):
+            self._cursor_style.addItem(tr(label), key)
+        self._cursor_style.setCurrentIndex(max(0, self._cursor_style.findData(
+            str(_gs.value("cursor_style", "tool", st)).lower())))
+        form.addRow(tr("Tool cursor:"), self._cursor_style)
+
         self._msaa = QComboBox()
         for n in (0, 2, 4, 8):
             self._msaa.addItem(tr("Off") if n == 0 else f"{n}x", n)
@@ -235,21 +246,22 @@ class PreferencesDialog(QDialog):
             "next start."))
         form.addRow(tr("Graphics server:"), self._platform)
 
-        # The experimental Rust engine (core._native): off by default, read
+        # The Rust engine (core._native): on by default, read
         # once at start. Greyed out in a build that does not carry it.
-        self._rust = QCheckBox(tr("Rust engine (experimental)"))
-        self._rust.setChecked(str(_gs.value(_native.SETTING, "0", st)) == "1")
+        self._rust = QCheckBox(tr("Rust engine"))
+        self._rust.setChecked(str(_gs.value(_native.SETTING, _native.DEFAULT, st)) == "1")
         if _native.available() is None:
             self._rust.setEnabled(False)
             self._rust.setToolTip(tr("This build of IngeTrazo does not carry "
                                      "the Rust engine."))
         else:
             self._rust.setToolTip(tr(
-                "Computes the heavy parts (hidden lines of the sheets and "
-                "more) with the new native engine, much faster on big "
-                "models. It is a test: keep a copy of your files and "
-                "report anything odd with the label rust-engine. Takes "
-                "effect at the next start."))
+                "Computes the heavy parts (opening big files, hidden lines "
+                "of the sheets, intersections, snapping) with the native "
+                "engine, much faster on big models, with the same results. "
+                "On by default: turn it off only if something looks "
+                "different, and report it with the label rust-engine. "
+                "Takes effect at the next start."))
         form.addRow("", self._rust)
         tabs.addTab(general, tr("General"))
 
@@ -331,8 +343,9 @@ class PreferencesDialog(QDialog):
             check.setChecked(state.items[key])
             comm_lay.addWidget(check)
             self._overlay_checks[key] = check
-        catalog = list(getattr(getattr(self._window, "viewport", None),
-                               "ext_overlay_catalog", None) or [])
+        catalog = getattr(getattr(self._window, "viewport", None),
+                          "ext_overlay_catalog", None)
+        catalog = list(catalog) if isinstance(catalog, (list, tuple)) else []
         if not catalog:
             none = QLabel(tr("No extension draws overlays yet."))
             none.setStyleSheet("color: gray;")
@@ -494,12 +507,15 @@ class PreferencesDialog(QDialog):
         # separator, preview): everything a readout is shown with. Its rows
         # and the ones below share one form, like the other pages.
         self._units_panel = UnitsPanel(current)
+        self._initial_units = self._units_panel.settings()
         form = self._units_panel.form
         # Issue #121: the choice used to live only in the open document, so
         # every new file went back to metres.
         self._units_for_new = QCheckBox(tr("Also use for new documents"))
         self._units_for_new.setChecked(
-            _units.new_document_units() == current)
+            str(st.value(_UNITS_FOR_NEW_KEY, "1")).lower() not in ("0", "false"))
+        self._units_for_new_explicit = False
+        self._units_for_new.toggled.connect(self._units_for_new_toggled)
         form.addRow("", self._units_for_new)
         from views.units_start_dialog import ask_at_start
         self._units_at_start = QCheckBox(tr("Ask which units to use at startup"))
@@ -698,6 +714,9 @@ class PreferencesDialog(QDialog):
             st.setValue(sf.KEY_HEIGHT, round(self._figure_height.value(), 3))
             st.setValue(sf.KEY_NAME, self._figure_name.text().strip())
 
+    def _units_for_new_toggled(self, _checked: bool) -> None:
+        self._units_for_new_explicit = True
+
     def accept(self) -> None:  # noqa: D102 — QDialog override
         st = QSettings()
 
@@ -708,9 +727,19 @@ class PreferencesDialog(QDialog):
         if scene is not None and chosen != _units.model_units_of(scene):
             _units.apply_units(scene, chosen)
             scene.version += 1
-            self._window.viewport.update()
-        if self._units_for_new.isChecked():
-            _units.remember_new_document_units(chosen)
+            notify = getattr(self._window.viewport, "notify_scene_changed", None)
+            if callable(notify):
+                notify()
+            else:
+                self._window.viewport.update()
+        for_new = self._units_for_new.isChecked()
+        # The checkbox is a remembered preference, independent of the model.
+        # An unrelated edit must not copy this model's units over a newer
+        # default chosen in another window. Explicit opt-in copies them too.
+        if chosen != self._initial_units or self._units_for_new_explicit:
+            st.setValue(_UNITS_FOR_NEW_KEY, "1" if for_new else "0")
+            if for_new:
+                _units.remember_new_document_units(chosen)
         from views.units_start_dialog import set_ask_at_start
         set_ask_at_start(self._units_at_start.isChecked())
 
@@ -768,10 +797,10 @@ class PreferencesDialog(QDialog):
         _gs.set_value("platform", self._platform.currentData(), st)
         rust = "1" if self._rust.isChecked() else "0"
         if self._rust.isEnabled() and rust != str(
-                _gs.value(_native.SETTING, "0", st)):
+                _gs.value(_native.SETTING, _native.DEFAULT, st)):
             _gs.set_value(_native.SETTING, rust, st)
             QMessageBox.information(
-                self, tr("Rust engine (experimental)"),
+                self, tr("Rust engine"),
                 tr("Restart IngeTrazo to switch the engine."))
         setup = getattr(self._window, "_setup_autosave", None)
         if callable(setup):
@@ -796,6 +825,10 @@ class PreferencesDialog(QDialog):
         st.setValue("nav/invert_wheel",
                     "1" if self._invert.isChecked() else "0")
         self._window.viewport._invert_wheel = self._invert.isChecked()
+        _gs.set_value("cursor_style", self._cursor_style.currentData(), st)
+        reapply = getattr(self._window.viewport, "_apply_tool_cursor", None)
+        if callable(reapply):
+            reapply()                  # the active tool's pointer at once
 
         st.setValue("nav/invert_orbit_y",
                     "1" if self._invert_orbit.isChecked() else "0")

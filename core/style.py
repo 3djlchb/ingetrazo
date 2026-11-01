@@ -70,9 +70,19 @@ class Style:
     # paints. Empty = the flat colour, as always.
     section_fill_texture: str = ""
     section_fill_texture_size: tuple = (1.0, 1.0)
+    # Ambient occlusion (#954): the soft darkening where
+    # surfaces meet. Off in every preset; the distance is in metres (how
+    # far a surface still darkens its neighbour), the intensity 0–2.
+    ambient_occlusion: bool = False
+    ao_distance: float = 0.5
+    ao_intensity: float = 1.0
+    # Colour by layer: faces draw in their layer's colour (core.layers
+    # .layer_color) instead of their material — the shaded, textured and
+    # X-ray modes. Off in every preset; a scene remembers it with the style.
+    color_by_layer: bool = False
 
     def to_dict(self) -> dict:
-        return {
+        out = {
             "name": self.name,
             "face_mode": self.face_mode,
             "edges": self.edges,
@@ -93,7 +103,13 @@ class Style:
             **({"section_fill_texture": self.section_fill_texture,
                 "section_fill_texture_size": list(self.section_fill_texture_size)}
                if self.section_fill_texture else {}),
+            "ambient_occlusion": self.ambient_occlusion,
+            "ao_distance": self.ao_distance,
+            "ao_intensity": self.ao_intensity,
         }
+        if self.color_by_layer:
+            out["color_by_layer"] = True
+        return out
 
     @classmethod
     def from_dict(cls, raw: dict) -> "Style":
@@ -120,6 +136,13 @@ class Style:
             section_fill_texture=str(raw.get("section_fill_texture") or ""),
             section_fill_texture_size=_tex_size(
                 raw.get("section_fill_texture_size")),
+            ambient_occlusion=bool(raw.get("ambient_occlusion",
+                                           d.ambient_occlusion)),
+            ao_distance=_clamped(raw.get("ao_distance"), d.ao_distance,
+                                 AO_DISTANCE_RANGE),
+            ao_intensity=_clamped(raw.get("ao_intensity"), d.ao_intensity,
+                                  AO_INTENSITY_RANGE),
+            color_by_layer=bool(raw.get("color_by_layer", False)),
         )
 
     def copy(self) -> "Style":
@@ -160,6 +183,21 @@ def stored_texture_path(path) -> str:
         return p.relative_to(base).as_posix()
     except ValueError:
         return str(p)
+#: The ambient occlusion controls' ranges (metres; plain factor).
+AO_DISTANCE_RANGE = (0.01, 50.0)
+AO_INTENSITY_RANGE = (0.0, 2.0)
+
+
+def _clamped(raw, default: float, bounds: tuple) -> float:
+    """A number from a dict, kept in ``bounds``; anything malformed (a
+    hand-edited document) falls back to ``default``."""
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return default
+    if v != v:                                   # NaN
+        return default
+    return min(max(v, bounds[0]), bounds[1])
 
 
 def _opt_rgb(raw) -> tuple | None:

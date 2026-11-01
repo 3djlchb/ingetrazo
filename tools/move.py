@@ -206,6 +206,46 @@ GRIP_SPREAD = 0.3
 _FLAT = 1e-6
 
 
+def _convex_hull(points) -> list:
+    """Andrew's monotone chain over (x, y) pairs: the hull, traversed
+    consistently, with no repeated last point."""
+    pts = sorted(set(points))
+    if len(pts) <= 2:
+        return pts
+
+    def cross(o, a, b):
+        return ((a[0] - o[0]) * (b[1] - o[1])
+                - (a[1] - o[1]) * (b[0] - o[0]))
+
+    lower: list = []
+    for p in pts:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+    upper: list = []
+    for p in reversed(pts):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+    return lower[:-1] + upper[:-1]
+
+
+def _within_hull(hull, x: float, y: float, margin: float) -> bool:
+    """(x, y) inside a convex hull, or within *margin* px of it: the
+    signed distance to every edge line stays above −margin."""
+    if len(hull) < 3:
+        return False
+    for i, a in enumerate(hull):
+        b = hull[(i + 1) % len(hull)]
+        ex, ey = b[0] - a[0], b[1] - a[1]
+        length = (ex * ex + ey * ey) ** 0.5
+        if length == 0.0:
+            continue
+        if (ex * (y - a[1]) - ey * (x - a[0])) / length < -margin:
+            return False
+    return True
+
+
 def rotation_grips(obb, eye: QVector3D) -> list:
     """Rotation grips on a group's box (issue #115): four on
     each face turned toward *eye*, as ``(position, face_centre, normal)``.
@@ -690,6 +730,38 @@ class MoveTool(Tool):
             return None
         return g
 
+    def _grips_stay(self, viewport, obb_of, w2p, x: float, y: float) -> bool:
+        """Whether the grips on show may stay although the cursor is off
+        the group's geometry and off every grip: the selection must still
+        be this group (or nothing), and the cursor still inside the
+        group's box as projected on screen, GRIP_PX of margin around it.
+        On a thin, long object — a pipe, an elbow — the grips sit on the
+        box, far from the mesh, and the way from the mesh out to one of
+        them crosses a stretch where the pick finds nothing and no grip
+        is near yet: the grips vanished mid-journey and none could be
+        taken (issue #871). This only ever KEEPS grips that are already
+        on show; acquiring a group still takes the pick, as before."""
+        group = self._grip_group
+        if group is None or not self._grips:
+            return False
+        sel = viewport.scene.selection
+        if sel and set(sel) != {group}:
+            return False
+        frame, lo, hi = obb_of(group)
+        axes = [QVector3D(a) for a in frame]
+        pts = []
+        for i in (0, 1):
+            for j in (0, 1):
+                for k in (0, 1):
+                    corner = (axes[0] * (hi[0] if i else lo[0])
+                              + axes[1] * (hi[1] if j else lo[1])
+                              + axes[2] * (hi[2] if k else lo[2]))
+                    p = w2p(corner)
+                    if p is None:
+                        return False
+                    pts.append((p[0], p[1]))
+        return _within_hull(_convex_hull(pts), x, y, GRIP_PX)
+
     def _track_grips(self, ctx: ToolContext) -> None:
         viewport = ctx.viewport
         obb_of = getattr(viewport, "_group_obb", None)
@@ -704,6 +776,14 @@ class MoveTool(Tool):
         hot = self._grip_under(w2p, x, y)
         if g is None and hot is not None:
             self._hot_grip = hot
+            return
+        if g is None and self._grips_stay(viewport, obb_of, w2p, x, y):
+            # Off the mesh but still inside the shown group's box: the
+            # grips stay (issue #871). The camera may have moved: re-face
+            # them, exactly as when the group is picked again.
+            self._grips = rotation_grips(obb_of(self._grip_group),
+                                         cam.eye())
+            self._hot_grip = self._grip_under(w2p, x, y)
             return
         if g is not self._grip_group:
             self._grip_group = g
