@@ -720,6 +720,8 @@ class Stage(QWidget):
     def __init__(self, viewport) -> None:
         super().__init__()
         self.setObjectName("stage")
+        #: What the stage places: the window's modelling area — since
+        #: upstream's project tabs, those tabs over their viewports.
         self.viewport = viewport
         viewport.setParent(self)
         self.manager: Optional["AreaManager"] = None
@@ -731,7 +733,11 @@ class Stage(QWidget):
         from PySide6.QtCore import QSize
         if self.manager is not None:
             return QSize(240, 160)
-        return self.viewport.minimumSize()
+        # The placed widget is upstream's project-tabs area (#1066): its
+        # minimum is its layout's (the viewport's, under the tab bar), not
+        # a size set on it.
+        w = self.viewport
+        return w.minimumSize().expandedTo(w.minimumSizeHint())
 
     def sizeHint(self):
         from PySide6.QtCore import QSize

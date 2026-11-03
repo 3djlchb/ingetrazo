@@ -9,7 +9,7 @@ import json
 
 import pytest
 from PySide6.QtCore import QSettings, Qt
-from PySide6.QtWidgets import QApplication, QSplitter
+from PySide6.QtWidgets import QApplication, QMainWindow, QSplitter
 
 from views.areas import (DEFAULT_LAYOUT, EMPTY, LAYOUT_KEY, MODE_KEY, VIEWPORT,
                          EmptyEditor)
@@ -58,8 +58,10 @@ def test_the_classic_layout_is_the_default_and_unchanged():
     win = _window()
     try:
         assert win.layout_mode() == "classic"
-        assert win.centralWidget() is win.stage
-        assert win.viewport.parentWidget() is win.stage
+        # Qt's centre is the stage; upstream's project tabs (#1066) sit in
+        # it, the viewport in their stack.
+        assert QMainWindow.centralWidget(win) is win.stage
+        assert win._doc_area.parentWidget() is win.stage
         assert win.stage.manager is None
         assert win.area_manager is None
         assert win._layout_actions["classic"].isChecked()
@@ -82,7 +84,7 @@ def test_areas_start_with_viewport_console_and_the_properties_area_on_the_right(
         assert right.editor_id == "properties"
         assert win.stage.slot.parentWidget() is not None
         assert left.widget(0).isAncestorOf(win.stage.slot)
-        assert win.viewport.parentWidget() is win.stage, "never reparented"
+        assert win._doc_area.parentWidget() is win.stage, "never reparented"
         assert win._layout_actions["areas"].isChecked()
         assert QSettings().value(MODE_KEY) == "areas"
     finally:
@@ -138,7 +140,7 @@ def test_back_to_classic_gives_every_borrowed_widget_back():
             win.profile_dock.widget().parentWidget() is not win.profile_dock
         win.set_layout_mode("classic")
         assert win.stage.manager is None and win.area_manager is None
-        assert win.viewport.parentWidget() is win.stage
+        assert win._doc_area.parentWidget() is win.stage
         inner = win.profile_dock.widget()
         assert inner is not None and inner.parentWidget() is win.profile_dock
     finally:
@@ -175,7 +177,7 @@ def test_a_single_editor_moves_by_swapping_and_the_viewport_never_vanishes():
         m.set_editor(console, VIEWPORT)                  # pick it below: a swap
         assert console.editor_id == VIEWPORT and vp_area.editor_id == "python_console"
         assert console.isAncestorOf(win.stage.slot)
-        assert win.viewport.parentWidget() is win.stage
+        assert win._doc_area.parentWidget() is win.stage
         m.set_editor(console, EMPTY)                     # would lose the viewport
         assert console.editor_id == VIEWPORT
         assert "3D" in win.statusBar().currentMessage()
@@ -413,7 +415,8 @@ def test_the_viewport_never_moves_and_sits_over_its_area():
     try:
         win.show()
         _pump()
-        vp = win.viewport
+        # What the stage places: the project tabs with their viewports.
+        vp = win._doc_area
         parent = vp.parentWidget()
         assert vp.geometry() == win.stage.rect(), "classic: it fills the centre"
         win.set_layout_mode("areas")

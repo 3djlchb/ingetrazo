@@ -273,7 +273,10 @@ def _over_the_view(win, handle):
     The central widget holds it — the viewport itself, or the Stage that
     carries it beside the areas (the window manager)."""
     kids = [c for c in win.children() if c.isWidgetType()]
-    return kids.index(handle) > kids.index(win.centralWidget())
+    view = win.viewport
+    while view.parent() is not win:       # inside the project tabs' area
+        view = view.parent()
+    return kids.index(handle) > kids.index(view)
 
 
 def test_reordering_the_panel_tabs_leaves_the_sidebar_handle_on_top(

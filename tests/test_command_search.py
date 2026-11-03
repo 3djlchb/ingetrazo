@@ -348,7 +348,8 @@ def test_the_real_box_is_fitted_to_the_modelling_area(ventana,
         return QRect(work.topLeft(), size)
     monkeypatch.setattr(cs, "fit_box", spy)
     QApplication.processEvents()                 # the layout settled first
-    central = ventana.viewport                   # the modelling area
+    # The viewport in front, under the project tabs (#1066).
+    central = ventana.viewport
     box = cs.open_search(ventana)
     assert seen == [QRect(central.mapToGlobal(QPoint(0, 0)),
                           central.size())]
