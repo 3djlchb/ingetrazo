@@ -29,11 +29,11 @@ def test_an_indexed_entry_reads_back_as_its_soup():
 
 
 def test_the_disk_cache_format_is_versioned():
-    """Indexed chunks go to ".chunk2": a build from before reads ".chunk"
-    only and would draw the unique corners as a soup."""
+    """Indexed chunks went to ".chunk2"; the soups without an index go to
+    ".chunk3", so neither is ever read as the other."""
     from views.viewport import Viewport
-    assert Viewport._CHUNK_CACHE_EXT == ".chunk2"
-    assert "vcol_ix" in Viewport._CHUNK_CACHE_FIELDS
+    assert Viewport._CHUNK_CACHE_EXT == ".chunk3"
+    assert "vcol_ix" not in Viewport._CHUNK_CACHE_FIELDS
 
 
 class _GLX:

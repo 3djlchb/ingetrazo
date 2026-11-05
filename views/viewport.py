@@ -13242,9 +13242,10 @@ class Viewport(QOpenGLWidget):
         # Opaque faces as a triangle soup, as upstream's slot layout reads
         # them (the faces buffer, the holes, the lazy instance chunks). This
         # fork indexed them (performance phase 2); since upstream's #158
-        # work laid that buffer out by slots, the index path is retired —
-        # vcol_ix stays None and every helper reads the soup as it is.
-        vcol_u, vcol_ix = vcol.tobytes(), None
+        # work laid that buffer out by slots, the index path is retired: no
+        # ``vcol_ix`` key, so this entry has the keys of the array bake
+        # (tests/test_array_bake.py) and _vcol_soup reads it as it is.
+        vcol_u = vcol.tobytes()
         entry = {"fp": fp, "vkey": vkey, "rev": 0, "uid": next(_chunk_uid),
                  "msig": msig,
                  "serial": getattr(mesh, "_mut_serial", None),
@@ -13254,7 +13255,7 @@ class Viewport(QOpenGLWidget):
                  # axes, which is the one the selection cue draws.
                  "obb": None,
                  "edges": edges_data.tobytes(),
-                 "vcol": vcol_u, "vcol_ix": vcol_ix,
+                 "vcol": vcol_u,
                  "by_texture": {k: v.tobytes() for k, v in by_texture.items()},
                  "tcol": {a: v.tobytes() for a, v in tcol.items()},
                  "ttex": {(pth, a, fc): v.tobytes()
@@ -13358,13 +13359,14 @@ class Viewport(QOpenGLWidget):
         return h.hexdigest()
 
     #: The file extension of the on-disk chunks, bumped with their FORMAT:
-    #: ".chunk2" holds the opaque faces indexed (``vcol`` = unique corners +
-    #: ``vcol_ix``). A build from before reads only ".chunk" and must never
-    #: meet these — it would draw the unique corners as a triangle soup.
-    _CHUNK_CACHE_EXT = ".chunk2"
+    #: ".chunk2" held the opaque faces indexed (``vcol`` = unique corners +
+    #: ``vcol_ix``); ".chunk3" holds them as the soup again, without the
+    #: index. Neither must meet a reader of the other format, or the unique
+    #: corners would be drawn as a triangle soup.
+    _CHUNK_CACHE_EXT = ".chunk3"
 
     _CHUNK_CACHE_FIELDS = (
-        "edges", "vcol", "vcol_ix", "by_texture", "tcol", "ttex", "back_vcol",
+        "edges", "vcol", "by_texture", "tcol", "ttex", "back_vcol",
         "back_tex", "back_tcol", "back_ttex", "fvcol", "dback", "areas",
         "v0", "e1", "e2", "tri_ent", "soft_pts", "soft_n0", "soft_c0",
         "soft_n1", "soft_c1", "soft_single", "bbox", "coordsum",
@@ -13382,9 +13384,8 @@ class Viewport(QOpenGLWidget):
                 return None
             with open(path, "rb") as fh:
                 stored = pickle.load(fh)     # our own cache dir only
-            if (stored.get("nf") != len(mesh.faces) or "dback" not in stored
-                    or "vcol_ix" not in stored):
-                return None          # a cache predating the back tint / index
+            if stored.get("nf") != len(mesh.faces) or "dback" not in stored:
+                return None          # a cache predating the back tint
             entry = dict(stored)
             entry.update(fp=fp, vkey=vkey, rev=0, uid=next(_chunk_uid),
                          faces=list(mesh.faces))
@@ -16949,23 +16950,17 @@ class Viewport(QOpenGLWidget):
         if getattr(idx, "tri_v0", None) is None \
                 and not getattr(idx, "own_spans", None):
             return False
-        cam = self.camera
-        if getattr(cam, "perspective", True) or not hasattr(cam, "forward"):
-            origin = cam.eye()
-            delta = world - origin
-            dist = delta.length()
-            if dist < 1e-9:
-                return False
-            d = delta / dist
-            depth = dist
-        else:
-            # A parallel view looks along ONE direction: what hides a point
-            # lies on the sight line through it, not on a line to the eye —
-            # and a parallel view also shows what is behind the eye.
-            d = cam.forward()
-            dist = self._parallel_back(world.x(), world.y(), world.z())
-            origin = world - d * dist
-            depth = abs(QVector3D.dotProduct(world - cam.eye(), d))                 + cam.distance
+        # From the eye in every projection, as upstream's batched pass
+        # (_occluded_many_now) and the engine cast: the parallel view's own
+        # sight line here made the corners and groups found with the engine
+        # on differ from those found without it (tests/test_lazy_native_snap).
+        origin = self.camera.eye()
+        delta = world - origin
+        dist = delta.length()
+        if dist < 1e-9:
+            return False
+        d = delta / dist
+        depth = dist
         # A point ON a face must not be hidden by that face. A fixed 1 mm
         # was the margin, and single-precision coordinates seen from afar
         # or along a face nearly edge-on round by more than that: corners
