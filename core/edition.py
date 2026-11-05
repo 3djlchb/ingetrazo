@@ -8,13 +8,28 @@ The official IngeTrazo uses «IngeTrazo»; with the same name both builds
 would read and write one store, and the layouts, toolbars and panels of
 this edition would show up in the official one. Logs, the extensions
 folder and the texture and render caches stay shared.
+
+The same goes for what the desktop sees: the single-instance socket (a
+second launch hands its file to the running window — of the OTHER build,
+with one name), the Linux launcher and icon, and the window's identity
+that docks and panels group by.
 """
 from __future__ import annotations
+
+import os
+import sys
 
 #: The official build's organization name, where the preferences come from.
 UPSTREAM_ORGANIZATION = "IngeTrazo"
 ORGANIZATION = "IngeTrazo-3djlchb"
 APPLICATION = "IngeTrazo"
+#: What menus and launchers call this edition.
+DISPLAY_NAME = "IngeTrazo 3djlchb"
+#: Desktop file id (Wayland app id), X11 instance name and icon name;
+#: the official build uses «ingetrazo».
+DESKTOP_ID = "ingetrazo-3djlchb"
+#: The official build listens on «ingetrazo-single-instance».
+SINGLE_INSTANCE_SOCKET = "ingetrazo-3djlchb-single-instance"
 
 _adopted = False
 
@@ -25,6 +40,11 @@ def set_identity() -> None:
     from PySide6.QtCore import QCoreApplication
     QCoreApplication.setOrganizationName(ORGANIZATION)
     QCoreApplication.setApplicationName(APPLICATION)
+    if sys.platform.startswith("linux"):
+        # Qt's xcb plugin takes the WM_CLASS instance from RESOURCE_NAME,
+        # else from the binary's name — «ingetrazo» in both builds — and
+        # X11 panels (Cinnamon, MATE) match StartupWMClass against it.
+        os.environ.setdefault("RESOURCE_NAME", DESKTOP_ID)
     adopt_upstream_settings()
 
 

@@ -28,13 +28,14 @@ def test_integrate_writes_launcher_and_icon_pointing_at_the_file(tmp_path, monke
     assert appimage.appimage_path() == img
     assert not appimage.is_integrated(img)
     f = appimage.integrate(img)
-    assert f == data / "applications" / "ingetrazo.desktop"
+    # The 3djlchb edition's own launcher and icon (core/edition.py).
+    assert f == data / "applications" / "ingetrazo-3djlchb.desktop"
     text = f.read_text()
     assert f'Exec="{img}" %f' in text and f"TryExec={img}" in text
-    assert "Icon=ingetrazo" in text and "application/x-ingetrazo" in text
-    assert (data / "icons/hicolor/256x256/apps/ingetrazo.png").read_bytes() == b"\x89PNG"
+    assert "Icon=ingetrazo-3djlchb\n" in text and "application/x-ingetrazo" in text
+    assert (data / "icons/hicolor/256x256/apps/ingetrazo-3djlchb.png").read_bytes() == b"\x89PNG"
     assert appimage.is_integrated(img)
     # a moved AppImage reads as not integrated (the launcher would be stale)
     assert not appimage.is_integrated(tmp_path / "elsewhere.AppImage")
     appimage.remove()
-    assert not f.exists() and not (data / "icons/hicolor/256x256/apps/ingetrazo.png").exists()
+    assert not f.exists() and not (data / "icons/hicolor/256x256/apps/ingetrazo-3djlchb.png").exists()
