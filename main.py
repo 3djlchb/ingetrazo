@@ -495,8 +495,8 @@ def main() -> int:
     _configure_surface_format()
     app = _App(sys.argv)
     app.setProperty("platform_forced", platform_forced)
-    app.setApplicationName("IngeTrazo")
-    app.setOrganizationName("IngeTrazo")
+    from core.edition import set_identity
+    set_identity()
     app.setProperty("gpu_pref", gpu_pref)
     # A driver that cannot serve the format we just asked for takes the
     # whole app down with it, window included — and Qt's own

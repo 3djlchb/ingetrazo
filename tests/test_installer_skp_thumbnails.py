@@ -29,13 +29,14 @@ def _section(name: str) -> str:
 
 
 def test_app_id_is_unchanged():
-    assert "AppId={{63D1C88D-591C-48C8-A13B-5E41810D05E4}" in _script()
+    # The 3djlchb edition's own AppId (it installs beside the official one).
+    assert "AppId={{C8D6F86A-BE83-4152-A84F-89C10F4E4573}" in _script()
 
 
 def test_skp_progid_key_is_still_deleted_on_uninstall():
     entries = _section("Registry").replace("\\\n", " ").splitlines()
     entry = next(line for line in entries
-                 if r'Subkey: "Software\Classes\IngeTrazo.skp";' in line)
+                 if r'Subkey: "Software\Classes\{#MyProgId}.skp";' in line)
     assert "uninsdeletekey" in entry
 
 
@@ -52,7 +53,7 @@ def test_thumbnail_handler_is_copied_to_the_skp_progid():
     assert THUMBNAIL_PROVIDER in code
     write = next(line for line in code.splitlines() if "RegWriteStringValue" in line)
     assert "HKA" in write and "SkpProgId" in write
-    assert "SkpProgId = 'IngeTrazo.skp'" in code
+    assert "SkpProgId = '{#MyProgId}.skp'" in code
 
 
 def test_handler_is_searched_in_progid_extension_and_system_associations():

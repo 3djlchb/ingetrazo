@@ -152,10 +152,8 @@ def choose_platform(preference: str, env: dict | None = None,
 def apply_platform_preference() -> str | None:
     """Called BEFORE the QApplication exists: reads the preference and sets
     ``QT_QPA_PLATFORM`` when the choice says so. Returns what was set."""
-    from PySide6.QtCore import QCoreApplication
-    from core import general_settings
-    QCoreApplication.setOrganizationName("IngeTrazo")
-    QCoreApplication.setApplicationName("IngeTrazo")
+    from core import edition, general_settings
+    edition.set_identity()
     pref = str(general_settings.value("platform", AUTO) or AUTO)
     chosen = choose_platform(pref)
     if chosen:

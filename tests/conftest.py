@@ -47,8 +47,9 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 _app = QApplication.instance() or QApplication(sys.argv[:1])
 # Match the identity configured by main.py so QSettings tests exercise the
 # same isolated application store as the running application.
-_app.setOrganizationName("IngeTrazo")
-_app.setApplicationName("IngeTrazo")
+from core.edition import APPLICATION, ORGANIZATION  # noqa: E402
+_app.setOrganizationName(ORGANIZATION)
+_app.setApplicationName(APPLICATION)
 
 if _WIN_OFFSCREEN:
     from PySide6.QtGui import QFont  # noqa: E402
