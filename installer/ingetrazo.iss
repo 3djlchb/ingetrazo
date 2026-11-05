@@ -10,28 +10,43 @@
 ;
 ; The AppId is a FIXED GUID — never change it between versions, or Windows
 ; treats every release as a different app and upgrades stop being clean.
+;
+; 3djlchb edition: its own AppId, name, folder and ProgIDs, so it installs
+; BESIDE the official IngeTrazo instead of over it (core/edition.py keeps
+; the preferences apart too). Double-clicking .igz or .skp stays with the
+; official build unless the matching task is ticked.
 
-#define MyAppName "IngeTrazo"
-#define MyAppPublisher "Ing. Marco Sumari Tellez"
-#define MyAppURL "https://ingetrazo.com"
+#define MyAppName "IngeTrazo 3djlchb"
+#define MyAppPublisher "3djlchb (IngeTrazo de Ing. Marco Sumari Tellez)"
+#define MyAppURL "https://github.com/3djlchb/ingetrazo"
 #define MyAppExeName "ingetrazo.exe"
+; Prefix of this edition's ProgIDs; the official build uses «IngeTrazo».
+#define MyProgId "IngeTrazo3djlchb"
 
 ; MyAppVersion is injected from the build command with /DMyAppVersion=X.Y.Z
 #ifndef MyAppVersion
   #define MyAppVersion "0.0.0-dev"
 #endif
+; VersionInfoVersion takes numbers only: «0.6.0-3djlchb» → «0.6.0».
+#define MyDashPos Pos("-", MyAppVersion)
+#if MyDashPos > 0
+  #define MyAppFileVersion Copy(MyAppVersion, 1, MyDashPos - 1)
+#else
+  #define MyAppFileVersion MyAppVersion
+#endif
 
 [Setup]
-; FIXED AppId GUID — generated once for IngeTrazo. Changing it breaks upgrades.
-AppId={{63D1C88D-591C-48C8-A13B-5E41810D05E4}
+; FIXED AppId GUID — generated once for the 3djlchb edition. Changing it
+; breaks upgrades; the official one is {63D1C88D-591C-48C8-A13B-5E41810D05E4}.
+AppId={{C8D6F86A-BE83-4152-A84F-89C10F4E4573}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} {#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
-AppSupportURL=https://github.com/tuxiasumari/ingetrazo/issues
-AppUpdatesURL=https://github.com/tuxiasumari/ingetrazo/releases
-VersionInfoVersion={#MyAppVersion}
+AppSupportURL={#MyAppURL}/issues
+AppUpdatesURL={#MyAppURL}/releases
+VersionInfoVersion={#MyAppFileVersion}
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription=Modelador 3D libre para ingenieria y arquitectura
 VersionInfoProductName={#MyAppName}
@@ -76,30 +91,37 @@ Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortugue
 Name: "polish"; MessagesFile: "compiler:Languages\Polish.isl"
 
 [CustomMessages]
-english.SkpDefault=Open .skp files with IngeTrazo (double-click)
+english.SkpDefault=Open .skp files with {#MyAppName} (double-click)
+english.IgzDefault=Open .igz documents with {#MyAppName} (double-click)
 english.FileAssociations=File associations:
-english.IgzDocument=IngeTrazo document
-english.DaeModel=COLLADA model (IngeTrazo)
-english.SkpModel=SKP model (IngeTrazo)
-spanish.SkpDefault=Abrir archivos .skp con IngeTrazo (doble clic)
+english.IgzDocument={#MyAppName} document
+english.DaeModel=COLLADA model ({#MyAppName})
+english.SkpModel=SKP model ({#MyAppName})
+spanish.SkpDefault=Abrir archivos .skp con {#MyAppName} (doble clic)
+spanish.IgzDefault=Abrir documentos .igz con {#MyAppName} (doble clic)
 spanish.FileAssociations=Asociaciones de archivos:
-spanish.IgzDocument=Documento de IngeTrazo
-spanish.DaeModel=Modelo COLLADA (IngeTrazo)
-spanish.SkpModel=Modelo SKP (IngeTrazo)
-brazilianportuguese.SkpDefault=Abrir arquivos .skp com o IngeTrazo (clique duplo)
+spanish.IgzDocument=Documento de {#MyAppName}
+spanish.DaeModel=Modelo COLLADA ({#MyAppName})
+spanish.SkpModel=Modelo SKP ({#MyAppName})
+brazilianportuguese.SkpDefault=Abrir arquivos .skp com o {#MyAppName} (clique duplo)
+brazilianportuguese.IgzDefault=Abrir documentos .igz com o {#MyAppName} (clique duplo)
 brazilianportuguese.FileAssociations=Associações de arquivos:
-brazilianportuguese.IgzDocument=Documento do IngeTrazo
-brazilianportuguese.DaeModel=Modelo COLLADA (IngeTrazo)
-brazilianportuguese.SkpModel=Modelo SKP (IngeTrazo)
-polish.SkpDefault=Otwieraj pliki .skp w IngeTrazo (dwukrotne kliknięcie)
+brazilianportuguese.IgzDocument=Documento do {#MyAppName}
+brazilianportuguese.DaeModel=Modelo COLLADA ({#MyAppName})
+brazilianportuguese.SkpModel=Modelo SKP ({#MyAppName})
+polish.SkpDefault=Otwieraj pliki .skp w {#MyAppName} (dwukrotne kliknięcie)
+polish.IgzDefault=Otwieraj dokumenty .igz w {#MyAppName} (dwukrotne kliknięcie)
 polish.FileAssociations=Skojarzenia plików:
-polish.IgzDocument=Dokument IngeTrazo
-polish.DaeModel=Model COLLADA (IngeTrazo)
-polish.SkpModel=Model SKP (IngeTrazo)
+polish.IgzDocument=Dokument {#MyAppName}
+polish.DaeModel=Model COLLADA ({#MyAppName})
+polish.SkpModel=Model SKP ({#MyAppName})
 
 [Tasks]
+; Both unchecked: beside the official build, double-click stays with it.
+Name: "igzdefault"; Description: "{cm:IgzDefault}"; \
+    GroupDescription: "{cm:FileAssociations}"; Flags: unchecked
 Name: "skpdefault"; Description: "{cm:SkpDefault}"; \
-    GroupDescription: "{cm:FileAssociations}"
+    GroupDescription: "{cm:FileAssociations}"; Flags: unchecked
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; \
     GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
@@ -143,13 +165,18 @@ Root: HKCU; Subkey: "Software\Microsoft\DirectX\UserGpuPreferences"; \
 
 ; ── .igz — IngeTrazo's own format: full association + branded document icon ──
 ; Double-click opens the document in IngeTrazo and Explorer shows the .igz icon.
+; This edition always appears in «Open with»; it takes the double-click only
+; with the igzdefault task, leaving it to the official build otherwise.
 Root: HKA; Subkey: "Software\Classes\.igz"; ValueType: string; \
-    ValueData: "IngeTrazo.Document"; Flags: uninsdeletevalue
-Root: HKA; Subkey: "Software\Classes\IngeTrazo.Document"; ValueType: string; \
+    ValueData: "{#MyProgId}.Document"; Tasks: igzdefault; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.igz\OpenWithProgids"; \
+    ValueType: string; ValueName: "{#MyProgId}.Document"; ValueData: ""; \
+    Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\{#MyProgId}.Document"; ValueType: string; \
     ValueData: "{cm:IgzDocument}"; Flags: uninsdeletekey
-Root: HKA; Subkey: "Software\Classes\IngeTrazo.Document\DefaultIcon"; \
+Root: HKA; Subkey: "Software\Classes\{#MyProgId}.Document\DefaultIcon"; \
     ValueType: string; ValueData: "{app}\ingetrazo-igz.ico,0"
-Root: HKA; Subkey: "Software\Classes\IngeTrazo.Document\shell\open\command"; \
+Root: HKA; Subkey: "Software\Classes\{#MyProgId}.Document\shell\open\command"; \
     ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
 
 ; ── .dae / .skp — standard interchange formats: "Open with" only ────────────
@@ -159,32 +186,31 @@ Root: HKA; Subkey: "Software\Classes\IngeTrazo.Document\shell\open\command"; \
 ; each extension's OpenWithProgids list, so IngeTrazo appears in the right-click
 ; "Open with" menu. The ProgId carries the branded icon, which only takes visual
 ; effect if the user later chooses IngeTrazo as the default for these files.
-Root: HKA; Subkey: "Software\Classes\IngeTrazo.dae"; ValueType: string; \
+Root: HKA; Subkey: "Software\Classes\{#MyProgId}.dae"; ValueType: string; \
     ValueData: "{cm:DaeModel}"; Flags: uninsdeletekey
-Root: HKA; Subkey: "Software\Classes\IngeTrazo.dae\DefaultIcon"; \
+Root: HKA; Subkey: "Software\Classes\{#MyProgId}.dae\DefaultIcon"; \
     ValueType: string; ValueData: "{app}\ingetrazo-dae.ico,0"
-Root: HKA; Subkey: "Software\Classes\IngeTrazo.dae\shell\open\command"; \
+Root: HKA; Subkey: "Software\Classes\{#MyProgId}.dae\shell\open\command"; \
     ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
 Root: HKA; Subkey: "Software\Classes\.dae\OpenWithProgids"; \
-    ValueType: string; ValueName: "IngeTrazo.dae"; ValueData: ""; \
+    ValueType: string; ValueName: "{#MyProgId}.dae"; ValueData: ""; \
     Flags: uninsdeletevalue
 
-Root: HKA; Subkey: "Software\Classes\IngeTrazo.skp"; ValueType: string; \
+Root: HKA; Subkey: "Software\Classes\{#MyProgId}.skp"; ValueType: string; \
     ValueData: "{cm:SkpModel}"; Flags: uninsdeletekey
-Root: HKA; Subkey: "Software\Classes\IngeTrazo.skp\DefaultIcon"; \
+Root: HKA; Subkey: "Software\Classes\{#MyProgId}.skp\DefaultIcon"; \
     ValueType: string; ValueData: "{app}\ingetrazo-skp.ico,0"
-Root: HKA; Subkey: "Software\Classes\IngeTrazo.skp\shell\open\command"; \
+Root: HKA; Subkey: "Software\Classes\{#MyProgId}.skp\shell\open\command"; \
     ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
 Root: HKA; Subkey: "Software\Classes\.skp\OpenWithProgids"; \
-    ValueType: string; ValueName: "IngeTrazo.skp"; ValueData: ""; \
+    ValueType: string; ValueName: "{#MyProgId}.skp"; ValueData: ""; \
     Flags: uninsdeletevalue
-; Optional task: make IngeTrazo the DEFAULT opener for .skp (double-click).
-; Checked by default — .skp now opens natively (openskp backend). Users who
-; prefer another program for .skp can untick it; uninstall removes the value
-; and Windows falls back to the previous handler.
-; The [Code] section below copies the previous thumbnail handler to IngeTrazo.skp.
+; Optional task: make this edition the DEFAULT opener for .skp (double-click).
+; Unchecked in this edition, so the official build keeps it. Uninstall
+; removes the value and Windows falls back to the previous handler.
+; The [Code] section below copies the previous thumbnail handler to SkpProgId.
 Root: HKA; Subkey: "Software\Classes\.skp"; ValueType: string; \
-    ValueData: "IngeTrazo.skp"; Tasks: skpdefault; Flags: uninsdeletevalue
+    ValueData: "{#MyProgId}.skp"; Tasks: skpdefault; Flags: uninsdeletevalue
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; \
@@ -197,7 +223,7 @@ Filename: "{app}\{#MyAppExeName}"; \
 // owned the extension before (issue #804). IngeTrazo has no handler of its own,
 // so IngeTrazo.skp borrows the one Windows used until now.
 const
-  SkpProgId = 'IngeTrazo.skp';
+  SkpProgId = '{#MyProgId}.skp';
   ThumbnailHandlerKey = 'ShellEx\{E357FCCD-A995-4576-B01F-234630154E96}';
 
 var
