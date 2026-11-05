@@ -22,8 +22,14 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-DESKTOP_NAME = "ingetrazo.desktop"
-ICON_NAME = "ingetrazo.png"
+from core.edition import DESKTOP_ID, DISPLAY_NAME
+
+# The 3djlchb edition's own launcher and icon, beside the official
+# «ingetrazo» ones (core/edition.py).
+DESKTOP_NAME = f"{DESKTOP_ID}.desktop"
+ICON_NAME = f"{DESKTOP_ID}.png"
+#: The icon at the AppDir root, as build-appimage.sh lays it out.
+APPDIR_ICON = "ingetrazo.png"
 
 
 def appimage_path() -> Optional[Path]:
@@ -68,18 +74,18 @@ def _desktop_entry(appimage: Path) -> str:
     return (
         "[Desktop Entry]\n"
         "Type=Application\n"
-        "Name=IngeTrazo\n"
+        f"Name={DISPLAY_NAME}\n"
         "GenericName=3D Modeler\n"
         "GenericName[es]=Modelador 3D\n"
         "Comment=Free 3D modeler for civil engineering and architecture\n"
         "Comment[es]=Modelador 3D libre para ingeniería civil y arquitectura\n"
         f'Exec="{exe}" %f\n'
         f'TryExec={exe}\n'
-        "Icon=ingetrazo\n"
+        f"Icon={DESKTOP_ID}\n"
         "Terminal=false\n"
         "Categories=Graphics;3DGraphics;Engineering;\n"
         "MimeType=application/x-ingetrazo;model/vnd.collada+xml;application/vnd.sketchup.skp;\n"
-        "StartupWMClass=ingetrazo\n"
+        f"StartupWMClass={DESKTOP_ID}\n"
         "X-AppImage-Integrated=true\n"
     )
 
@@ -89,7 +95,7 @@ def integrate(appimage: Path, icon_source: Optional[Path] = None) -> Path:
     ``icon_source`` defaults to the AppDir's root icon."""
     if icon_source is None:
         appdir = os.environ.get("APPDIR", "")
-        cand = Path(appdir) / ICON_NAME if appdir else None
+        cand = Path(appdir) / APPDIR_ICON if appdir else None
         icon_source = cand if cand is not None and cand.is_file() else None
     f = desktop_file()
     f.parent.mkdir(parents=True, exist_ok=True)

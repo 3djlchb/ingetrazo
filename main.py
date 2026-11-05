@@ -528,7 +528,8 @@ def main() -> int:
     # matched nothing, so the shell (and GNOME Software's Open button, which
     # waits for the launched app to appear) never tied it to the launcher.
     import os as _os
-    app.setDesktopFileName(_os.environ.get("FLATPAK_ID") or "ingetrazo")
+    from core.edition import DESKTOP_ID
+    app.setDesktopFileName(_os.environ.get("FLATPAK_ID") or DESKTOP_ID)
     # Light or dark chrome: follows the desktop by default, live
     # (Preferences ▸ General ▸ Theme pins one). See views/theme.py.
     from views.theme import apply_theme
@@ -558,7 +559,8 @@ def main() -> int:
     # then kills as a duplicate (the 'it doesn't open' failure). Fail-open:
     # any socket trouble just launches a normal standalone instance.
     from PySide6.QtNetwork import QLocalServer, QLocalSocket
-    _SOCKET = "ingetrazo-single-instance"
+    # The edition's own: the official build's would take our documents.
+    from core.edition import SINGLE_INSTANCE_SOCKET as _SOCKET
     # File ▸ New Window starts a second IngeTrazo with --new-window: it must
     # NOT hand over to the running one like a double-click does, or the
     # new window never appears (issue #76).

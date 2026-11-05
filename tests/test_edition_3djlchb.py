@@ -91,3 +91,28 @@ def test_a_later_start_keeps_the_edition_own_preferences(tmp_path):
     mine = _ini(tmp_path, "edition", {"language": "en"})
     edition.adopt_upstream_settings(mine, theirs)
     assert mine.value("language") == "en"
+
+
+def test_a_launch_never_hands_its_file_to_the_official_build():
+    # With one socket name, opening this edition while the official one
+    # runs handed the document to the official window and quit.
+    assert edition.SINGLE_INSTANCE_SOCKET != "ingetrazo-single-instance"
+    main_py = (ROOT / "main.py").read_text(encoding="utf-8")
+    assert "SINGLE_INSTANCE_SOCKET as _SOCKET" in main_py
+    assert '_SOCKET = "ingetrazo-single-instance"' not in main_py
+
+
+def test_the_linux_launcher_is_not_the_official_one():
+    from core import appimage
+    assert appimage.DESKTOP_NAME == "ingetrazo-3djlchb.desktop"
+    entry = appimage._desktop_entry(Path("/opt/IngeTrazo.AppImage"))
+    assert f"Name={edition.DISPLAY_NAME}\n" in entry
+    assert f"StartupWMClass={edition.DESKTOP_ID}\n" in entry
+    main_py = (ROOT / "main.py").read_text(encoding="utf-8")
+    assert 'get("FLATPAK_ID") or DESKTOP_ID' in main_py
+
+
+def test_the_linux_files_carry_the_edition_name():
+    script = (ROOT / "packaging" / "build-appimage.sh").read_text(encoding="utf-8")
+    assert 'NAME="IngeTrazo-3djlchb-$VERSION"' in script
+    assert 'APPIMAGE="$OUT/$NAME-$ARCH.AppImage"' in script

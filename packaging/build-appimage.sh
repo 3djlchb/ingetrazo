@@ -27,7 +27,10 @@ ARCH=${ARCH:-x86_64}
 cd "$ROOT"
 VERSION=$("$PYTHON" -c 'from core.version import __version__; print(__version__)')
 APPDIR="$WORK/IngeTrazo.AppDir"
-APPIMAGE="$OUT/IngeTrazo-$VERSION-$ARCH.AppImage"
+# The 3djlchb edition's files, so they never overwrite the official ones
+# downloaded to the same folder (still matched by IngeTrazo-*-x86_64…).
+NAME="IngeTrazo-3djlchb-$VERSION"
+APPIMAGE="$OUT/$NAME-$ARCH.AppImage"
 
 echo "==> IngeTrazo $VERSION -> $APPIMAGE"
 
@@ -48,8 +51,8 @@ echo "==> tarball"
 # The same bundle, without the AppImage wrapper: extract and run. For users
 # whose distro lacks FUSE (the classic AppImage complaint) or who want to
 # unpack under /opt. Ships the desktop file and icon for manual integration.
-TARDIR="$WORK/IngeTrazo-$VERSION"
-TARBALL="$OUT/IngeTrazo-$VERSION-linux-$ARCH.tar.gz"
+TARDIR="$WORK/$NAME"
+TARBALL="$OUT/$NAME-linux-$ARCH.tar.gz"
 rm -rf "$TARDIR"
 mkdir -p "$TARDIR" "$OUT"
 cp -a "$WORK/pyi/ingetrazo/." "$TARDIR/"
@@ -67,7 +70,7 @@ it to ~/.local/share/applications/.
 
 Prefer the AppImage from the same release if your distro has FUSE.
 TXT
-tar -C "$WORK" -czf "$TARBALL" "IngeTrazo-$VERSION"
+tar -C "$WORK" -czf "$TARBALL" "$NAME"
 printf '%s  (%s)\n' "$TARBALL" "$(du -h "$TARBALL" | cut -f1)"
 
 echo "==> AppDir"
