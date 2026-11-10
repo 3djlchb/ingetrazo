@@ -116,3 +116,43 @@ def test_the_linux_files_carry_the_edition_name():
     script = (ROOT / "packaging" / "build-appimage.sh").read_text(encoding="utf-8")
     assert 'NAME="IngeTrazo-3djlchb-$VERSION"' in script
     assert 'APPIMAGE="$OUT/$NAME-$ARCH.AppImage"' in script
+
+
+def _deb_script() -> str:
+    return (ROOT / "packaging" / "build-deb.sh").read_text(encoding="utf-8")
+
+
+def test_the_deb_carries_the_edition_names():
+    script = _deb_script()
+    assert f"PKG={edition.DESKTOP_ID} " in script
+    assert f'NAME="{edition.DISPLAY_NAME}"' in script
+    for line in ("Exec=$PKG %f", "Icon=$PKG", "StartupWMClass=$PKG"):
+        assert line in script, line
+    # Installed under /opt/<pkg> with /usr/bin/<pkg>: never the official
+    # «ingetrazo» paths.
+    assert '"$STAGE/opt/$PKG"' in script and '"$STAGE/usr/bin/$PKG"' in script
+
+
+def test_the_deb_depends_on_what_the_bundle_leaves_to_the_host():
+    # ingetrazo.spec drops these from the bundle (_HOST_ONLY): the package
+    # must make apt bring them.
+    depends = next(line for line in _deb_script().splitlines()
+                   if line.startswith("Depends:"))
+    for pkg in ("libx11-6", "libx11-xcb1", "libxcb-glx0", "libstdc++6",
+                "libgcc-s1", "libglib2.0-0", "libgl1", "libegl1"):
+        assert pkg in depends, pkg
+
+
+def test_the_deb_document_icons_do_not_take_the_official_names():
+    script = _deb_script()
+    assert 'cp "$f" "$dest/$PKG-$(basename "$f")"' in script
+    assert r'<icon name=\"$PKG-' in script
+
+
+def test_the_release_builds_and_installs_the_deb():
+    wf = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+        encoding="utf-8")
+    assert "packaging/build-deb.sh build/pyi/ingetrazo dist" in wf
+    assert "sudo apt-get install -y ./dist/ingetrazo-3djlchb_*_amd64.deb" in wf
+    assert "ingetrazo-3djlchb --check" in wf
+    assert "dist/ingetrazo-3djlchb_*_amd64.deb --clobber" in wf

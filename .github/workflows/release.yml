@@ -98,6 +98,37 @@ jobs:
           mkdir -p tarcheck && tar -C tarcheck -xzf dist/IngeTrazo-*-linux-x86_64.tar.gz
           tarcheck/IngeTrazo-*/ingetrazo --check
 
+      # The 3djlchb edition as a .deb (Debian, LMDE, Ubuntu, Mint), wrapping
+      # the bundle build-appimage.sh left in build/pyi.
+      - name: Build the .deb
+        run: PYTHON=./venv/bin/python packaging/build-deb.sh build/pyi/ingetrazo dist
+
+      # Installed through apt as a user would, it must find its data, start
+      # a real GUI, and leave nothing behind when removed.
+      - name: Smoke test the .deb
+        run: |
+          sudo apt-get install -y ./dist/ingetrazo-3djlchb_*_amd64.deb
+          ingetrazo-3djlchb --check
+          test -f /usr/share/applications/ingetrazo-3djlchb.desktop
+          set +e
+          xvfb-run -a timeout 25 ingetrazo-3djlchb > deb-smoke.log 2>&1
+          rc=$?
+          set -e
+          cat deb-smoke.log
+          if [ "$rc" != "124" ]; then
+            echo "!! the installed .deb exited with $rc instead of surviving to the timeout"
+            exit 1
+          fi
+          sudo apt-get remove -y ingetrazo-3djlchb
+          test ! -e /opt/ingetrazo-3djlchb && test ! -e /usr/bin/ingetrazo-3djlchb
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IngeTrazo-3djlchb-deb-amd64
+          path: dist/ingetrazo-3djlchb_*_amd64.deb
+          if-no-files-found: error
+          retention-days: 7
+
       - uses: actions/upload-artifact@v4
         with:
           name: IngeTrazo-AppImage-x86_64
@@ -123,7 +154,8 @@ jobs:
             || gh release create "${GITHUB_REF_NAME}" --title "IngeTrazo ${GITHUB_REF_NAME}" --generate-notes
           gh release upload "${GITHUB_REF_NAME}" \
             dist/IngeTrazo-*-x86_64.AppImage \
-            dist/IngeTrazo-*-linux-x86_64.tar.gz --clobber
+            dist/IngeTrazo-*-linux-x86_64.tar.gz \
+            dist/ingetrazo-3djlchb_*_amd64.deb --clobber
           # The example documents, under a name without the version so the
           # website can point at .../releases/latest/download/ for good.
           (cd examples && zip -q -r ../IngeTrazo-ejemplos.zip .)
