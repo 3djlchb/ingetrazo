@@ -168,10 +168,11 @@ Root: HKCU; Subkey: "Software\Microsoft\DirectX\UserGpuPreferences"; \
 ; This edition always appears in «Open with»; it takes the double-click only
 ; with the igzdefault task, leaving it to the official build otherwise.
 Root: HKA; Subkey: "Software\Classes\.igz"; ValueType: string; \
-    ValueData: "{#MyProgId}.Document"; Tasks: igzdefault; Flags: uninsdeletevalue
+    ValueData: "{#MyProgId}.Document"; Tasks: igzdefault; \
+    Flags: uninsdeletevalue uninsdeletekeyifempty
 Root: HKA; Subkey: "Software\Classes\.igz\OpenWithProgids"; \
     ValueType: string; ValueName: "{#MyProgId}.Document"; ValueData: ""; \
-    Flags: uninsdeletevalue
+    Flags: uninsdeletevalue uninsdeletekeyifempty
 Root: HKA; Subkey: "Software\Classes\{#MyProgId}.Document"; ValueType: string; \
     ValueData: "{cm:IgzDocument}"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\{#MyProgId}.Document\DefaultIcon"; \
@@ -186,6 +187,10 @@ Root: HKA; Subkey: "Software\Classes\{#MyProgId}.Document\shell\open\command"; \
 ; each extension's OpenWithProgids list, so IngeTrazo appears in the right-click
 ; "Open with" menu. The ProgId carries the branded icon, which only takes visual
 ; effect if the user later chooses IngeTrazo as the default for these files.
+; Uninstalling undoes the entries last to first, so each extension's own key is
+; listed before what goes inside it, and goes only if nothing else is left there.
+Root: HKA; Subkey: "Software\Classes\.dae"; Flags: uninsdeletekeyifempty
+Root: HKA; Subkey: "Software\Classes\.skp"; Flags: uninsdeletekeyifempty
 Root: HKA; Subkey: "Software\Classes\{#MyProgId}.dae"; ValueType: string; \
     ValueData: "{cm:DaeModel}"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\{#MyProgId}.dae\DefaultIcon"; \
@@ -194,7 +199,7 @@ Root: HKA; Subkey: "Software\Classes\{#MyProgId}.dae\shell\open\command"; \
     ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
 Root: HKA; Subkey: "Software\Classes\.dae\OpenWithProgids"; \
     ValueType: string; ValueName: "{#MyProgId}.dae"; ValueData: ""; \
-    Flags: uninsdeletevalue
+    Flags: uninsdeletevalue uninsdeletekeyifempty
 
 Root: HKA; Subkey: "Software\Classes\{#MyProgId}.skp"; ValueType: string; \
     ValueData: "{cm:SkpModel}"; Flags: uninsdeletekey
@@ -204,7 +209,7 @@ Root: HKA; Subkey: "Software\Classes\{#MyProgId}.skp\shell\open\command"; \
     ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
 Root: HKA; Subkey: "Software\Classes\.skp\OpenWithProgids"; \
     ValueType: string; ValueName: "{#MyProgId}.skp"; ValueData: ""; \
-    Flags: uninsdeletevalue
+    Flags: uninsdeletevalue uninsdeletekeyifempty
 ; Optional task: make this edition the DEFAULT opener for .skp (double-click).
 ; Unchecked in this edition, so the official build keeps it. Uninstall
 ; removes the value and Windows falls back to the previous handler.

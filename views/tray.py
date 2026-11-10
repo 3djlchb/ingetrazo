@@ -4367,17 +4367,20 @@ _SCENE_ALWAYS_BUMP = os.environ.get("INGETRAZO_SCENE_ALWAYS_BUMP", "") == "1"
 
 class ScenesPanel(QWidget):
     """Saved views — "Scenes": named camera + layer-visibility
-    snapshots. Double-click recalls one; the buttons capture the current
-    view, update the selected scene from it, or delete it. Together with
-    layers this is the '2D that emerges' workflow bottled: "Planta" = top
-    camera + parallel + plan layers, one click away."""
+    snapshots. Double-click (or a click on its dot) recalls one; the buttons
+    capture the current view, update the active scene from it, rename,
+    delete, and move the selected scene up or down; its right-click menu
+    renames it and moves it too. Together with layers this is the '2D that
+    emerges' workflow bottled: "Planta" = top camera + parallel + plan
+    layers, one click away."""
 
     def __init__(self, window) -> None:
         super().__init__()
-        from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel,
-                                       QPushButton, QTreeWidget, QVBoxLayout)
+        from PySide6.QtWidgets import (QAbstractItemView, QLabel, QPushButton,
+                                       QTreeWidget, QVBoxLayout)
         self._window = window
         self._updating = False
+        self._row_edit = False
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 6, 8, 8)
         hint = QLabel(tr("Double-click a scene to show it"))
@@ -4396,9 +4399,9 @@ class ScenesPanel(QWidget):
         self.tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
         # Double-click already SHOWS the scene, so it must not also open the
         # name editor (the two fought: the scene change refreshed the list
-        # and killed the editor). Rename = F2, the Rename button, or — as
-        # renaming a file in Windows — a click, a pause, and a second click
-        # on the row already selected (a quick double-click cancels that).
+        # and killed the editor). Rename = F2, the Rename button, the
+        # right-click menu, or — as renaming a file in Windows — a click, a
+        # pause, and a second click on the row already selected.
         self.tree.setEditTriggers(QAbstractItemView.EditKeyPressed
                                   | QAbstractItemView.SelectedClicked)
         self.tree.itemDoubleClicked.connect(self._on_activate)
@@ -4410,8 +4413,16 @@ class ScenesPanel(QWidget):
         delete.setShortcutContext(Qt.WidgetShortcut)
         delete.triggered.connect(self._on_delete)
         self.tree.addAction(delete)
+        for keys, step in (("Alt+Up", -1), ("Alt+Down", 1)):
+            move = QAction(self.tree)
+            move.setShortcut(QKeySequence(keys))
+            move.setShortcutContext(Qt.WidgetShortcut)
+            move.triggered.connect(
+                lambda _c=False, s=step: self._on_move(s))
+            self.tree.addAction(move)
+        self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._on_list_menu)
         lay.addWidget(self.tree)
-        row = QHBoxLayout()
         add_btn = QPushButton(tr("+ Scene"))
         add_btn.setToolTip(tr("Save the current view and layer visibility"))
         add_btn.clicked.connect(self._on_add)
@@ -4424,27 +4435,66 @@ class ScenesPanel(QWidget):
         del_btn = QPushButton(tr("−"))
         del_btn.setToolTip(tr("Delete the selected scenes"))
         del_btn.clicked.connect(self._on_delete)
+        up_btn = self.up_btn = QPushButton("↑")
+        up_btn.setToolTip(tr("Move up (Alt+↑)"))
+        up_btn.clicked.connect(lambda _c=False: self._on_move(-1))
+        down_btn = self.down_btn = QPushButton("↓")
+        down_btn.setToolTip(tr("Move down (Alt+↓)"))
+        down_btn.clicked.connect(lambda _c=False: self._on_move(1))
+        # As narrow as they read, or they push the row onto a second line.
+        for btn in (up_btn, down_btn):
+            btn.setFixedWidth(32)
         row = FlowLayout(spacing=4)          # wraps in a narrow tray (see Layers)
         row.addWidget(add_btn)
         row.addWidget(upd_btn)
         row.addWidget(ren_btn)
         row.addWidget(del_btn)
+        row.addWidget(up_btn)
+        row.addWidget(down_btn)
         lay.addLayout(row)
         self.refresh()
 
     def _scene(self):
         return self._window.viewport.scene
 
+    @staticmethod
+    def _view_of(item):
+        return item.data(1, Qt.UserRole) if item is not None else None
+
     # ---- Model → view --------------------------------------------------------
     def refresh(self) -> None:
-        from PySide6.QtWidgets import QAbstractItemView, QTreeWidgetItem
-        if self.tree.state() == QAbstractItemView.EditingState:
-            return                      # a rename in progress: leave it be
+        from PySide6.QtWidgets import QAbstractItemView
+        views = list(self._scene().saved_views)
+        # A rename in progress (or the row's own edit being committed): the
+        # rows stay — rebuilding would delete the row under the editor.
+        if (not self._row_edit
+                and self.tree.state() != QAbstractItemView.EditingState):
+            self._rebuild_rows(views)
+        # The scene tabs under the viewport list the same scenes.
+        follow = getattr(self._window, "_refresh_scene_tabs", None)
+        if callable(follow):
+            follow()
+        # So do the view sources of the sheet composer; only when they
+        # changed, since every edit of the model passes through here.
+        names = [v.name for v in views]
+        if names != getattr(self, "_names", None):
+            self._names = names
+            composer = getattr(self._window, "_composer", None)
+            reload = getattr(composer, "_reload_view_sources", None)
+            if reload is not None:
+                reload()
+
+    def _rebuild_rows(self, views) -> None:
+        from PySide6.QtCore import QItemSelectionModel
+        from PySide6.QtWidgets import QTreeWidgetItem
         self._updating = True
+        # What is picked stays picked: «↑» pressed twice moves the same
+        # scene twice, and every edit of the model passes through here.
+        picked = [self._view_of(it) for it in self.tree.selectedItems()]
+        current = self._view_of(self.tree.currentItem())
         self.tree.clear()
-        scene = self._scene()
-        active = getattr(scene, "active_view", None)
-        for view in scene.saved_views:
+        active = getattr(self._scene(), "active_view", None)
+        for view in views:
             item = QTreeWidgetItem(["", view.name])
             item.setData(1, Qt.UserRole, view)
             item.setData(0, ACTIVE_ROLE, view is active)
@@ -4452,8 +4502,20 @@ class ScenesPanel(QWidget):
                             else tr("Click to show this scene"))
             item.setFlags(item.flags() | Qt.ItemIsEditable)
             self.tree.addTopLevelItem(item)
+            if view is current:
+                self.tree.setCurrentItem(item, 1,
+                                         QItemSelectionModel.NoUpdate)
+            if any(view is p for p in picked):
+                item.setSelected(True)
         fit_rows(self.tree)
         self._updating = False
+
+    def _row_of(self, view):
+        for i in range(self.tree.topLevelItemCount()):
+            item = self.tree.topLevelItem(i)
+            if self._view_of(item) is view:
+                return item
+        return None
 
     # ---- View → model --------------------------------------------------------
     def _on_item_clicked(self, item, column) -> None:
@@ -4462,7 +4524,12 @@ class ScenesPanel(QWidget):
             self._on_activate(item)
 
     def _on_activate(self, item, _column=None) -> None:
-        view = item.data(1, Qt.UserRole)
+        self.show_view(self._view_of(item))
+
+    def show_view(self, view) -> None:
+        """Show the saved ``view`` (a double-click or a dot here, and a
+        click on the scene tabs under the viewport). It becomes the ACTIVE
+        scene, the one the viewport's label names."""
         if view is None:
             return
         scene = self._scene()
@@ -4470,7 +4537,7 @@ class ScenesPanel(QWidget):
         before = shown_state(scene)
         view.apply(scene, self._window.viewport.camera)
         scene.active_view = view
-        _mark_active(self.tree, lambda it: it.data(1, Qt.UserRole) is view,
+        _mark_active(self.tree, lambda it: self._view_of(it) is view,
                      tr("Active scene"), tr("Click to show this scene"))
         # A scene that only moves the camera changes nothing the caches
         # keyed on ``scene.version`` hold: bumping it re-synced every edge
@@ -4495,38 +4562,116 @@ class ScenesPanel(QWidget):
         dock = getattr(self._window, "layers_dock", None)
         if dock is not None:
             dock.panel.refresh()
+        row = getattr(self._window, "_scene_tabs", None)
+        if row is not None:
+            row.mark_view(view)
         self._window.statusBar().showMessage(
             tr("Scene '{name}'", name=view.name), 2000)
 
     def _on_item_changed(self, item, column=1) -> None:
         if self._updating or column != 1:
             return
-        view = item.data(1, Qt.UserRole)
+        view = self._view_of(item)
         if view is None:
             return
-        scene = self._scene()
-        new_name = item.text(1).strip()
-        if new_name and new_name != view.name:
-            if any(v is not view and v.name == new_name
-                   for v in scene.saved_views):
-                self._window.statusBar().showMessage(
-                    tr("A scene named '{name}' already exists",
-                       name=new_name), 3000)
-            else:
-                from core.outliner import rename_scene
-                if rename_scene(scene, view, new_name):
-                    self._touch()
+        # The row is being edited: rename without rebuilding the rows (the
+        # item that emitted this signal must outlive it), then show the
+        # real name — the new one, or the old one when it was refused.
+        self._row_edit = True
+        try:
+            self.rename_view(view, item.text(1))
+        finally:
+            self._row_edit = False
         self._updating = True
         item.setText(1, view.name)
         self._updating = False
 
+    def rename_view(self, view, name: str) -> bool:
+        """Rename the scene ``view``, as one undo step (the list's own
+        editor, the scene tabs, the composer's panel); the sheet frames that
+        show it follow. False when nothing changed: an empty name, the same
+        one, or another scene's."""
+        name = (name or "").strip()
+        if not name or name == view.name:
+            return False
+        if any(v is not view and v.name == name
+               for v in self._scene().saved_views):
+            self._window.viewport.flash_status(tr(
+                "Another scene is already called «{name}»", name=name), 3500)
+            return False
+        from core.saved_views import RenameSceneCommand
+        self._window.viewport.history.execute(RenameSceneCommand(view, name))
+        self.refresh()
+        self._touch()
+        return True
+
+    def ask_rename(self, view) -> None:
+        """Ask for the new name of the scene ``view`` (the scene tabs)."""
+        if view is None:
+            return
+        from views import prompts
+        name, ok = prompts.get_text(self._window, tr("Rename…"),
+                                    tr("New name:"), text=view.name)
+        if ok:
+            self.rename_view(view, name)
+
     def _on_rename(self) -> None:
-        """Edit the highlighted scene's name in place."""
+        """Edit the highlighted scene's name in place (F2, «Rename»)."""
         item = self.tree.currentItem()
         if item is None:
             return
         self.tree.setFocus()
         self.tree.editItem(item, 1)
+
+    def move_view(self, view, index: int) -> None:
+        """Move the scene ``view`` to ``index`` in the list, as one undo
+        step (↑ ↓, Alt+↑/↓, and dragging a scene tab)."""
+        views = self._scene().saved_views
+        if view not in views or view is None:
+            return
+        index = max(0, min(int(index), len(views) - 1))
+        if index == views.index(view):
+            return
+        from core.saved_views import MoveSceneCommand
+        self._window.viewport.history.execute(MoveSceneCommand(view, index))
+        self.refresh()
+        self._touch()
+
+    def _on_move(self, step: int) -> None:
+        """One place up or down for the scene the list is on."""
+        view = self._view_of(self.tree.currentItem())
+        if view is None:
+            return
+        self.move_view(view, self._scene().saved_views.index(view) + step)
+
+    def _on_list_menu(self, pos) -> None:
+        menu = self._build_list_menu(self.tree.itemAt(pos))
+        if menu is not None:
+            menu.exec(self.tree.viewport().mapToGlobal(pos))
+
+    def _build_list_menu(self, item):
+        """A scene's right-click menu in the list: rename it, move it."""
+        if item is None:
+            return None
+        from PySide6.QtWidgets import QMenu
+        self.tree.setCurrentItem(item, 1)
+        views = self._scene().saved_views
+        at = views.index(self._view_of(item))
+        menu = QMenu(self.tree)
+        menu.setAttribute(Qt.WA_DeleteOnClose)
+        menu.addAction(tr("Rename…"), lambda: self.tree.editItem(item, 1))
+        menu.addSeparator()
+        up = menu.addAction(tr("Move up (Alt+↑)"), lambda: self._on_move(-1))
+        up.setEnabled(at > 0)
+        down = menu.addAction(tr("Move down (Alt+↓)"),
+                              lambda: self._on_move(1))
+        down.setEnabled(at < len(views) - 1)
+        return menu
+
+    def add_scene(self) -> None:
+        """Keep the current view as a new scene (the «+ Scene» button, and
+        «+» of the scene tabs under the viewport)."""
+        self._on_add()
 
     def _on_add(self) -> None:
         from core.saved_views import SavedView
@@ -4536,11 +4681,15 @@ class ScenesPanel(QWidget):
         taken = {v.name for v in scene.saved_views}
         while f"{base} {n}" in taken:
             n += 1
-        view = SavedView.capture(f"{base} {n}", scene,
-                                 self._window.viewport.camera)
-        scene.saved_views.append(view)
-        scene.active_view = view        # it is what you are looking at
+        from core.history import AddSceneCommand
+        self._window.viewport.history.execute(AddSceneCommand(
+            SavedView.capture(f"{base} {n}", scene,
+                              self._window.viewport.camera)))
+        scene.active_view = scene.saved_views[-1]   # what you are looking at
         self.refresh()
+        row = getattr(self._window, "_scene_tabs", None)
+        if row is not None:                   # it holds this very view
+            row.mark_view(scene.saved_views[-1])
         self._touch()
 
     def _on_update(self) -> None:
@@ -4550,26 +4699,38 @@ class ScenesPanel(QWidget):
         scene = self._scene()
         view = getattr(scene, "active_view", None)
         if view is None or view not in scene.saved_views:
-            item = self.tree.currentItem()
-            view = item.data(1, Qt.UserRole) if item is not None else None
+            view = self._view_of(self.tree.currentItem())
         if view is None:
             self._window.statusBar().showMessage(
                 tr("Show a scene (or pick one in the list) to update it"),
                 3000)
             return
+        self.update_view(view)
+
+    def update_view(self, view) -> None:
+        """Keep the current view in the scene ``view`` (the «Update»
+        button, and the scene tabs' right-click menu); it becomes the
+        active scene, since it now IS the current view."""
+        if view is None:
+            return
+        scene = self._scene()
         view.recapture(scene, self._window.viewport.camera)
-        scene.active_view = view           # it now IS the current view
+        scene.active_view = view
         self.refresh()
         self._touch()
         self._window.statusBar().showMessage(
             tr("Scene '{name}' updated", name=view.name), 2000)
 
     def _on_delete(self) -> None:
-        views = [it.data(1, Qt.UserRole) for it in self.tree.selectedItems()]
+        views = [self._view_of(it) for it in self.tree.selectedItems()]
         if not views:
             item = self.tree.currentItem()
-            views = [item.data(1, Qt.UserRole)] if item is not None else []
-        views = [v for v in views if v is not None]
+            views = [self._view_of(item)] if item is not None else []
+        self.delete_views([v for v in views if v is not None])
+
+    def delete_views(self, views) -> None:
+        """Delete these scenes, as one undo step (the «−» button, Delete in
+        the list, and the scene tabs' right-click menu)."""
         if not views:
             return
         from core.history import DeleteScenesCommand
@@ -4676,6 +4837,21 @@ class BimPanel(QWidget):
             rows += p is None
             it += 1
         fit_rows(self.tree, rows=rows)
+
+    def _folded_groups(self) -> set:
+        """The ``id`` of the group behind each folded row of the table."""
+        from PySide6.QtWidgets import QTreeWidgetItemIterator
+        folded = set()
+        it = QTreeWidgetItemIterator(self.tree)
+        while it.value() is not None:
+            item = it.value()
+            if item.childCount() and not item.isExpanded():
+                idx = item.data(0, Qt.UserRole)
+                group = (self._containers[-idx - 1] if idx < 0
+                         else self._objects[idx].get("group"))
+                folded.add(id(group))
+            it += 1
+        return folded
 
     # ---- Actions -------------------------------------------------------------
     def _on_tag(self) -> None:
@@ -4829,6 +5005,9 @@ class BimPanel(QWidget):
                 and getattr(self, "_untagged_scene", None) == id(scene)
                 and hist.tags_cv == scene.content_version):
             return
+        # The rows are rebuilt below, and opening a group is a change of
+        # content: what the user folded has to survive it (#1117).
+        folded = self._folded_groups()
         # A memo per panel: an edit re-measures only the objects it touched.
         memo = self.__dict__.setdefault("_takeoff_memo", {})
         self._objects = collect_objects(scene, memo)
@@ -4917,6 +5096,14 @@ class BimPanel(QWidget):
             else:
                 parent.addChild(item)
         self.tree.expandAll()
+        self.tree.blockSignals(True)            # one _fit_tree, below
+        try:
+            for rows in (tagged_rows, group_rows):
+                for key, row in rows.items():
+                    if key in folded:
+                        row.setExpanded(False)
+        finally:
+            self.tree.blockSignals(False)
         self._fit_tree()
 
 

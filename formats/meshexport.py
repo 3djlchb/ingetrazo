@@ -208,13 +208,6 @@ def _is_mirrored(matrix) -> bool:
     return matrix is not None and matrix.determinant() < 0.0
 
 
-def _piece_paint(piece, top):
-    """The paint a piece's default faces show (``core.group.
-    effective_material``): its own, else the top-level object's."""
-    return (getattr(piece, "material", None)
-            or getattr(top, "material", None) or None)
-
-
 def _shown(face, paint) -> dict:
     """The attrs ``face`` is drawn with under a container's ``paint``."""
     from core.materials import effective_attrs
@@ -227,8 +220,8 @@ def _placements_facing(group, toward, figures: bool = True):
     outline (``"mesh"``) by :func:`_turned_toward`, a simple quad rebuilt by
     :func:`_facing_quad`. ``figures=False`` leaves the figures out
     (:func:`faceme_figures`)."""
-    from core.group import iter_placements, transformed_mesh
-    for g, m in iter_placements(group):
+    from core.group import iter_painted_placements, transformed_mesh
+    for g, m, paint in iter_painted_placements(group):
         kind = getattr(g, "billboard", False)
         if kind and not figures:
             continue
@@ -237,7 +230,6 @@ def _placements_facing(group, toward, figures: bool = True):
             mesh = _turned_toward(mesh, toward)
         elif kind:
             mesh = _facing_quad(mesh, toward)
-        paint = _piece_paint(g, group)
         # (a figure rebuilt to face the camera is not a mirror image)
         mirrored = _is_mirrored(m) and not kind
         for f in mesh.faces:
@@ -246,7 +238,8 @@ def _placements_facing(group, toward, figures: bool = True):
 
 def _group_faces(group):
     """A group's faces in world space as ``(face, attrs)``, each with the
-    paint it shows: the face's own, else its piece's, else the group's.
+    paint it shows: the face's own, else its piece's, else the nearest
+    painted container's above it.
 
     When no nested piece carries paint of its own and no copy is a mirror
     image, the whole group is ONE paint and comes through
@@ -254,16 +247,15 @@ def _group_faces(group):
     is walked piece by piece — the merged mesh no longer knows which piece
     a face came from, nor which copy was mirrored — each component copy
     read in place through its matrix (:class:`_PlacedFace`)."""
-    from core.group import iter_placements, world_mesh
-    pieces = list(iter_placements(group))
-    if (not any(getattr(p, "material", None) for p, _m in pieces[1:])
-            and not any(_is_mirrored(m) for _p, m in pieces)):
+    from core.group import iter_painted_placements, world_mesh
+    pieces = list(iter_painted_placements(group))
+    if (not any(getattr(p, "material", None) for p, _m, _paint in pieces[1:])
+            and not any(_is_mirrored(m) for _p, m, _paint in pieces)):
         paint = getattr(group, "material", None)
         for f in world_mesh(group).faces:
             yield f, _shown(f, paint)
         return
-    for p, m in pieces:
-        paint = _piece_paint(p, group)
+    for p, m, paint in pieces:
         if m is None:                       # classic group: already world
             for f in p.mesh.faces:
                 yield f, _shown(f, paint)
@@ -587,13 +579,29 @@ def corner_normals(face, smoother: SmoothNormals | None = None) -> dict:
     return (smoother or SmoothNormals()).corners(face)
 
 
+def _worn_outright(attrs: dict) -> dict:
+    """The attrs a one-material copy of the face goes out with: what its front
+    shows, or its back's own material when the front shows nothing. A face
+    turned inside out and painted on the side you see has only a back; left
+    to the front it renders in the default colour, the paint gone. The front
+    wins whenever it shows anything, own or a container's paint (``attrs`` is
+    already :func:`_shown`): the viewport draws that on the front too, and
+    a room painted from inside must not change the walls' outside."""
+    from core.materials import has_own_material
+    back = attrs.get("back")
+    if (isinstance(back, dict) and has_own_material(back)
+            and not has_own_material(attrs)):
+        return back
+    return attrs
+
+
 def _add_face(face, materials, prims, attrs=None, smoother=None) -> None:
     """One face's triangles into ``prims`` under its material's key, each
     corner with its normal: the face's own, or the surface's at a corner on
     a soft edge (:class:`SmoothNormals`). ``attrs`` is what the face shows
     (:func:`world_faces_painted`), its own by default."""
     from core.texture import affine_uv, planar_uv
-    attrs = face.attrs if attrs is None else attrs
+    attrs = _worn_outright(face.attrs if attrs is None else attrs)
     smoother = smoother or SmoothNormals()
     n = smoother.flat(face)
     smooth = smoother.corners(face)

@@ -6643,6 +6643,8 @@ class ComposerWindow(QMainWindow):
 
         # Save / update / export live on the sheet toolbar at the top
         # (Marco, 2026-09-08: «para no sobrecargar la barra lateral derecha»).
+        from views.wheel_guard import guard_wheel
+        guard_wheel(panel)
         return panel
 
     def _build_canvas_area(self, view) -> _QWidget:
@@ -10737,6 +10739,8 @@ class ComposerWindow(QMainWindow):
         item.update()
         for it in others:
             it.update()
+        if "campos" in changed and isinstance(model, Cajetin):
+            self.refresh_items()             # any text may read these rows
         return others
 
     def _on_frame_props(self, *_a) -> None:
@@ -11726,26 +11730,24 @@ class ComposerWindow(QMainWindow):
                     f.setExpanded(True)
         tree.blockSignals(False)
 
-    def _item_rows(self) -> list:
-        """Every item row of the list, folders or not.
+    def _item_rows(self):
+        """Every item row of the list, folders or not, top to bottom.
 
-        A list, walked to the end before returning — never a generator. A
-        ``next(r for r in _item_rows() ...)`` left the generator suspended
-        with its ``QTreeWidgetItemIterator`` alive and registered on the
-        tree; the next ``tree.clear()`` (the deferred list refresh) then ran
-        with an iterator pointing at the rows it was freeing — an access
-        violation whenever the garbage collector had not reaped the
-        generator first."""
-        from PySide6.QtWidgets import QTreeWidgetItemIterator
-        rows = []
-        it = QTreeWidgetItemIterator(self.items_list)
-        while it.value() is not None:
-            row = it.value()
+        By hand, not with a QTreeWidgetItemIterator: PySide makes the tree
+        the Python parent of one, so it outlives the walk and stays
+        registered in the tree's model. clear() deletes a row that Python
+        still holds (the right-click menu's actions hold theirs) without
+        telling the iterators, and the next clear() walks up from the one
+        left dangling — the native crash Marco hit, 05-11."""
+        tree = self.items_list
+        stack = [tree.topLevelItem(i)
+                 for i in range(tree.topLevelItemCount() - 1, -1, -1)]
+        while stack:
+            row = stack.pop()
             if row.data(0, Qt.UserRole) is not None:
-                rows.append(row)
-            it += 1
-        del it
-        return rows
+                yield row
+            stack.extend(row.child(i)
+                         for i in range(row.childCount() - 1, -1, -1))
 
     def _sync_items_list(self, item) -> None:
         self.items_list.blockSignals(True)
