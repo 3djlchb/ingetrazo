@@ -222,3 +222,14 @@ def test_the_update_check_asks_this_fork_releases():
         "tag_name": "v9.9.9",
         "html_url": "https://github.com/ingelibre/ingetrazo/releases/tag/v9.9.9"})
     assert r.url == uc.RELEASES_PAGE + "/latest"
+
+
+def test_the_release_builds_no_snap_under_the_official_name():
+    # Upstream's snap is «ingetrazo»: this edition would take the official
+    # one's place. The fork's release workflow has no Snap job; an upstream
+    # merge that brings it back must be undone.
+    wf = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+        encoding="utf-8")
+    jobs = re.findall(r"^  ([A-Za-z0-9_-]+):\s*$", wf, re.M)
+    assert "snap" not in jobs, jobs
+    assert "snapcraft" not in wf.split("# 3djlchb edition: no Snap job")[0]
