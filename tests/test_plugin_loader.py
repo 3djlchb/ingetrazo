@@ -90,7 +90,8 @@ def test_missing_directory_is_fine(tmp_path):
 def test_default_dirs_shape():
     dirs = plugin_dirs()
     assert dirs[0].name == "plugins"
-    assert user_plugins_dir().parts[-2:] == ("ingetrazo", "plugins")
+    from core import edition  # 3djlchb: the edition's own folder
+    assert user_plugins_dir().parts[-2:] == (edition.DATA_DIR_LOWER, "plugins")
 
 
 # ---- Failure isolation (the app must always start) ------------------------
