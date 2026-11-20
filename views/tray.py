@@ -4646,7 +4646,7 @@ class ScenesPanel(QWidget):
             "folder_add", tr("Add folder"), self._on_add_folder)
         self.update_btn = self._tool_button(
             "refresh",
-            tr("Update the selected scene from the current view"),
+            tr("Update the active scene from the current view"),  # 3djlchb
             self._on_update)
         bar.addWidget(self.add_btn)
         bar.addWidget(self.add_folder_btn)
@@ -5470,7 +5470,17 @@ class ScenesPanel(QWidget):
         return view
 
     def _on_update(self) -> None:
-        self.update_view(self.current_view())
+        # 3djlchb: the ACTIVE scene takes the current view — show a scene,
+        # orbit away («No scene»), Update — whatever row is highlighted;
+        # with no scene active, the highlighted one, which becomes active.
+        scene = self._scene()
+        active = getattr(scene, "active_view", None)
+        view = (active if any(v is active for v in scene.saved_views)
+                else self.current_view())
+        self.update_view(view)
+        if view is not None:
+            scene.active_view = self.shown = view
+            self.refresh()
 
     def update_view(self, view) -> None:
         """Keep the current view in the scene ``view``, as one undo step

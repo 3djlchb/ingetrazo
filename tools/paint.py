@@ -185,7 +185,11 @@ def clicked_back_side(viewport, face, group, x: float, y: float) -> bool:
     # container's for a nested component, which turned the normal wrong.
     placed = getattr(viewport, "pick_face_placement", None)
     if placed is not None:
-        pface, pgroup = placed(x, y)
+        # Read only, as every pick of the Paint tool since #1092: a big lazy
+        # mesh painted whole stays unbuilt (3djlchb, after upstream 0.6.2).
+        from views.array_bake import reading_only
+        with reading_only():
+            pface, pgroup = placed(x, y)
         if pface is face:
             group = pgroup
     _p, normal = face_plane_world(face, getattr(group, "xform", None))
