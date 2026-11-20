@@ -51,6 +51,20 @@ from core.edition import APPLICATION, ORGANIZATION  # noqa: E402
 _app.setOrganizationName(ORGANIZATION)
 _app.setApplicationName(APPLICATION)
 
+# The app's style goes on before any window exists, as main.py does through
+# apply_theme. Left to the first test that applies a theme, setStyle walked
+# every widget the earlier files had left behind and met one already gone:
+# the SIGSEGV that took down a whole batch at test_theme_slate (12-11).
+def _wear_app_style() -> None:
+    from views import theme as _theme
+    app = QApplication.instance()
+    if not isinstance(app.style(), _theme.ChromeStyle):
+        _theme._app_style = _theme.ChromeStyle("Fusion")
+        app.setStyle(_theme._app_style)
+
+
+_wear_app_style()
+
 if _WIN_OFFSCREEN:
     from PySide6.QtGui import QFont  # noqa: E402
     for _alias in ("Sans", "Sans Serif", "DejaVu Sans"):

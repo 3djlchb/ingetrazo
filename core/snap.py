@@ -13,6 +13,9 @@ Snap kinds (priority high → low):
    ``"intersection_edge"`` and with a face (loose, in a group or component)
    ``"intersection_face"``.
 7. ``"midpoint"``       — midpoint of an existing edge.
+   ``"face_center"``    — centre of area of the face under the cursor or
+                          of a selected face (with the endpoints, which
+                          win a tie).
 8. ``"origin"``         — world origin.
 9. ``"on_edge"``        — arbitrary point along an edge (start a shape on it).
 10. ``"aligned"``       — level with / in line with an encouraged point across
@@ -40,6 +43,7 @@ from typing import Callable, Optional
 
 from PySide6.QtGui import QVector3D
 
+from .geometry import Edge
 
 # Colors used by the rubber band and the 2D snap indicator. RGB floats [0, 1].
 COLOR_ENDPOINT = (0.16, 0.62, 0.36)
@@ -80,8 +84,9 @@ AXIS_NAMES = {"x": "X", "y": "Y", "z": "Z"}
 #: _POINT_SNAPS``, which asks the same question of the protractor's width.
 POINT_SNAP_KINDS = frozenset({
     "endpoint", "midpoint", "intersection", "intersection_edge",
-    "intersection_face", "on_edge", "on_line", "close",
+    "intersection_face", "on_edge", "on_line", "on_circle", "close",
     "origin", "center", "centre", "component_origin", "arc_midpoint",
+    "quadrant",
 })
 
 
@@ -111,6 +116,9 @@ class SnapResult:
     #: snaps to a corner on that line — locked to red, the line stays red
     #: (#711, BastelBaus: «keep line color»).
     lock_color: Optional[tuple[float, float, float]] = None
+    # 17.10.26 BasteBaus: stores an edge if snapped to an edge to be used in 
+    #                     dimension tool do directly create a dimension on an edge
+    edge: Optional[Edge] = None
 
 
 # ---- Helpers ---------------------------------------------------------------
@@ -684,6 +692,100 @@ def curve_centers_of_face(face, xform=None) -> list:
             if fit is not None:
                 out.append((fit[0], fit[1], (li, ri)))
     return out
+
+
+def _inside_2d(p, poly) -> bool:
+    """Even-odd ray cast: whether ``p`` lies inside ``poly`` [(x, y)]."""
+    x, y = p
+    inside = False
+    j = len(poly) - 1
+    for i in range(len(poly)):
+        xi, yi = poly[i]
+        xj, yj = poly[j]
+        if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
+            inside = not inside
+        j = i
+    return inside
+
+
+def face_center_of_face(face, xform=None) -> Optional[QVector3D]:
+    """The *Face center* inference: the centre of AREA of the face, holes
+    taken out, in world space (``xform`` places a component's face).
+
+    Not the average of the corners (``Face.centroid``): a trapezoid, or a
+    face with many vertices crowded on one side (a rounded corner), pulls
+    that average away from the middle.
+
+    A centre in a HOLE still counts: the middle of a frame or a ring is
+    exactly the point one is after. ``None`` when it falls outside the
+    outer boundary — the elbow of an L, where the point belongs to no
+    part of the face — and for a degenerate face."""
+    loops = [list(face.vertices)] + [list(h) for h in (face.holes or [])]
+    if xform is not None:
+        loops = [[xform.map(QVector3D(p)) for p in loop] for loop in loops]
+    outer = loops[0]
+    if len(outer) < 3:
+        return None
+    # Newell's normal of the outer loop, in doubles.
+    nx = ny = nz = 0.0
+    for i in range(len(outer)):
+        a, b = outer[i], outer[(i + 1) % len(outer)]
+        nx += (a.y() - b.y()) * (a.z() + b.z())
+        ny += (a.z() - b.z()) * (a.x() + b.x())
+        nz += (a.x() - b.x()) * (a.y() + b.y())
+    nlen = math.sqrt(nx * nx + ny * ny + nz * nz)
+    if nlen < 1e-12:
+        return None
+    n = (nx / nlen, ny / nlen, nz / nlen)
+    # An orthonormal basis (u, v) of the face's plane, origin at a corner.
+    seed = (1.0, 0.0, 0.0) if abs(n[0]) < 0.9 else (0.0, 1.0, 0.0)
+    u = (n[1] * seed[2] - n[2] * seed[1],
+         n[2] * seed[0] - n[0] * seed[2],
+         n[0] * seed[1] - n[1] * seed[0])
+    ul = math.sqrt(u[0] ** 2 + u[1] ** 2 + u[2] ** 2)
+    u = (u[0] / ul, u[1] / ul, u[2] / ul)
+    v = (n[1] * u[2] - n[2] * u[1],
+         n[2] * u[0] - n[0] * u[2],
+         n[0] * u[1] - n[1] * u[0])
+    o = outer[0]
+    ox, oy, oz = o.x(), o.y(), o.z()
+
+    def flat(loop):
+        out = []
+        for p in loop:
+            dx, dy, dz = p.x() - ox, p.y() - oy, p.z() - oz
+            out.append((dx * u[0] + dy * u[1] + dz * u[2],
+                        dx * v[0] + dy * v[1] + dz * v[2]))
+        return out
+
+    flats = [flat(loop) for loop in loops if len(loop) >= 3]
+    area = sx = sy = 0.0
+    for k, poly in enumerate(flats):
+        a = cx = cy = 0.0
+        for i in range(len(poly)):
+            x0, y0 = poly[i]
+            x1, y1 = poly[(i + 1) % len(poly)]
+            cr = x0 * y1 - x1 * y0
+            a += cr
+            cx += (x0 + x1) * cr
+            cy += (y0 + y1) * cr
+        if abs(a) < 1e-18:
+            continue
+        # Each loop's area-weighted centre, whatever its winding: the
+        # outer loop adds, the holes take away.
+        sign = 1.0 if k == 0 else -1.0
+        w = abs(a) * 0.5 * sign
+        area += w
+        sx += w * cx / (3.0 * a)
+        sy += w * cy / (3.0 * a)
+    if area <= 1e-12:
+        return None
+    c = (sx / area, sy / area)
+    if not _inside_2d(c, flats[0]):
+        return None
+    return QVector3D(ox + c[0] * u[0] + c[1] * v[0],
+                     oy + c[0] * u[1] + c[1] * v[1],
+                     oz + c[0] * u[2] + c[1] * v[2])
 
 
 def _vertex_on_line(
@@ -1276,17 +1378,20 @@ def _pairs_that_may_meet(edges):
 
 
 def _intersection_snap(
-    cx, cy, scene, world_to_pixel, et, is_occluded, are_occluded=None
+    cx, cy, scene, world_to_pixel, et, is_occluded, are_occluded=None,
+    candidate_world=None,
 ) -> Optional[SnapResult]:
-    """Green intersection point where two edges / guide lines actually cross.
+    """Green intersection point where two edges, guide lines or guide circles
+    actually cross.
 
     Every other ``"intersection"`` in this module is *directional*: it only
     appears while a lock line is active (an axis lock, a perpendicular draw, an
     extension). Two construction guides crossing produce no such direction, so
     their meeting point was never offered — the cursor slid along whichever
     guide was nearest (``on_edge``). The X of two guides is the whole reason to
-    draw them, so collect the edges whose screen span passes under the cursor
-    and intersect them pairwise in 3-D (edge intersection).
+    draw them, so collect the targets whose screen span passes under the cursor
+    and intersect them pairwise in 3-D (edge intersection, circle-circle and
+    circle-segment for the guide circles).
 
     ``segment_intersection`` rejects parallel and *skew* pairs, so two edges
     that merely cross in projection do not light up a point that isn't there.
@@ -1302,7 +1407,7 @@ def _intersection_snap(
     # that keeps the pairwise test tiny and stops a far-away crossing (whose
     # pixel happens to land near the cursor by coincidence of depth) from
     # firing.
-    near = []
+    near_edges = []
     for edge in scene.edges:
         if getattr(edge, "center", False):
             continue  # the degenerate pseudo-edge that carries a circle centre
@@ -1315,8 +1420,16 @@ def _intersection_snap(
             continue
         d, _t = _closest_on_segment_2d((cx, cy), pa, pb)
         if d <= et:
-            near.append(edge)
-    if len(near) < 2:
+            near_edges.append(edge)
+    # Guide circles whose rim passes under the cursor.
+    near_circles = []
+    if candidate_world is not None:
+        for circ in getattr(scene, "circles", ()):
+            d, _rim = _closest_on_circle(
+                circ, candidate_world, cx, cy, world_to_pixel, et)
+            if d is not None:
+                near_circles.append(circ)
+    if not near_circles and len(near_edges) < 2:
         return None
 
     # The crossings under the cursor, in pair order; the nearest one in
@@ -1324,18 +1437,34 @@ def _intersection_snap(
     # nearest first, in batches (_first_visible): under the plant of #158
     # a cursor on a hidden corner had 56 crossings, each one a ray.
     found = []
-    for i, j in _pairs_that_may_meet(near):
-        e1, e2 = near[i], near[j]
-        hit = segment_intersection(e1.a, e1.b, e2.a, e2.b)
-        if hit is None:
-            continue  # parallel, collinear or skew — no real meeting
+
+    def _offer(hit, o1, o2):
         hp = world_to_pixel(hit)
         if hp is None:
-            continue
+            return
         dh = math.hypot(hp[0] - cx, hp[1] - cy)
-        if dh > et:
-            continue
-        found.append((dh, hit, e1, e2))
+        if dh <= et:
+            found.append((dh, hit, o1, o2))
+
+    for i, j in _pairs_that_may_meet(near_edges):
+        e1, e2 = near_edges[i], near_edges[j]
+        hit = segment_intersection(e1.a, e1.b, e2.a, e2.b)
+        if hit is not None:
+            _offer(hit, e1, e2)
+    for circ in near_circles:
+        for e in near_edges:
+            for p in _segment_circle_intersections(
+                    e.a, e.b, circ.center, circ.radius, circ.normal):
+                _offer(p, e, circ)
+    for i in range(len(near_circles)):
+        for j in range(i + 1, len(near_circles)):
+            c1, c2 = near_circles[i], near_circles[j]
+            for p in _circle_circle_intersections(
+                    c1.center, c1.radius, c1.normal,
+                    c2.center, c2.radius, c2.normal):
+                _offer(p, c1, c2)
+    if not found:
+        return None
     found.sort(key=lambda f: f[0])
     first = {}
     for k, f in enumerate(found):
@@ -1347,7 +1476,11 @@ def _intersection_snap(
         return None
     best = found[order[k]]
     hit = best[1]
-    corners = (best[2].a, best[2].b, best[3].a, best[3].b)
+    corners = [c for c in (getattr(best[2], "a", None),
+                           getattr(best[2], "b", None),
+                           getattr(best[3], "a", None),
+                           getattr(best[3], "b", None))
+               if c is not None]
     if any((hit - c).lengthSquared() < 1e-12 for c in corners):
         # Two edges meeting at a shared corner «intersect» there, and
         # between the endpoint rule's radius and this one the corner came
@@ -1597,6 +1730,132 @@ def _first_visible(points, is_occluded, are_occluded=None):
     return None
 
 
+def _closest_on_circle(circ, candidate_world, cx, cy, world_to_pixel, et):
+    """The nearest point on a guide circle's rim to the cursor, as
+    ``(screen_distance_px, world_point)`` when within ``et``, else
+    ``(None, None)``.
+
+    The circle is analytic: the candidate is projected onto the circle's
+    plane and then radially onto the rim, so the snap is exact, not a
+    polygon's vertex.
+    """
+    c = circ.center
+    n = circ.normal
+    r = float(circ.radius)
+    if r <= 0.0:
+        return None, None
+    proj = candidate_world - n * QVector3D.dotProduct(candidate_world - c, n)
+    v = proj - c
+    if v.length() < 1e-9:
+        # On the circle's axis every rim point is equally near: pick the
+        # circle's own x-axis as a stable representative.
+        from core.axes import plane_axes
+        u, _w = plane_axes(n)
+        v = u * r
+    rim = c + v.normalized() * r
+    px = world_to_pixel(rim)
+    if px is None:
+        return None, None
+    d = math.hypot(px[0] - cx, px[1] - cy)
+    return (d, rim) if d <= et else (None, None)
+
+
+def _circle_circle_intersections(c1, r1, n1, c2, r2, n2):
+    """The points where two circles meet: a list of 0, 1 or 2 ``QVector3D``.
+
+    The circles must be coplanar (parallel normals, same plane); otherwise
+    they do not meet in a point. Exact — no polygon vertices involved.
+    """
+    if r1 <= 0.0 or r2 <= 0.0:
+        return []
+    if abs(abs(QVector3D.dotProduct(n1, n2)) - 1.0) > 1e-6:
+        return []                    # not coplanar
+    d = c2 - c1
+    dist = d.length()
+    if dist < 1e-12:
+        return []                    # concentric: no two points to offer
+    if abs(QVector3D.dotProduct(d, n1)) > 1e-6 * max(1.0, dist):
+        return []                    # parallel planes, offset apart
+    dd = d / dist
+    a = (dist * dist + r1 * r1 - r2 * r2) / (2.0 * dist)
+    h2 = r1 * r1 - a * a
+    if h2 < -1e-12:
+        return []                    # separate, or one inside the other
+    h = math.sqrt(max(h2, 0.0))
+    mid = c1 + dd * a
+    perp = QVector3D.crossProduct(n1, dd)
+    if h < 1e-9:
+        return [mid]                 # tangent
+    return [mid + perp * h, mid - perp * h]
+
+
+def _segment_circle_intersections(a, b, c, r, n):
+    """Where a finite segment ``a→b`` meets a circle (centre ``c``, radius
+    ``r``, unit normal ``n``): 0, 1 or 2 points, clamped to the segment."""
+    if r <= 0.0:
+        return []
+    ab = b - a
+    lab2 = QVector3D.dotProduct(ab, ab)
+    if lab2 < 1e-12:
+        return []
+    denom = QVector3D.dotProduct(ab, n)
+    if abs(denom) > 1e-9 * math.sqrt(lab2):
+        # The segment's line pierces the circle's plane once.
+        t = QVector3D.dotProduct(c - a, n) / denom
+        if t < 0.0 or t > 1.0:
+            return []
+        p = a + ab * t
+        return [p] if abs((p - c).length() - r) < 1e-6 else []
+    # The segment lies in (or parallel to) the circle's plane.
+    if abs(QVector3D.dotProduct(c - a, n)) > 1e-6:
+        return []                    # parallel, not in the plane
+    f = a - c
+    dd = QVector3D.dotProduct(ab, ab)
+    df = QVector3D.dotProduct(ab, f)
+    ff = QVector3D.dotProduct(f, f)
+    disc = df * df - dd * (ff - r * r)
+    if disc < 0.0:
+        return []
+    sq = math.sqrt(max(disc, 0.0))
+    out = []
+    for t in ((-df - sq) / dd, (-df + sq) / dd):
+        if 0.0 <= t <= 1.0:
+            p = a + ab * t
+            if not out or (p - out[-1]).length() > 1e-6:
+                out.append(p)
+    return out
+
+
+def _circle_quadrants(c, r, n):
+    """The four cardinal points of a circle (centre ``c``, radius ``r``,
+    plane normal ``n``): N/E/S/W in the circle's own basis."""
+    if r <= 0.0:
+        return []
+    from core.axes import plane_axes
+    u, v = plane_axes(n)
+    return [c + u * r, c - u * r, c + v * r, c - v * r]
+
+
+def _circle_tangent_points(c, r, n, p):
+    """The tangent points on a circle from an external point ``p`` (projected
+    onto the circle's plane): 0 (inside), 1 (on the rim) or 2 points."""
+    if r <= 0.0:
+        return []
+    proj = p - n * QVector3D.dotProduct(p - c, n)
+    dvec = proj - c
+    d = dvec.length()
+    if d < r:
+        return []                     # inside: no real tangent
+    if d <= r:
+        return [QVector3D(proj)]      # on the rim: the point itself
+    dd = dvec / d
+    w = QVector3D.crossProduct(n, dd)  # unit, in the plane, ⊥ dd
+    cos_b = r / d
+    sin_b = math.sqrt(1.0 - cos_b * cos_b)
+    return [c + (dd * cos_b + w * sin_b) * r,
+            c + (dd * cos_b - w * sin_b) * r]
+
+
 def compute_snap(
     candidate_world: QVector3D,
     candidate_pixel: tuple[float, float],
@@ -1637,6 +1896,8 @@ def compute_snap(
     hover_lock_plane: Optional[tuple] = None,
     face_crossing: Optional[Callable[[], Optional[tuple]]] = None,
     face_outline: Optional[Callable[[], Optional[tuple]]] = None,
+    face_centers: Optional[list] = None,
+    face_context: Optional[str] = None,
 ) -> SnapResult:
     # Linear-inference toggle (Alt): "all" = every inference, "off" =
     # point snaps only, "parallel_perp" = keep only parallel/perpendicular. The
@@ -2038,6 +2299,11 @@ def compute_snap(
                 continue
             else:
                 plain.append(edge)
+        # A guide circle's four quadrants are named points too — the cardinal
+        # N/E/S/W of the circle, exact.
+        for circ in getattr(scene, "circles", ()):
+            for q in _circle_quadrants(circ.center, circ.radius, circ.normal):
+                _consider(q, "quadrant", COLOR_MIDPOINT)
         # The world origin is a point inference like a corner (the
         # "Origin"), so it must beat the LINEAR inferences of rule 5 — it
         # sat in rule 6, behind 'from point' and the axis line, and a
@@ -2055,6 +2321,21 @@ def compute_snap(
                 _consider(edge.a, "endpoint", COLOR_ENDPOINT, context=getattr(edge, "context", None))
             if not getattr(edge, "clip_b", False):
                 _consider(edge.b, "endpoint", COLOR_ENDPOINT, context=getattr(edge, "context", None))
+        for point, context in face_centers or ():
+            # The centres of the face under the cursor and of the selected
+            # faces, ``(point, context)``. Handed in on their own, not as
+            # degenerate pseudo-edges: the line rules (on edge, extension,
+            # the lock's 'endpoint on the line') would read such a point as
+            # a scrap of edge. After the endpoints, so a corner wins a tie.
+            #
+            # Not the point the operation started on: a circle begun at a
+            # face's centre found that same centre again under its rim, and
+            # the radius snapped back to nothing — no disc was built. A
+            # corner is geometry the drawing welds to; this point is not,
+            # and landing on it again only gives a zero-length step.
+            if start_point is not None and (point - start_point).length() < 1e-6:
+                continue
+            _consider(point, "face_center", COLOR_ON_FACE, context=context)
         # A "close" already chosen stands; otherwise the nearest visible of
         # the named points and endpoints (named ones first on a tie — they
         # were appended first and the sort is stable).
@@ -2228,9 +2509,19 @@ def compute_snap(
     #     the cursor slid along the nearest guide. Runs before midpoint/on-edge
     #     so the exact crossing wins, but below every endpoint and lock.
     inter = _intersection_snap(cx, cy, scene, world_to_pixel, et, is_occluded,
-                               are_occluded)
-    if inter is not None and axis_engaged is None:
-        return inter
+                               are_occluded, candidate_world)
+    if inter is not None:
+        if axis_engaged is None:
+            return inter
+        # The intersection is a POINT snap and must keep beating the engaged
+        # axis (as endpoint/close do) — but only while it lies ON that axis,
+        # so it never pulls the point off the lock line. Two guide circles
+        # side by side cross twice on the line through their centres: that
+        # chord lines up with an axis, and without this the axis magnet stole
+        # the second crossing from a line started at the first (#238).
+        if start_point is not None and _vertex_on_line(
+                inter.point, start_point, _AXIS_VECTORS[axis_engaged]):
+            return inter
 
     # 5d. An edge — guide, line, arc or circle facet — piercing the face under
     #     the cursor. Asked after the edge/edge crossing and before the
@@ -2258,11 +2549,24 @@ def compute_snap(
     if best is not None:
         return SnapResult(best[1], best[2], best[3], context=best[4])
 
-    # 7. On-edge: an arbitrary point along an edge. An edge is a big linear
-    #    target, so it gets a more generous radius than the point snaps —
-    #    landing a corner on it (a door on the floor line) should be forgiving.
-    best_edge: Optional[tuple[float, QVector3D]] = None
-    on_edges = []
+    # 6b. Tangent to a guide circle: while drawing from a fixed start, snap to
+    #     the point on the circle where the segment is tangent (the classic CAD
+    #     tangent). Two exist; the nearest one wins. Only meaningful with a
+    #     start point — a line's, not a shape's diagonal span.
+    if line_start is not None:
+        for circ in getattr(scene, "circles", ()):
+            for tp in _circle_tangent_points(
+                    circ.center, circ.radius, circ.normal, line_start):
+                _consider(tp, "tangent", COLOR_TANGENT)
+        _resolve()
+        if best is not None:
+            return SnapResult(best[1], best[2], best[3], context=best[4])
+
+    # 7. On-edge / on-circle: an arbitrary point along an edge or a guide
+    #    circle's rim. A linear target is big, so it gets a more generous
+    #    radius than the point snaps — landing a corner on it (a door on the
+    #    floor line) should be forgiving.
+    on_targets = []
     for edge in scene.edges:
         pa = world_to_pixel(edge.a)
         pb = world_to_pixel(edge.b)
@@ -2284,15 +2588,22 @@ def compute_snap(
             on_pt = _lerp_on_segment(edge.a, edge.b, proj)
         else:
             on_pt = edge.a + ab * t
-        on_edges.append((d, on_pt, edge))
-    # The nearest VISIBLE one, asked nearest first: a ray per edge in reach
+        kind = "on_line" if getattr(edge, "guide", False) else "on_edge"
+        on_targets.append((d, on_pt, kind, edge))
+    # A guide circle's rim is the same big target, resolved exactly: the
+    # nearest point on the analytic circle to the cursor.
+    for circ in getattr(scene, "circles", ()):
+        d, rim_pt = _closest_on_circle(
+            circ, candidate_world, cx, cy, world_to_pixel, et)
+        if d is not None:
+            on_targets.append((d, rim_pt, "on_circle", circ))
+    # The nearest VISIBLE one, asked nearest first: a ray per target in reach
     # was most of a hover over a dense model (14 000 rays in 60 moves over
     # the SPR of #158, when only the first visible one is kept). The sort is
-    # stable, so a tie goes to the edge listed first, as it always did.
-    on_edges.sort(key=lambda c: c[0])
-    k = _first_visible([c[1] for c in on_edges], is_occluded, are_occluded)
-    if k is not None:
-        best_edge = on_edges[k]
+    # stable, so a tie goes to the target listed first, as it always did.
+    on_targets.sort(key=lambda c: c[0])
+    k = _first_visible([c[1] for c in on_targets], is_occluded, are_occluded)
+    best_target = on_targets[k] if k is not None else None
     # 7a. With an axis engaged the on-edge point is silenced (it would pull
     #     the point off the line), but the edge under the cursor may CROSS
     #     the axis line: that crossing is on the line AND on the edge, the
@@ -2300,35 +2611,43 @@ def compute_snap(
     #     arc drawn along red from one edge of a face to the opposite one
     #     landed 1–2 mm inside or outside the edge depending on the pixel,
     #     and left loose stubs (0.5.7 landed exactly; the chair backrest of
-    #     the tutorial hunt, 2026-10-12).
-    if best_edge is not None and axis_engaged is not None:
-        _d, _on_pt, edge = best_edge
-        hit = _line_segment_intersection(
-            start_point, _AXIS_VECTORS[axis_engaged], edge.a, edge.b)
-        if hit is not None:
-            hp = world_to_pixel(hit)
-            if (hp is not None
-                    and math.hypot(hp[0] - cx, hp[1] - cy) <= et
-                    and (is_occluded is None or not is_occluded(hit))):
-                return SnapResult(hit, "intersection", COLOR_ENDPOINT,
-                                  guide=(start_point, hit))
-    if best_edge is not None and axis_engaged is None:
-        _d, on_pt, edge = best_edge
-        if line_inferences and acquired_point is not None:
+    #     the tutorial hunt, 2026-10-12). A circle rim has no such straight
+    #     crossing, so it stays silenced under a lock.
+    if best_target is not None and axis_engaged is not None:
+        _d, _on_pt, kind, target = best_target
+        if kind != "on_circle":
+            hit = _line_segment_intersection(
+                start_point, _AXIS_VECTORS[axis_engaged], target.a, target.b)
+            if hit is not None:
+                hp = world_to_pixel(hit)
+                if (hp is not None
+                        and math.hypot(hp[0] - cx, hp[1] - cy) <= et
+                        and (is_occluded is None or not is_occluded(hit))):
+                    return SnapResult(hit, "intersection", COLOR_ENDPOINT,
+                                      guide=(start_point, hit))
+    if best_target is not None and axis_engaged is None:
+        _d, on_pt, kind, target = best_target
+        if kind == "on_edge" and line_inferences and acquired_point is not None:
             # On an edge AND lined up with the acquired point: the one point
             # of the edge that is both. The edge used to win outright, the
             # dotted «from point» line vanished as the cursor reached the
             # wall and the length jumped with every pixel — «hasta el final
             # no me llega» (Rafael, revision 4, 01:30).
             cross = _edge_from_point_crossing(
-                edge, acquired_point, cx, cy, world_to_pixel, threshold_px,
+                target, acquired_point, cx, cy, world_to_pixel, threshold_px,
                 is_occluded)
             if cross is not None:
                 return cross
-        if getattr(edge, "guide", False):
+        if kind == "on_circle":
+            return SnapResult(on_pt, "on_circle", COLOR_ON_EDGE)
+        if kind == "on_line":
             return SnapResult(on_pt, "on_line", COLOR_ON_EDGE)   # a guide line
         return SnapResult(on_pt, "on_edge", COLOR_ON_EDGE,
-                          context=getattr(edge, "context", None))
+                          context=getattr(target, "context", None),
+                          edge=target)
+                          # 17.10.26 Bastelbaus: added edge which is used on dimension tool
+                          #                      to directly create a dimension by clickling
+                          #                      on an edge
 
     # 7c. Where the face under the cursor meets another face with no edge
     #     between them — a box sunk into the floor, a beam through a wall
@@ -2491,7 +2810,10 @@ def compute_snap(
 
     # 10. On-face: the cursor hovers a face with nothing closer to snap to.
     #     The candidate already lies on that face's plane (the work plane).
+    #     ``face_context`` is what the ScreenTip says about it — the rest of
+    #     the model while a group / component is open ("outside").
     if face_under_cursor:
-        return SnapResult(candidate_world, "on_face", COLOR_ON_FACE)
+        return SnapResult(candidate_world, "on_face", COLOR_ON_FACE,
+                          context=face_context)
 
     return SnapResult(candidate_world, "none", COLOR_NONE)

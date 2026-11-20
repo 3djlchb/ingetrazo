@@ -176,7 +176,9 @@ class InferenceEngine:
         else:
             if self._hover_edge is not None:
                 self._acquired_edge = self._hover_edge
-            face, _g = vp.pick_face_placement(px, py)
+            pick = (getattr(vp, "pick_face_inference", None)
+                    or vp.pick_face_placement)
+            face, _g = pick(px, py)
             if face is not None:
                 from core.snap import face_plane_world
                 self._acquired_face_normal = face_plane_world(
@@ -187,7 +189,9 @@ class InferenceEngine:
         what a direction lock meets as «constrained on plane». ``ref`` is the
         cursor's own point on the face, where the dotted guide starts."""
         vp = self.viewport
-        face, owner = vp.pick_face_placement(px, py)
+        pick = (getattr(vp, "pick_face_inference", None)
+                or vp.pick_face_placement)
+        face, owner = pick(px, py)
         if face is None:
             return None
         from core.snap import face_plane_world
@@ -255,6 +259,8 @@ class InferenceEngine:
             hover_lock_plane=lock_plane,
             are_occluded=None if _no_snap_fast() else vp._occluded_many,
             face_under_cursor=vp._still_face_under(px_x, px_y),
+            face_context=(vp._face_context_under(px_x, px_y)
+                          if hasattr(vp, "_face_context_under") else None),
             edge_threshold_px=vp.edge_snap_threshold_px,
             magnetic_axis_deg=getattr(tool, "magnetic_axis_deg", None),
             screen_axis_px=getattr(tool, "screen_axis_px", None),
@@ -278,6 +284,7 @@ class InferenceEngine:
             if hasattr(vp, "_face_crossing_point") else None,
             face_outline=(lambda: vp._face_outline_world(px_x, px_y))
             if hasattr(vp, "_face_outline_world") else None,
+            face_centers=self._face_centers(px_x, px_y),
         )
         if snap is not None and snap.kind == "axis" and snap.axis:
             self._sticky_axis = snap.axis
@@ -298,6 +305,13 @@ class InferenceEngine:
             return SnapResult(snap.point, "none", COLOR_NONE)
         return snap
 
+    def _face_centers(self, px_x: float, px_y: float):
+        """The «Face center» points near the cursor — the face under it and
+        the selected faces — as the viewport sees them (``None`` from a
+        stand-in viewport without the method)."""
+        near = getattr(self.viewport, "_face_centers_near", None)
+        return near(px_x, px_y) if callable(near) else None
+
     # ---- Post-processors (axis-source cue, extensions) ----------------------
 
     #: Built-in inferences an extension's may not override: a point with a
@@ -305,7 +319,7 @@ class InferenceEngine:
     _NAMED_SNAPS = frozenset((
         "endpoint", "midpoint", "arc_midpoint", "center", "origin",
         "component_origin", "intersection", "intersection_edge",
-        "intersection_face", "close", "on_edge"))
+        "intersection_face", "close", "on_edge", "face_center"))
 
     def _axis_source_cue(self, snap, px_x: float, px_y: float):
         """Before its first click, a tool that reads the model axes as a

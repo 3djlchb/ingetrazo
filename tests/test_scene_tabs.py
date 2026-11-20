@@ -78,10 +78,7 @@ def test_no_scenes_no_row_and_the_panel_makes_the_first(win):
 
 
 def test_the_panels_button_itself_brings_the_row(win):
-    from core.i18n import tr
-    from PySide6.QtWidgets import QPushButton
-    plus = next(b for b in win.tray.scenes.findChildren(QPushButton)
-                if b.text() == tr("+ Scene"))
+    plus = win.tray.scenes.add_btn          # the Scenes tab's bar (#1158)
     assert _row(win).isHidden()
     plus.click()
     assert not _row(win).isHidden()
@@ -415,10 +412,7 @@ def _saved(win):
 
 
 def _panel(win):
-    # This fork keeps the Scenes panel a two-column tree (the active
-    # scene's dot, then the name), not upstream's plain list.
-    t = win.tray.scenes.tree
-    return [t.topLevelItem(i).text(1) for i in range(t.topLevelItemCount())]
+    return [row.text(0) for row in win.tray.scenes.scene_rows()]
 
 
 def _in_step(win):
@@ -660,7 +654,7 @@ def test_the_panels_own_editor_renames_in_one_undo_step(win):
     _scene(win, "A")
     _scene(win, "B")
     steps = len(win.viewport.history.undo_stack)
-    win.tray.scenes.tree.topLevelItem(0).setText(1, "Z")
+    win.tray.scenes.scene_rows()[0].setText(0, "Z")
     assert _in_step(win) == ["Z", "B"]
     assert len(win.viewport.history.undo_stack) == steps + 1
     win._on_undo()
@@ -670,7 +664,7 @@ def test_the_panels_own_editor_renames_in_one_undo_step(win):
 def test_the_panels_editor_refused_puts_the_real_name_back(win):
     _scene(win, "A")
     _scene(win, "B")
-    win.tray.scenes.tree.topLevelItem(0).setText(1, "B")
+    win.tray.scenes.scene_rows()[0].setText(0, "B")
     assert _in_step(win) == ["A", "B"]
 
 
@@ -685,11 +679,12 @@ def test_the_panels_menu_renames_and_moves(win):
     panel = win.tray.scenes
 
     def menu_of(row):
-        m = panel._build_list_menu(panel.tree.topLevelItem(row))
+        m = panel.context_menu(panel.scene_rows()[row])
         return m, {a.text(): a for a in m.actions()}
-    assert panel._build_list_menu(None) is None     # off the rows
-    menu, acts = menu_of(0)
     up, down = tr("Move up (Alt+↑)"), tr("Move down (Alt+↓)")
+    off = {a.text() for a in panel.context_menu(None).actions()}
+    assert up not in off and down not in off        # off the rows
+    menu, acts = menu_of(0)
     assert not acts[up].isEnabled() and acts[down].isEnabled()
     acts[down].trigger()
     assert _in_step(win) == ["B", "A", "C"]
@@ -698,8 +693,13 @@ def test_the_panels_menu_renames_and_moves(win):
     acts[up].trigger()
     assert _in_step(win) == ["B", "C", "A"]
     menu, acts = menu_of(0)
-    acts[tr("Rename…")].trigger()
+    win._scene_actions["scene_rename"].trigger()    # what the menu holds
+    assert win._scene_actions["scene_rename"] in menu.actions()
     assert panel.tree.state() == QAbstractItemView.EditingState
+
+
+def _moves(panel):
+    return {a.shortcut().toString(): a for a in panel.tree.actions()}
 
 
 def test_the_panels_arrows_keep_moving_the_same_scene(win):
@@ -707,30 +707,29 @@ def test_the_panels_arrows_keep_moving_the_same_scene(win):
     _scene(win, "B")
     _scene(win, "C")
     panel = win.tray.scenes
-    panel.tree.setCurrentItem(panel.tree.topLevelItem(2), 1)
-    panel.up_btn.click()
-    panel.up_btn.click()                       # the same scene, not the row
+    panel.select_view(win.viewport.scene.saved_views[2])
+    up, down = _moves(panel)["Alt+Up"], _moves(panel)["Alt+Down"]
+    up.trigger()
+    up.trigger()                               # the same scene, not the row
     assert _in_step(win) == ["C", "A", "B"]
-    assert panel.tree.currentItem().text(1) == "C"
-    assert [i.text(1) for i in panel.tree.selectedItems()] == ["C"]
+    assert panel.current_view().name == "C"
+    assert [v.name for v in panel.selected_views()] == ["C"]
     steps = len(win.viewport.history.undo_stack)
-    panel.up_btn.click()                       # already first: no step
+    up.trigger()                               # already first: no step
     assert steps == len(win.viewport.history.undo_stack)
-    panel.down_btn.click()
+    down.trigger()
     assert _in_step(win) == ["A", "C", "B"]
     win._on_undo()
     assert _in_step(win) == ["C", "A", "B"]
 
 
-def test_the_panels_arrows_leave_the_buttons_on_one_line(win):
-    """At the style's default width «↓» fell onto a line of its own."""
-    _scene(win, "A")
+def test_the_panels_bar_has_no_arrow_buttons(win):
+    """The bar of Layers (#1158): Alt+↑/↓ and the right-click menu move a
+    scene; the ↑ ↓ buttons are not there to fall onto a line of their own."""
+    from PySide6.QtWidgets import QPushButton
     panel = win.tray.scenes
-    win.show()
-    panel.resize(420, panel.height())
-    _settle()
-    assert panel.down_btn.width() <= 32 and panel.up_btn.width() <= 32
-    assert panel.down_btn.y() == panel.up_btn.y()
+    assert not [b for b in panel.findChildren(QPushButton)
+                if b.text() in ("↑", "↓")]
 
 
 def test_alt_arrows_move_it_where_the_list_has_the_keys(win):
@@ -739,8 +738,8 @@ def test_alt_arrows_move_it_where_the_list_has_the_keys(win):
     _scene(win, "A")
     _scene(win, "B")
     panel = win.tray.scenes
-    panel.tree.setCurrentItem(panel.tree.topLevelItem(0), 1)
-    acts = {a.shortcut().toString(): a for a in panel.tree.actions()}
+    panel.select_view(win.viewport.scene.saved_views[0])
+    acts = _moves(panel)
     assert acts["Alt+Down"].shortcutContext() == Qt.WidgetShortcut
     acts[QKeySequence("Alt+Down").toString()].trigger()
     assert _in_step(win) == ["B", "A"]
@@ -753,10 +752,12 @@ def test_a_refresh_keeps_what_the_panel_has_picked(win):
     _scene(win, "B")
     _scene(win, "C")
     panel = win.tray.scenes
-    panel.tree.topLevelItem(0).setSelected(True)
-    panel.tree.topLevelItem(2).setSelected(True)
+    rows = panel.scene_rows()
+    rows[0].setSelected(True)
+    rows[2].setSelected(True)
+    panel._shape = None                        # a rebuild, not a skip
     panel.refresh()
-    assert sorted(i.text(1) for i in panel.tree.selectedItems()) == ["A", "C"]
+    assert sorted(v.name for v in panel.selected_views()) == ["A", "C"]
 
 
 def test_a_scene_shown_from_the_panel_marks_its_tab(win):
@@ -774,10 +775,10 @@ def test_undo_takes_a_new_scene_away_and_its_row_with_it(win):
     assert len(scene.saved_views) == 1 and not _row(win).isHidden()
     win._on_undo()
     assert scene.saved_views == [] and _row(win).isHidden()
-    assert win.tray.scenes.tree.topLevelItemCount() == 0
+    assert win.tray.scenes.scene_rows() == []
     win._on_redo()
     assert len(scene.saved_views) == 1 and not _row(win).isHidden()
-    assert win.tray.scenes.tree.topLevelItemCount() == 1
+    assert len(win.tray.scenes.scene_rows()) == 1
 
 
 def test_undo_of_the_plus_of_the_row_takes_one_scene_away(win):

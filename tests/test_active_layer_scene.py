@@ -172,24 +172,19 @@ def _close(win):
     win.close()
 
 
-def _row(tree, name):
-    return next(tree.topLevelItem(i) for i in range(tree.topLevelItemCount())
-                if tree.topLevelItem(i).text(1) == name)
+def _row(panel, name):
+    """The row of scene ``name`` (upstream's Scenes tab, 0.6.2: one column)."""
+    return next(it for it in panel.scene_rows() if it.text(0) == name)
 
 
-def _dot_click(tree, item):
-    from PySide6.QtCore import QPoint
-    from PySide6.QtTest import QTest
-    rect = tree.visualItemRect(item)
-    x = tree.columnViewportPosition(0) + tree.columnWidth(0) // 2
-    QTest.mouseClick(tree.viewport(), Qt.LeftButton,
-                     pos=QPoint(x, rect.center().y()))
-    _app.processEvents()
+def _marked(panel):
+    """The scenes whose row carries the mark — bold, the scene shown last;
+    in this edition, the document's active scene."""
+    return [it.text(0) for it in panel.scene_rows() if it.font(0).bold()]
 
 
 def test_the_scenes_panel_marks_the_active_scene_and_the_viewport_names_it():
     from core.saved_views import SavedView
-    from views.tray import ACTIVE_ROLE
     win = _window()
     try:
         vp = win.viewport
@@ -200,22 +195,21 @@ def test_the_scenes_panel_marks_the_active_scene_and_the_viewport_names_it():
         panel.refresh()
         tree = panel.tree
         assert vp.active_scene_label()[1] is None       # none shown yet
-        assert not any(tree.topLevelItem(i).data(0, ACTIVE_ROLE)
-                       for i in range(tree.topLevelItemCount()))
-        _dot_click(tree, _row(tree, "Corte"))           # a dot shows it
+        assert _marked(panel) == []
+        panel._on_double_click(_row(panel, "Corte"))    # a double-click shows it
         assert scene.active_view is scene.saved_views[1]
-        assert _row(tree, "Corte").data(0, ACTIVE_ROLE) is True
+        assert _marked(panel) == ["Corte"]
         prefix, name = vp.active_scene_label()
         assert prefix in ("Scene:", "Escena:") and name == "Corte"
-        panel._on_activate(_row(tree, "Planta"))        # double-click path
+        panel._on_activate(_row(panel, "Planta"))        # double-click path
         assert vp.active_scene_label()[1] == "Planta"
         panel._on_add()                                 # «+ Scene» is shown
         assert scene.active_view is scene.saved_views[-1]
         # Editing the row renames it; deleting the active scene clears it.
-        _row(tree, scene.active_view.name).setText(1, "Fachada")
+        _row(panel, scene.active_view.name).setText(0, "Fachada")
         assert vp.active_scene_label()[1] == "Fachada"
         panel.refresh()
-        tree.setCurrentItem(_row(tree, "Fachada"))
+        tree.setCurrentItem(_row(panel, "Fachada"))
         panel._on_delete()
         assert scene.active_view is None
         assert vp.active_scene_label()[1] is None       # «No scene»
@@ -243,19 +237,19 @@ def test_moving_off_the_scene_reads_no_scene_and_update_brings_it_back():
             vp.camera.yaw += 0.7                      # a different view each
         panel.refresh()
         tree = panel.tree
-        panel._on_activate(_row(tree, "Corte BB"))
+        panel._on_activate(_row(panel, "Corte BB"))
         assert vp.active_scene_label() == (vp.active_scene_label()[0],
                                            "Corte BB")
         for move in (lambda c: setattr(c, "yaw", c.yaw + 0.3),       # orbit
                      lambda c: setattr(c, "distance", c.distance * 1.5),
                      lambda c: setattr(c, "perspective", not c.perspective)):
-            panel._on_activate(_row(tree, "Corte BB"))
+            panel._on_activate(_row(panel, "Corte BB"))
             move(vp.camera)
             prefix, name = vp.active_scene_label()
             assert name is None and prefix in ("No scene", "Sin escena")
         # Update writes the current view into the ACTIVE scene, even with
         # another row highlighted.
-        tree.setCurrentItem(_row(tree, "Corte AA"), 1)
+        tree.setCurrentItem(_row(panel, "Corte AA"), 0)
         before_aa = scene.saved_views[0].yaw
         panel._on_update()
         assert vp.active_scene_label()[1] == "Corte BB"
@@ -263,7 +257,7 @@ def test_moving_off_the_scene_reads_no_scene_and_update_brings_it_back():
         assert scene.saved_views[1].matches_camera(vp.camera)
         # With no scene active, Update falls back to the highlighted row.
         scene.active_view = None
-        tree.setCurrentItem(_row(tree, "Corte AA"), 1)
+        tree.setCurrentItem(_row(panel, "Corte AA"), 0)
         panel._on_update()
         assert scene.active_view is scene.saved_views[0]
         assert vp.active_scene_label()[1] == "Corte AA"
@@ -423,7 +417,7 @@ def test_update_saves_everything_a_scene_holds_not_only_the_camera():
         for n in ("Planta", "Corte"):
             scene.saved_views.append(SavedView.capture(n, scene, vp.camera))
         panel.refresh()
-        panel._on_activate(_row(panel.tree, "Corte"))
+        panel._on_activate(_row(panel, "Corte"))
         # Change the state, NOT the camera.
         scene.layer("Muros").visible = False
         scene.display_style.edges = False
@@ -441,9 +435,9 @@ def test_update_saves_everything_a_scene_holds_not_only_the_camera():
         assert corte.hidden_objects == [g.uid]
         # Planta untouched; going there and back restores Corte's state.
         assert "Muros" not in scene.saved_views[0].hidden_layers
-        panel._on_activate(_row(panel.tree, "Planta"))
+        panel._on_activate(_row(panel, "Planta"))
         assert scene.layer("Muros").visible is True and g.hidden is False
-        panel._on_activate(_row(panel.tree, "Corte"))
+        panel._on_activate(_row(panel, "Corte"))
         assert scene.layer("Muros").visible is False
         assert scene.display_style.edges is False and g.hidden is True
     finally:

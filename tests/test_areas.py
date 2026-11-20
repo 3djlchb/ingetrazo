@@ -97,6 +97,11 @@ def test_the_properties_area_holds_the_trays_panels_and_gives_them_back():
     try:
         tray_inner = win.tray.widget()
         bim_inner = win.bim_tray.widget()
+        # BIM and Terrain hidden, as they start: the choice of panels is
+        # remembered, and an earlier test in the same process may have
+        # opened them (upstream's test_add_panels_button shows BIM).
+        win.set_tray_shown(win.bim_tray, False)
+        win.set_tray_shown(win.georef_tray, False)
         win.set_layout_mode("areas")
         prop = win._properties_editor
         assert isinstance(prop, PropertiesEditor)
