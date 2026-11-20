@@ -28,7 +28,8 @@ def test_user_log_dir_is_writable_and_outside_the_app(state_home):
     assert d.is_absolute() and d.is_dir()
     assert not str(d).startswith(str(paths.app_root()))
     if not sys.platform.startswith("win") and sys.platform != "darwin":
-        assert d == state_home / "ingetrazo"
+        from core import edition  # 3djlchb: the edition's own folder
+        assert d == state_home / edition.DATA_DIR_LOWER
     (d / "probe").write_text("x", encoding="utf-8")
 
 

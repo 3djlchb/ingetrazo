@@ -80,7 +80,8 @@ def user_plugins_dir() -> Path:
     else:
         base = Path(os.environ.get("XDG_DATA_HOME")
                     or (Path.home() / ".local" / "share"))
-    return base / "ingetrazo" / "plugins"
+    from core import edition  # 3djlchb: not the official build's folder
+    return base / edition.DATA_DIR_LOWER / "plugins"
 
 
 def plugin_dirs() -> list[Path]:

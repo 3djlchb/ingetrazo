@@ -10,8 +10,10 @@ release is built without it.
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
+import pytest
 from PySide6.QtCore import QSettings
 
 from core import edition
@@ -156,3 +158,67 @@ def test_the_release_builds_and_installs_the_deb():
     assert "sudo apt-get install -y ./dist/ingetrazo-3djlchb_*_amd64.deb" in wf
     assert "ingetrazo-3djlchb --check" in wf
     assert "dist/ingetrazo-3djlchb_*_amd64.deb --clobber" in wf
+
+
+# --- the folders upstream names by hand ---------------------------------------
+
+_OFFICIAL_DIR_NAMES = {"ingetrazo"}       # «IngeTrazo» and «ingetrazo», any case
+
+
+def _assert_edition_folder(path, name):
+    parts = [p.lower() for p in Path(path).parts]
+    assert not _OFFICIAL_DIR_NAMES & set(parts), path
+    assert name.lower() in parts, path
+
+
+@pytest.fixture
+def user_dirs(tmp_path, monkeypatch):
+    for var in ("XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME",
+                "APPDATA", "LOCALAPPDATA"):
+        monkeypatch.setenv(var, str(tmp_path / var.lower()))
+    monkeypatch.delenv("INGETRAZO_TEXTURE_CACHE", raising=False)
+    return tmp_path
+
+
+def test_the_texture_cache_is_not_the_official_one(user_dirs):
+    # Emptying it here must leave the official build's images alone.
+    from core.texture import texture_cache_root
+    _assert_edition_folder(texture_cache_root(), edition.DATA_DIR)
+
+
+def test_the_user_extensions_are_not_the_official_ones(user_dirs):
+    # An extension installed in one build does not appear in the other;
+    # the Animation extension's ffmpeg download goes beside them.
+    from core.extensions import user_plugins_dir
+    from plugins.igz_animacion.ffmpeg_tools import default_install_dir
+    _assert_edition_folder(user_plugins_dir(), edition.DATA_DIR_LOWER)
+    _assert_edition_folder(default_install_dir(), edition.DATA_DIR_LOWER)
+
+
+def test_the_logs_are_not_the_official_ones(user_dirs):
+    from core.paths import user_log_dir
+    name = (edition.DATA_DIR_LOWER if sys.platform.startswith("linux")
+            else edition.DATA_DIR)
+    _assert_edition_folder(user_log_dir(), name)
+
+
+@pytest.mark.parametrize("flatpak", [False, True])
+def test_the_render_cache_is_not_the_official_one(user_dirs, monkeypatch,
+                                                  flatpak):
+    import core.render_blender as rb
+    monkeypatch.setattr(rb, "in_flatpak", lambda: flatpak)
+    monkeypatch.setattr(rb.Path, "home", lambda: user_dirs)
+    _assert_edition_folder(rb.work_base(), edition.DATA_DIR)
+
+
+def test_the_update_check_asks_this_fork_releases():
+    from core import update_check as uc
+    assert uc.LATEST_API == (
+        "https://api.github.com/repos/3djlchb/ingetrazo/releases/latest")
+    assert uc.RELEASES_PAGE == "https://github.com/3djlchb/ingetrazo/releases"
+    # An answer pointing at the official releases is not followed: «new
+    # version» never sends this edition's users to the official download.
+    r = uc.parse_release({
+        "tag_name": "v9.9.9",
+        "html_url": "https://github.com/ingelibre/ingetrazo/releases/tag/v9.9.9"})
+    assert r.url == uc.RELEASES_PAGE + "/latest"

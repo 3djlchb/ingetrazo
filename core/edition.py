@@ -6,8 +6,12 @@ Qt files the preferences (the registry on Windows) and the per-user data
 (autosaves, scale figures, sheet templates) under the organization name.
 The official IngeTrazo uses «IngeTrazo»; with the same name both builds
 would read and write one store, and the layouts, toolbars and panels of
-this edition would show up in the official one. Logs, the extensions
-folder and the texture and render caches stay shared.
+this edition would show up in the official one. The folders upstream
+names by hand (logs, the user's extensions, the texture and render
+caches) take this edition's names too (DATA_DIR, DATA_DIR_LOWER): an
+extension installed here does not appear there, and emptying the texture
+cache here leaves the official one's alone. The update check asks this
+fork's releases (RELEASES_REPO), not the official ones.
 
 The same goes for what the desktop sees: the single-instance socket (a
 second launch hands its file to the running window — of the OTHER build,
@@ -30,6 +34,13 @@ DISPLAY_NAME = "IngeTrazo 3djlchb"
 DESKTOP_ID = "ingetrazo-3djlchb"
 #: The official build listens on «ingetrazo-single-instance».
 SINGLE_INSTANCE_SOCKET = "ingetrazo-3djlchb-single-instance"
+#: The folders upstream names by hand: «IngeTrazo» (texture and render
+#: caches; logs on Windows and macOS) and «ingetrazo» (the user's
+#: extensions; logs on Linux) in the official build.
+DATA_DIR = ORGANIZATION
+DATA_DIR_LOWER = DESKTOP_ID
+#: Where the update check looks («ingelibre/ingetrazo» in the official one).
+RELEASES_REPO = "3djlchb/ingetrazo"
 
 _adopted = False
 

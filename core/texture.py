@@ -54,7 +54,8 @@ def texture_cache_root() -> Path:
     except Exception:  # noqa: BLE001 — no Qt paths (headless odd env): use $HOME
         base = ""
     root = Path(base) if base else Path.home() / ".local" / "share"
-    return root / "IngeTrazo" / "textures"
+    from core import edition  # 3djlchb: not the official build's cache
+    return root / edition.DATA_DIR / "textures"
 
 
 def texture_cache_stats() -> tuple[int, int]:

@@ -539,12 +539,13 @@ def work_base() -> Path:
     sandbox, so there it must be a folder the host sees at the same path:
     the real ``~/.cache`` (the sandbox's own cache lives under
     ``~/.var/app``, which Blender's own Flatpak cannot read)."""
+    from core import edition  # 3djlchb: not the official build's cache
     if in_flatpak():
-        return Path.home() / ".cache" / "IngeTrazo" / "render"
+        return Path.home() / ".cache" / edition.DATA_DIR / "render"
     from PySide6.QtCore import QStandardPaths
     base = QStandardPaths.writableLocation(
         QStandardPaths.StandardLocation.GenericCacheLocation)
-    return Path(base) / "IngeTrazo" / "render"
+    return Path(base) / edition.DATA_DIR / "render"
 
 
 def command(found: BlenderFound, job: Path) -> list:
