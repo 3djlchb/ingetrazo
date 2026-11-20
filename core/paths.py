@@ -41,16 +41,17 @@ def user_log_dir() -> Path:
     ``~/.local/state/ingetrazo``; the temp dir as the last resort."""
     import os
     import tempfile
+    from core import edition  # 3djlchb: not the official build's logs
     home = Path.home()
     if sys.platform.startswith("win"):
         base = os.environ.get("LOCALAPPDATA") or str(home / "AppData" / "Local")
-        candidates = [Path(base) / "IngeTrazo"]
+        candidates = [Path(base) / edition.DATA_DIR]
     elif sys.platform == "darwin":
-        candidates = [home / "Library" / "Logs" / "IngeTrazo"]
+        candidates = [home / "Library" / "Logs" / edition.DATA_DIR]
     else:
         state = os.environ.get("XDG_STATE_HOME") or str(home / ".local" / "state")
-        candidates = [Path(state) / "ingetrazo"]
-    candidates.append(Path(tempfile.gettempdir()) / "ingetrazo")
+        candidates = [Path(state) / edition.DATA_DIR_LOWER]
+    candidates.append(Path(tempfile.gettempdir()) / edition.DATA_DIR_LOWER)
     for d in candidates:
         try:
             d.mkdir(parents=True, exist_ok=True)

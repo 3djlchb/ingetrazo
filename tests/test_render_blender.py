@@ -112,7 +112,8 @@ def test_under_flatpak_renders_go_where_the_host_sees_them(tmp_path,
                                                           monkeypatch):
     monkeypatch.setattr(rb, "in_flatpak", lambda: True)
     monkeypatch.setattr(rb.Path, "home", lambda: tmp_path)
-    assert rb.work_base() == tmp_path / ".cache" / "IngeTrazo" / "render"
+    from core import edition  # 3djlchb: the edition's own folder
+    assert rb.work_base() == tmp_path / ".cache" / edition.DATA_DIR / "render"
 
 
 @pytest.mark.parametrize("line, expected", [

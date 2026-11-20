@@ -17,10 +17,12 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
+from core import edition
 from core.version import USER_AGENT, __version__
 
-LATEST_API = "https://api.github.com/repos/ingelibre/ingetrazo/releases/latest"
-RELEASES_PAGE = "https://github.com/ingelibre/ingetrazo/releases"
+# 3djlchb: this fork's releases, not the official ones.
+LATEST_API = f"https://api.github.com/repos/{edition.RELEASES_REPO}/releases/latest"
+RELEASES_PAGE = f"https://github.com/{edition.RELEASES_REPO}/releases"
 
 KEY_AUTO = "updates/check_at_start"
 KEY_LAST = "updates/last_check"
