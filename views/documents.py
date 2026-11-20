@@ -152,6 +152,32 @@ def size_plus_button(plus, tabs) -> None:
         plus.setFixedSize(max(30, h + 4), h)
 
 
+_probe_heights: dict = {}
+
+
+def panel_tab_height(bar) -> int:
+    """A side panel's tab height for ``bar``'s font and style: the style's
+    tab with no button in it (Qt makes a tab with a cross taller), and
+    with the icon a side panel's tab has (that sets its height). The
+    project tabs and the scene tabs are this tall too."""
+    key = (bar.font().key(), bar.style().name())
+    h = _probe_heights.get(key)
+    if h is None:
+        from PySide6.QtCore import QSize
+        from PySide6.QtGui import QIcon, QPixmap
+        from views.main_window import DOCK_TAB_ICON_PX
+        probe = QTabBar()
+        probe.setFont(bar.font())
+        probe.setStyle(bar.style())
+        probe.setIconSize(QSize(DOCK_TAB_ICON_PX, DOCK_TAB_ICON_PX))
+        pix = QPixmap(DOCK_TAB_ICON_PX, DOCK_TAB_ICON_PX)
+        pix.fill(Qt.transparent)
+        probe.addTab(QIcon(pix), "Xg")
+        h = _probe_heights[key] = probe.tabSizeHint(0).height()
+        probe.deleteLater()
+    return h
+
+
 class _ProjectTabs(QTabBar):
     """The project tabs, drawn as the side panels' tabs are (the same
     QTabBar and style, the same height), with a line in the accent colour
@@ -206,29 +232,26 @@ class _ProjectTabs(QTabBar):
         return min(hint.width(), width)
 
     _hint_widths: dict = {}
-    _probe_heights: dict = {}
 
     def _panel_tab_height(self) -> int:
-        """A side panel's tab height: the style's tab for this font, with
-        no button in it (Qt makes a tab with a cross taller)."""
-        key = (self.font().key(), self.style().name())
-        h = self._probe_heights.get(key)
-        if h is None:
-            probe = QTabBar()
-            probe.setFont(self.font())
-            probe.setStyle(self.style())
-            probe.addTab("Xg")
-            h = self._probe_heights[key] = probe.tabSizeHint(0).height()
-            probe.deleteLater()
-        return h
+        return panel_tab_height(self)
 
     def sizeHint(self):  # noqa: N802 — Qt override
         """Exactly as wide as its tabs: Qt's hint keeps room for the
-        scroll arrows, which left «+» a gap away from the last tab."""
+        scroll arrows, which left «+» a gap away from the last tab.
+
+        As tall as a tab from the start, tabs or not. The bar is built
+        empty (Qt's hint: 0 high) and its first tab comes while the window
+        is still hidden, when Qt asks for no new size. So it opened at the
+        row's height and grew to a tab's on a later layout, a moment after
+        the window showed: with a font whose tab is taller than that row
+        (macOS), the accent line under the name was cut off until then,
+        and the views under the bar shrank by the difference."""
         hint = super().sizeHint()
         if self.count():
             hint.setWidth(sum(self.tabSizeHint(i).width()
                               for i in range(self.count())))
+        hint.setHeight(max(hint.height(), self._panel_tab_height()))
         return hint
 
     def minimumSizeHint(self):  # noqa: N802 — Qt override

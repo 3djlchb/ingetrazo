@@ -1269,6 +1269,39 @@ class OutlinerPanel(QWidget):
             return path.name
         return getattr(w, "_import_name", None) or tr("Untitled")
 
+    def refresh_icons(self) -> None:
+        """Repaint every mark drawn in the palette's ink and accent after
+        the theme or the accent changes — the header's, the buttons' and
+        every row's. The rows set theirs once and only touch what changed,
+        so a theme switched with the app open left Light's black eyes and
+        padlocks on Dark's rows (the Layers tab's #1086, for the Browser)."""
+        hi = self.tree.headerItem()
+        hi.setIcon(COL_EYE, node_icon("eye"))
+        hi.setIcon(COL_LOCK, node_icon("lock"))
+        hi.setIcon(COL_ISOLATE, isolate_icon(False))
+        self._rename_btn.setIcon(node_icon("layers_rename"))
+        self._order_btn.setIcon(node_icon("layers_order"))
+        self._show_filter_state()
+        self._update_expand_button()
+        root = getattr(self, "_root", None)
+        if root is not None:
+            root.setIcon(COL_NAME, node_icon("document"))
+        # Forget what each row last showed, so the next pass paints all.
+        was = self._updating
+        self._updating = True
+        try:
+            for key, item in list(getattr(self, "_items", {}).items()):
+                state = self._state.get(key)
+                if state is not None:
+                    self._paint(item, None, state)
+        finally:
+            self._updating = was
+        self._sec_state = {}
+        self._sec_folder = None
+        self._head_marks = {}
+        self._rows_key = None
+        self.refresh()
+
     def refresh(self, rows_if_changed: bool = False) -> None:
         """Bring the tree up to date: rows rebuilt only when groups came or
         went, otherwise updated in place — a refresh follows every edit and
@@ -2289,7 +2322,8 @@ class OutlinerPanel(QWidget):
         sec.setHidden(sec.childCount() == 0 or not any_shown)
 
     _PATTERN_TEXT = {"solid": "Solid", "hatch": "Hatched 45°",
-                     "cross": "Cross-hatched", "none": "No fill"}
+                     "cross": "Cross-hatched", "none": "No fill",
+                     "layers": "Layers' hatches"}
 
     def set_plane_fill(self, plane, **changes) -> None:
         """Change this cut's own fill — ``pattern``, ``color``, ``spacing``;
@@ -2345,18 +2379,23 @@ class OutlinerPanel(QWidget):
         """The cut's own fill: pattern, colour, spacing, or the style's."""
         from PySide6.QtCore import QTimer
         sub = menu.addMenu(tr("Fill of this cut"))
+        sub.setToolTipsVisible(True)
         own = getattr(plane, "fill", None) or {}
         current = own.get("pattern")
         act = sub.addAction(tr("As the style"), lambda: self.set_plane_fill(
             plane, pattern=None))
         act.setCheckable(True)
         act.setChecked(current is None)
-        for pattern in ("solid", "hatch", "cross", "none"):
+        for pattern in ("solid", "hatch", "cross", "layers", "none"):
             act = sub.addAction(tr(self._PATTERN_TEXT[pattern]),
                                 lambda p=pattern: self.set_plane_fill(
                                     plane, pattern=p))
             act.setCheckable(True)
             act.setChecked(current == pattern)
+            if pattern == "layers":
+                act.setToolTip(tr(
+                    "Each layer's cut with the hatch the Layers panel gives "
+                    "it, as a sheet at 1:50 draws it"))
         sub.addSeparator()
         # Dialogs open once the menu has closed (see _fill_actions).
         sub.addAction(tr("Fill color of this cut…"), lambda: QTimer.singleShot(
@@ -4742,12 +4781,7 @@ class SheetsPanel(QWidget):
     def _show_scene(self, view) -> None:
         """Through the Scenes panel, so a scene shown from here does all
         a scene shown there does (style menu, selection, layers)."""
-        scenes = self._window.tray.scenes
-        for i in range(scenes.tree.topLevelItemCount()):
-            row = scenes.tree.topLevelItem(i)
-            if row.data(1, Qt.UserRole) is view:
-                scenes._on_activate(row)
-                return
+        self._window.tray.scenes.activate_view(view)
 
     def _new_sheet(self) -> None:
         self._window._show_new_sheet()

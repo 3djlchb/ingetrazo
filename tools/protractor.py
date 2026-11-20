@@ -244,7 +244,10 @@ class ProtractorBase(Tool):
                 or getattr(ctx.viewport, "pick_face_any", None))
         face = None
         if pick is not None:
-            face, _group = pick(ctx.screen.x(), ctx.screen.y())
+            # Only its normal is read: a big lazy mesh stays unbuilt (#1092).
+            from views.array_bake import reading_only
+            with reading_only():
+                face, _group = pick(ctx.screen.x(), ctx.screen.y())
         if face is not None:
             # The face's WORLD normal: a group's or component's face holds
             # its prototype's, and a turned copy put the protractor askew.
